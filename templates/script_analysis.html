@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>剧本分析 - Ai创作工具</title>
+    <script src="/static/state-manager.js"></script>
+    <link rel="stylesheet" href="/static/sidebar-nav.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .content {
+            padding: 20px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+        
+        .input-section {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .section-title {
+            font-size: 1.3em;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .script-input {
+            width: 100%;
+            min-height: 400px;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95em;
+            resize: vertical;
+            transition: border-color 0.3s;
+        }
+        
+        .script-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .analyze-btn {
+            flex: 1;
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            min-width: 120px;
+        }
+        
+        .analyze-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .analyze-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .clear-btn {
+            padding: 12px 24px;
+            background: #999;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .clear-btn:hover {
+            background: #777;
+        }
+        
+        .output-section {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .analysis-result {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            max-height: 800px;
+            overflow-y: auto;
+        }
+        
+        .result-item {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .result-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        
+        .result-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 2px solid #667eea;
+        }
+        
+        .character-item, .scene-item {
+            background: white;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            border-left: 3px solid #667eea;
+        }
+        
+        .character-name, .scene-name {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        
+        .character-desc, .scene-desc {
+            color: #666;
+            font-size: 0.95em;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        .scene-desc strong {
+            color: #333;
+            font-weight: 600;
+            display: block;
+            margin-top: 8px;
+            margin-bottom: 4px;
+        }
+        
+        .scene-desc strong:first-child {
+            margin-top: 0;
+        }
+        
+        .scene-desc div[style*="background"] {
+            margin: 10px 0 !important;
+            padding: 12px !important;
+            border-radius: 4px !important;
+            line-height: 1.6;
+        }
+        
+        .character-desc div[style*="background"] {
+            margin: 10px 0 !important;
+            padding: 12px !important;
+            border-radius: 4px !important;
+            line-height: 1.6;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+            font-weight: 600;
+        }
+        
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f0f0f0;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+        
+        @media (max-width: 1024px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+            
+            .script-input {
+                min-height: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 左侧导航栏 -->
+    <nav class="sidebar-nav" id="sidebarNav">
+        <div class="sidebar-nav-header">
+            <div class="sidebar-nav-title">Ai创作工具</div>
+            <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收缩/展开">
+                <span id="toggleIcon">‹</span>
+            </button>
+        </div>
+        <div class="sidebar-nav-menu">
+            <a href="/" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎨</span>
+                <span class="sidebar-nav-text">单图生成</span>
+            </a>
+            <a href="/batch" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📦</span>
+                <span class="sidebar-nav-text">批量生成</span>
+            </a>
+            <a href="/records" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📊</span>
+                <span class="sidebar-nav-text">生图任务</span>
+            </a>
+            <a href="/video-generate" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎬</span>
+                <span class="sidebar-nav-text">视频生成</span>
+            </a>
+            <a href="/video-tasks" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📹</span>
+                <span class="sidebar-nav-text">视频任务</span>
+            </a>
+            <a href="/script-analysis" class="sidebar-nav-item active">
+                <span class="sidebar-nav-icon">🎬</span>
+                <span class="sidebar-nav-text">剧本分析</span>
+            </a>
+            <a href="/content-management" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📚</span>
+                <span class="sidebar-nav-text">内容管理</span>
+            </a>
+            {% if user.username == 'system_admin' %}
+            <div class="sidebar-nav-divider"></div>
+            <a href="/stats" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📈</span>
+                <span class="sidebar-nav-text">系统统计</span>
+            </a>
+            {% endif %}
+        </div>
+        <div class="sidebar-nav-user">
+            <div class="sidebar-nav-user-info">
+                <div class="sidebar-nav-user-avatar">👤</div>
+                <div class="sidebar-nav-user-name">{{ user.username }}</div>
+            </div>
+            <a href="/logout" class="sidebar-nav-logout">登出</a>
+        </div>
+    </nav>
+    
+    <div class="main-content">
+        <div class="container">
+        <div class="content" style="padding-top: 20px;">
+            <!-- 输入区域 -->
+            <div class="input-section">
+                <div class="section-title">📝 输入剧本</div>
+                <textarea 
+                    class="script-input" 
+                    id="scriptInput" 
+                    placeholder="请输入剧本文本...&#10;&#10;示例：&#10;第一场 会议室&#10;人物：张三、李四&#10;...">
+                </textarea>
+                <div class="button-group">
+                    <button class="analyze-btn" id="analyzeBtn" onclick="analyzeScript()">🔍 分析剧本</button>
+                    <button class="clear-btn" onclick="clearScript()">清除</button>
+                </div>
+            </div>
+            
+            <!-- 输出区域 -->
+            <div class="output-section">
+                <div class="section-title">📊 分析结果</div>
+                <div id="resultContainer" class="analysis-result">
+                    <div class="empty-state">
+                        输入剧本文本后点击"分析剧本"进行拆解
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // localStorage 键名
+        const STORAGE_KEYS = {
+            scriptInput: 'scriptAnalysis_scriptInput',
+            analysisResult: 'scriptAnalysis_result',
+            analysisResultHtml: 'scriptAnalysis_resultHtml'
+        };
+        
+        // 控制分析请求的 AbortController
+        let analysisAbortController = null;
+        
+        // 页面加载时恢复之前保存的内容
+        document.addEventListener('DOMContentLoaded', function() {
+            restoreSavedContent();
+            // 重置 AbortController 为新的实例
+            analysisAbortController = new AbortController();
+        });
+        
+        // 页面可见性变化时的处理
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                // 页面隐藏时，取消任何未完成的请求
+                if (analysisAbortController) {
+                    analysisAbortController.abort();
+                    analysisAbortController = new AbortController();
+                }
+            } else {
+                // 页面重新显示时，重置 AbortController
+                analysisAbortController = new AbortController();
+            }
+        });
+        
+        // 保存用户输入
+        function saveScriptInput() {
+            const scriptInput = document.getElementById('scriptInput').value;
+            localStorage.setItem(STORAGE_KEYS.scriptInput, scriptInput);
+        }
+        
+        // 保存分析结果
+        function saveAnalysisResult(result, html) {
+            localStorage.setItem(STORAGE_KEYS.analysisResult, JSON.stringify(result));
+            localStorage.setItem(STORAGE_KEYS.analysisResultHtml, html);
+        }
+        
+        // 恢复之前保存的内容
+        function restoreSavedContent() {
+            // 恢复脚本输入
+            const savedScript = localStorage.getItem(STORAGE_KEYS.scriptInput);
+            if (savedScript) {
+                document.getElementById('scriptInput').value = savedScript;
+            }
+            
+            // 恢复分析结果
+            const savedResultHtml = localStorage.getItem(STORAGE_KEYS.analysisResultHtml);
+            if (savedResultHtml) {
+                document.getElementById('resultContainer').innerHTML = savedResultHtml;
+            }
+        }
+        
+        // 清除所有保存的内容
+        function clearAllSavedContent() {
+            localStorage.removeItem(STORAGE_KEYS.scriptInput);
+            localStorage.removeItem(STORAGE_KEYS.analysisResult);
+            localStorage.removeItem(STORAGE_KEYS.analysisResultHtml);
+        }
+        
+        // 监听输入框变化，实时保存
+        document.getElementById('scriptInput').addEventListener('input', function() {
+            saveScriptInput();
+        });
+        
+        async function analyzeScript() {
+            const scriptText = document.getElementById('scriptInput').value.trim();
+            
+            if (!scriptText) {
+                alert('请先输入剧本文本');
+                return;
+            }
+            
+            const resultContainer = document.getElementById('resultContainer');
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            
+            // 确保有有效的 AbortController
+            try {
+                // 尝试中止之前的请求（如果存在）
+                if (analysisAbortController) {
+                    analysisAbortController.abort();
+                }
+            } catch (e) {
+                // 忽略错误
+            }
+            
+            // 创建新的 AbortController
+            try {
+                analysisAbortController = new AbortController();
+            } catch (e) {
+                console.error('无法创建 AbortController:', e);
+                analysisAbortController = null;
+            }
+            
+            // 显示加载状态
+            analyzeBtn.disabled = true;
+            resultContainer.innerHTML = `
+                <div class="loading">
+                    <span class="loading-spinner"></span>
+                    正在分析剧本，请稍候...
+                </div>
+            `;
+            
+            try {
+                const response = await fetch('/api/analyze-script', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ script: scriptText }),
+                    signal: analysisAbortController ? analysisAbortController.signal : undefined,
+                    keepalive: true  // 保持连接，即使页面卸载也继续处理
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayAnalysisResult(data.result);
+                    // 保存结果
+                    saveAnalysisResult(data.result, resultContainer.innerHTML);
+                } else {
+                    const errorHtml = `
+                        <div class="error">
+                            <strong>分析失败</strong><br>
+                            ${data.error || '未知错误'}
+                        </div>
+                    `;
+                    resultContainer.innerHTML = errorHtml;
+                    // 保存错误结果
+                    saveAnalysisResult(null, errorHtml);
+                }
+            } catch (error) {
+                // 判断是否是由于页面卸载导致的中止
+                if (error.name === 'AbortError') {
+                    // 请求被中止，通常是因为页面卸载或用户中止
+                    console.log('分析被中止');
+                    // 不显示错误信息，直接返回
+                    return;
+                }
+                
+                console.error('分析出错:', error);
+                let errorMsg = error.message;
+                
+                // 提供更详细的错误提示
+                if (error.message === 'Failed to fetch') {
+                    errorMsg = '网络连接失败，请检查网络连接后重试。';
+                } else if (error.message.includes('NetworkError')) {
+                    errorMsg = '网络错误，请检查网络连接';
+                }
+                
+                const errorHtml = `
+                    <div class="error">
+                        <strong>请求失败</strong><br>
+                        ${errorMsg}
+                        <br><br>
+                        <small style="color: #999;">如果问题持续出现，请刷新页面后重试。</small>
+                    </div>
+                `;
+                resultContainer.innerHTML = errorHtml;
+                // 保存错误结果
+                saveAnalysisResult(null, errorHtml);
+            } finally {
+                analyzeBtn.disabled = false;
+                // 不清空 AbortController，保留它以便后续使用
+            }
+        }
+        
+        function displayAnalysisResult(result) {
+            const resultContainer = document.getElementById('resultContainer');
+            let html = '';
+            
+            // 主角设定
+            if (result.character) {
+                const char = result.character;
+                html += '<div class="result-item">';
+                html += '<div class="result-title">👤 主角设定</div>';
+                html += '<div class="character-item">';
+                html += `<div class="character-name">${escapeHtml(char.name || '主角')}</div>`;
+                html += '<div class="character-desc">';
+                if (char.age || char.gender) {
+                    html += `<strong>基本信息：</strong> ${escapeHtml(char.age || '未知')} 岁，${escapeHtml(char.gender || '未知')}<br>`;
+                }
+                if (char.appearance) {
+                    html += `<strong>外貌特征：</strong><br>${formatText(char.appearance)}<br>`;
+                }
+                if (char.costume) {
+                    html += `<strong>服饰风格：</strong><br>${formatText(char.costume)}<br>`;
+                }
+                if (char.personality) {
+                    html += `<strong>性格特征：</strong><br>${formatText(char.personality)}<br>`;
+                }
+                if (char.charm_points) {
+                    html += `<strong>独特魅力：</strong><br>${formatText(char.charm_points)}`;
+                }
+                html += '</div>';
+                html += '</div>';
+                html += '</div>';
+            }
+            
+            // 台词独白
+            if (result.monologue && result.monologue.content) {
+                html += '<div class="result-item">';
+                html += '<div class="result-title">🎤 台词独白</div>';
+                html += '<div class="character-item">';
+                html += `<div class="character-desc">`;
+                html += `<strong>台词内容：</strong><br><div style="background: #fff3cd; padding: 12px; border-radius: 4px; margin: 8px 0; font-style: italic;">${formatText(result.monologue.content)}</div>`;
+                if (result.monologue.character_traits) {
+                    html += `<strong>人物特征体现：</strong><br>${formatText(result.monologue.character_traits)}`;
+                }
+                html += `</div>`;
+                html += '</div>';
+                html += '</div>';
+            }
+            
+            // 分镜场景
+            if (result.scenes && result.scenes.length > 0) {
+                html += '<div class="result-item">';
+                html += '<div class="result-title">🎬 分镜场景</div>';
+                result.scenes.forEach((scene, index) => {
+                    html += `
+                        <div class="scene-item">
+                            <div class="scene-name">第 ${scene.scene_number || index + 1} 场 - ${escapeHtml(scene.location || '未知场景')}</div>
+                            <div class="scene-desc">
+                    `;
+                    if (scene.monologue_content) {
+                        html += `<strong>场景台词：</strong><br><div style="background: #e7f3ff; padding: 8px; border-radius: 4px; margin: 8px 0;">${formatText(scene.monologue_content)}</div>`;
+                    }
+                    if (scene.shot_type || scene.character_shot) {
+                        html += `<strong>拍摄景别：</strong> ${escapeHtml(scene.shot_type || '')}<br>`;
+                        if (scene.character_shot) {
+                            html += `<strong>人物景别：</strong> ${escapeHtml(scene.character_shot)}<br>`;
+                        }
+                    }
+                    if (scene.angle) {
+                        html += `<strong>视角：</strong> ${escapeHtml(scene.angle)}<br>`;
+                    }
+                    if (scene.composition) {
+                        html += `<strong>构图：</strong> ${escapeHtml(scene.composition)}<br>`;
+                    }
+                    if (scene.core_subject) {
+                        html += `<strong>核心主体：</strong> ${escapeHtml(scene.core_subject)}<br>`;
+                    }
+                    if (scene.emotion_action) {
+                        html += `<strong>情绪动作：</strong><br>${formatText(scene.emotion_action)}<br>`;
+                    }
+                    if (scene.environment) {
+                        html += `<strong>环境场景：</strong><br>${formatText(scene.environment)}<br>`;
+                    }
+                    if (scene.art_style) {
+                        html += `<strong>艺术风格：</strong> ${escapeHtml(scene.art_style)}<br>`;
+                    }
+                    if (scene.lighting_mood) {
+                        html += `<strong>氛围光线：</strong> ${escapeHtml(scene.lighting_mood)}<br>`;
+                    }
+                    if (scene.color_tone) {
+                        html += `<strong>色调：</strong> ${escapeHtml(scene.color_tone)}<br>`;
+                    }
+                    if (scene.camera_movement) {
+                        html += `<strong>运镜语言：</strong><br>${formatText(scene.camera_movement)}<br>`;
+                    }
+                    if (scene.sound_effect) {
+                        html += `<strong>音效设计：</strong><br>${formatText(scene.sound_effect)}<br>`;
+                    }
+                    if (scene.prompt_for_ai) {
+                        html += `<strong>AI绘图提示词：</strong><br><div style="background: #f0f0f0; padding: 12px; border-radius: 4px; margin: 8px 0; border-left: 3px solid #667eea;">${formatText(scene.prompt_for_ai)}</div>`;
+                    }
+                    html += `</div></div>`;
+                });
+                html += '</div>';
+            }
+            
+            // 风格色调
+            if (result.style_tone) {
+                const style = result.style_tone;
+                html += '<div class="result-item">';
+                html += '<div class="result-title">🎨 风格色调</div>';
+                html += '<div class="character-item">';
+                html += '<div class="character-desc">';
+                if (style.reference_keywords && style.reference_keywords.length > 0) {
+                    html += `<strong>参考风格关键词：</strong> ${style.reference_keywords.map(k => escapeHtml(k)).join('、')}<br>`;
+                }
+                if (style.texture_description) {
+                    html += `<strong>画面质感：</strong><br>${formatText(style.texture_description)}<br>`;
+                }
+                if (style.color_atmosphere) {
+                    html += `<strong>色调氛围：</strong><br>${formatText(style.color_atmosphere)}<br>`;
+                }
+                if (style.overall_description) {
+                    html += `<strong>整体风格：</strong><br>${formatText(style.overall_description)}`;
+                }
+                html += '</div>';
+                html += '</div>';
+                html += '</div>';
+            }
+            
+            // 背景音乐
+            if (result.background_music) {
+                const music = result.background_music;
+                html += '<div class="result-item">';
+                html += '<div class="result-title">🎵 背景音乐</div>';
+                html += '<div class="character-item">';
+                html += '<div class="character-desc">';
+                if (music.recommendation) {
+                    html += `<strong>推荐音乐：</strong> ${escapeHtml(music.recommendation)}<br>`;
+                }
+                if (music.reason) {
+                    html += `<strong>选择理由：</strong><br>${formatText(music.reason)}`;
+                }
+                html += '</div>';
+                html += '</div>';
+                html += '</div>';
+            }
+            
+            if (!html) {
+                html = '<div class="empty-state">暂无分析结果</div>';
+            }
+            
+            resultContainer.innerHTML = html;
+        }
+        
+        function clearScript() {
+            document.getElementById('scriptInput').value = '';
+            document.getElementById('resultContainer').innerHTML = `
+                <div class="empty-state">
+                    输入剧本文本后点击"分析剧本"进行拆解
+                </div>
+            `;
+            // 清除保存的内容
+            clearAllSavedContent();
+        }
+        
+        function escapeHtml(text) {
+            if (!text) return '';
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+        
+        function formatText(text) {
+            if (!text) return '';
+            // 先进行 HTML 转义
+            text = escapeHtml(text);
+            // 将换行符转换为 <br> 标签
+            text = text.replace(/\n/g, '<br>');
+            // 保留多个空格
+            text = text.replace(/  +/g, match => '&nbsp;'.repeat(match.length));
+            return text;
+        }
+    </script>
+    <script src="/static/sidebar-nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统统计 - AI图片生成器</title>
+    <script src="/static/state-manager.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .nav-bar {
+            background: white;
+            padding: 15px 30px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+        
+        .nav-bar a {
+            color: #667eea;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+        
+        .nav-bar a:hover {
+            background: #667eea;
+            color: white;
+        }
+        
+        .nav-bar a.active {
+            background: #667eea;
+            color: white;
+        }
+        
+        .user-info {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .user-info .username {
+            color: #667eea;
+            font-weight: 600;
+        }
+        
+        .logout-btn {
+            background: #dc3545;
+            color: white !important;
+            padding: 6px 14px !important;
+            font-size: 0.9em;
+        }
+        
+        .logout-btn:hover {
+            background: #c82333 !important;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        
+        .stat-card h3 {
+            font-size: 0.9em;
+            opacity: 0.9;
+            margin-bottom: 10px;
+        }
+        
+        .stat-card .value {
+            font-size: 2.5em;
+            font-weight: bold;
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+        }
+        
+        .section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+        
+        table th {
+            background: #f8f9fa;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #dee2e6;
+        }
+        
+        table td {
+            padding: 15px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        table tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .chart-container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .date-filter {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+        
+        .date-filter label {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .date-filter input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        .date-filter button {
+            padding: 8px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        
+        .date-filter button:hover {
+            background: #5568d3;
+        }
+    </style>
+</head>
+<body>
+    <div class="nav-bar">
+        <a href="/">🎨 单图生成</a>
+        <a href="/batch">📦 批量生成</a>
+        <a href="/records">📊 生成记录</a>
+        <a href="/video-generate">🎬 视频生成</a>
+        <a href="/video-tasks">📹 视频任务</a>
+        <a href="/script-analysis">🎬 剧本分析</a>
+        <a href="/content-management">📚 内容管理</a>
+        <a href="/stats" class="active">📈 系统统计</a>
+        <div class="user-info">
+            <span>👤 <span class="username">{{ user.username }}</span></span>
+            <a href="/logout" class="logout-btn">登出</a>
+        </div>
+    </div>
+    
+    <div class="container">
+        <div class="stats-grid" style="padding-top: 20px;">
+            <div class="stat-card">
+                <h3>总用户数</h3>
+                <div class="value" id="totalUsers">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>总生成图片</h3>
+                <div class="value" id="totalImages">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>今日生成</h3>
+                <div class="value" id="todayImages">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>本周生成</h3>
+                <div class="value" id="weekImages">-</div>
+            </div>
+        </div>
+        
+        <div class="content">
+            <div class="date-filter">
+                <label>筛选日期：</label>
+                <input type="date" id="startDate">
+                <span>至</span>
+                <input type="date" id="endDate">
+                <button onclick="loadStats()">🔍 查询</button>
+                <button onclick="resetDates()">🔄 重置</button>
+            </div>
+            
+            <div class="section">
+                <h2>📊 用户生成统计</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>用户ID</th>
+                            <th>用户名</th>
+                            <th>总生成数</th>
+                            <th>今日生成</th>
+                            <th>本周生成</th>
+                            <th>最后生成时间</th>
+                        </tr>
+                    </thead>
+                    <tbody id="userStatsTable">
+                        <tr>
+                            <td colspan="6" class="loading">加载中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="section">
+                <h2>📅 每日生成统计（最近7天）</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>日期</th>
+                            <th>生成数量</th>
+                            <th>参与用户数</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dailyStatsTable">
+                        <tr>
+                            <td colspan="3" class="loading">加载中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 页面加载时初始化日期
+        window.onload = function() {
+            // 设置默认日期范围（最近7天）
+            const today = new Date();
+            const weekAgo = new Date(today);
+            weekAgo.setDate(weekAgo.getDate() - 7);
+            
+            document.getElementById('endDate').valueAsDate = today;
+            document.getElementById('startDate').valueAsDate = weekAgo;
+            
+            loadStats();
+        };
+        
+        function resetDates() {
+            const today = new Date();
+            const weekAgo = new Date(today);
+            weekAgo.setDate(weekAgo.getDate() - 7);
+            
+            document.getElementById('endDate').valueAsDate = today;
+            document.getElementById('startDate').valueAsDate = weekAgo;
+            
+            loadStats();
+        }
+        
+        async function loadStats() {
+            try {
+                const startDate = document.getElementById('startDate').value;
+                const endDate = document.getElementById('endDate').value;
+                
+                const params = new URLSearchParams();
+                if (startDate) params.append('start_date', startDate);
+                if (endDate) params.append('end_date', endDate);
+                
+                const response = await fetch(`/api/stats?${params}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    // 更新统计卡片
+                    document.getElementById('totalUsers').textContent = data.total_users;
+                    document.getElementById('totalImages').textContent = data.total_images;
+                    document.getElementById('todayImages').textContent = data.today_images;
+                    document.getElementById('weekImages').textContent = data.week_images;
+                    
+                    // 更新用户统计表格
+                    renderUserStats(data.user_stats);
+                    
+                    // 更新每日统计表格
+                    renderDailyStats(data.daily_stats);
+                } else {
+                    alert('加载统计数据失败: ' + data.error);
+                }
+            } catch (error) {
+                console.error('加载统计数据失败:', error);
+                alert('加载统计数据失败: ' + error.message);
+            }
+        }
+        
+        function renderUserStats(stats) {
+            const tbody = document.getElementById('userStatsTable');
+            
+            if (stats.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">暂无数据</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = stats.map(stat => `
+                <tr>
+                    <td>${stat.user_id}</td>
+                    <td><strong>${stat.username}</strong></td>
+                    <td>${stat.total_count}</td>
+                    <td>${stat.today_count}</td>
+                    <td>${stat.week_count}</td>
+                    <td>${stat.last_generated || '从未生成'}</td>
+                </tr>
+            `).join('');
+        }
+        
+        function renderDailyStats(stats) {
+            const tbody = document.getElementById('dailyStatsTable');
+            
+            if (stats.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: #999;">暂无数据</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = stats.map(stat => `
+                <tr>
+                    <td><strong>${stat.date}</strong></td>
+                    <td>${stat.count}</td>
+                    <td>${stat.user_count}</td>
+                </tr>
+            `).join('');
+        }
+    </script>
+</body>
+</html>

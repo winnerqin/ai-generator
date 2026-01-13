@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生图任务 - Ai创作工具</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="/static/state-manager.js"></script>
+    <link rel="stylesheet" href="/static/sidebar-nav.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            background: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .content {
+            padding: 20px;
+        }
+        
+        .filter-bar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+        
+        .filter-bar input {
+            padding: 10px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            flex: 1;
+            max-width: 300px;
+        }
+        
+        .filter-bar button {
+            padding: 10px 20px;
+            background: #28a745; /* 绿色 */
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        
+        .filter-bar button:hover {
+            background: #218838;
+        }
+        
+        .records-table-container {
+            overflow-x: auto;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            max-height: 70vh;
+        }
+        
+        .records-table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 1400px;
+        }
+        
+        .records-table th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #dee2e6;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .records-table td {
+            padding: 12px;
+            border-bottom: 1px solid #dee2e6;
+            vertical-align: middle;
+        }
+        
+        .records-table tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .thumbnail {
+            width: 100px;
+            height: 100px;
+            object-fit: cover;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.3s;
+        }
+        
+        .thumbnail:hover {
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        
+        .sample-images-cell {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        
+        .sample-thumb {
+            width: 40px;
+            height: 40px;
+            object-fit: cover;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .download-btn {
+            padding: 6px 12px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .download-btn:hover {
+            background: #218838;
+        }
+        
+        .delete-btn {
+            padding: 6px 12px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            margin-left: 5px;
+        }
+        
+        .delete-btn:hover {
+            background: #c82333;
+        }
+        .add-lib-btn {
+            padding: 6px 10px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+            margin-left: 6px;
+        }
+        .add-lib-btn.person {
+            background: #17a2b8;
+        }
+        .add-lib-btn.scene {
+            background: #6f42c1;
+        }
+        .add-lib-btn:hover { opacity: 0.9; }
+        
+        .prompt-cell {
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .prompt-cell:hover {
+            white-space: normal;
+            overflow: visible;
+        }
+        
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 20px;
+            align-items: center;
+        }
+        
+        .pagination button {
+            padding: 8px 16px;
+            background: #28a745; /* 绿色 */
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        
+        .pagination button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .pagination span {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        /* 图片放大查看模态框 */
+        .lightbox {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .lightbox.active {
+            display: flex;
+        }
+        
+        .lightbox-content {
+            max-width: 90vw;
+            max-height: 90vh;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .lightbox-image {
+            max-width: 100%;
+            max-height: calc(90vh - 200px);
+            object-fit: contain;
+            border-radius: 8px;
+        }
+        
+        .lightbox-info-container {
+            width: 100%;
+            max-width: 600px;
+            margin-top: 20px;
+            position: relative;
+        }
+        
+        .lightbox-close {
+            position: absolute;
+            top: -40px;
+            right: 0;
+            font-size: 36px;
+            color: white;
+            cursor: pointer;
+            background: rgba(0,0,0,0.5);
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.3s;
+        }
+        
+        .lightbox-close:hover {
+            background: rgba(0,0,0,0.8);
+        }
+        
+        .lightbox-info {
+            position: relative;
+            width: 100%;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 0.9em;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+        }
+        
+        .lightbox-info p {
+            margin: 5px 0;
+        }
+        
+        .lightbox-info-toggle {
+            display: none;
+        }
+        
+        .lightbox-info-toggle.active {
+            display: block;
+        }
+        
+        .lightbox-info-btn {
+            position: relative;
+            margin: 0 auto;
+            padding: 10px 20px;
+            background: rgba(102, 126, 234, 0.8);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.9em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: block;
+        }
+        
+        .lightbox-info-btn:hover {
+            background: rgba(102, 126, 234, 1);
+            transform: translateY(-2px);
+        }
+        
+        .lightbox-nav {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(0,0,0,0.5);
+            color: white;
+            font-size: 36px;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .lightbox-nav:hover {
+            background: rgba(0,0,0,0.8);
+        }
+        
+        .lightbox-prev {
+            left: -70px;
+        }
+        
+        .lightbox-next {
+            right: -70px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2em;
+            color: #666;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px;
+            color: #999;
+        }
+        
+        .empty-state svg {
+            width: 100px;
+            height: 100px;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+    </style>
+</head>
+<body>
+    <!-- 左侧导航栏 -->
+    <nav class="sidebar-nav" id="sidebarNav">
+        <div class="sidebar-nav-header">
+            <div class="sidebar-nav-title">Ai创作工具</div>
+            <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收缩/展开">
+                <span id="toggleIcon">‹</span>
+            </button>
+        </div>
+        <div class="sidebar-nav-menu">
+            <a href="/" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎨</span>
+                <span class="sidebar-nav-text">单图生成</span>
+            </a>
+            <a href="/batch" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📦</span>
+                <span class="sidebar-nav-text">批量生成</span>
+            </a>
+            <a href="/records" class="sidebar-nav-item active">
+                <span class="sidebar-nav-icon">📊</span>
+                <span class="sidebar-nav-text">生图任务</span>
+            </a>
+            <a href="/video-generate" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎬</span>
+                <span class="sidebar-nav-text">视频生成</span>
+            </a>
+            <a href="/video-tasks" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📹</span>
+                <span class="sidebar-nav-text">视频任务</span>
+            </a>
+            <a href="/script-analysis" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎬</span>
+                <span class="sidebar-nav-text">剧本分析</span>
+            </a>
+            <a href="/content-management" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📚</span>
+                <span class="sidebar-nav-text">内容管理</span>
+            </a>
+            {% if user.username == 'system_admin' %}
+            <div class="sidebar-nav-divider"></div>
+            <a href="/stats" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📈</span>
+                <span class="sidebar-nav-text">系统统计</span>
+            </a>
+            {% endif %}
+        </div>
+        <div class="sidebar-nav-user">
+            <div class="sidebar-nav-user-info">
+                <div class="sidebar-nav-user-avatar">👤</div>
+                <div class="sidebar-nav-user-name">{{ user.username }}</div>
+            </div>
+            <a href="/logout" class="sidebar-nav-logout">登出</a>
+        </div>
+    </nav>
+    
+    <div class="main-content">
+        <div class="container">
+        <div class="content" style="padding-top: 20px;">
+            <div class="filter-bar">
+                <input type="text" id="searchInput" placeholder="搜索提示词..." onkeyup="handleSearch(event)">
+                <button onclick="loadRecords()">🔍 搜索</button>
+                <button onclick="loadRecords()">🔄 刷新</button>
+                <button onclick="batchDownload()" id="batchDownloadBtn" style="background: #28a745; display: none;">
+                    📦 批量下载 (<span id="selectedCount">0</span>)
+                </button>
+                <button onclick="deleteBatchRecords()" id="batchDeleteBtn" style="background: #dc3545; display: none; margin-left: 10px;">
+                    🗑️ 批量删除 (<span id="selectedCountDelete">0</span>)
+                </button>
+                <span style="margin-left: auto;">共 <strong id="totalCount">0</strong> 条记录</span>
+            </div>
+            
+            <div id="loadingArea" class="loading" style="display: none;">
+                加载中...
+            </div>
+            
+            <div id="emptyArea" class="empty-state" style="display: none;">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z" />
+                </svg>
+                <h3>暂无生图任务</h3>
+                <p>开始生成你的第一张图片吧！</p>
+            </div>
+            
+            <div class="records-table-container" id="tableContainer" style="display: none;">
+                <table class="records-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 50px;">
+                                <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)">
+                            </th>
+                            <th style="width: 60px;">ID</th>
+                            <th style="width: 150px;">生成时间</th>
+                            <th style="width: 250px;">提示词</th>
+                            <th style="width: 100px;">图片比例</th>
+                            <th style="width: 150px;">参考示例图</th>
+                            <th style="width: 80px;">分辨率</th>
+                            <th style="width: 120px;">文件名</th>
+                            <th style="width: 150px;">图片预览</th>
+                            <th style="width: 120px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recordsTableBody">
+                        <!-- 动态加载记录 -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="pagination" id="pagination" style="display: none;">
+                <button onclick="changePage(-1)" id="prevBtn">« 上一页</button>
+                <span>第 <strong id="currentPage">1</strong> 页 / 共 <strong id="totalPages">1</strong> 页</span>
+                <button onclick="changePage(1)" id="nextBtn">下一页 »</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 图片放大查看 -->
+    <div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
+        <div class="lightbox-content">
+            <div class="lightbox-close" onclick="closeLightbox(event)">&times;</div>
+            <div class="lightbox-nav lightbox-prev" onclick="navigateLightbox(-1, event)">‹</div>
+            <div class="lightbox-nav lightbox-next" onclick="navigateLightbox(1, event)">›</div>
+            <img id="lightboxImage" class="lightbox-image" src="" alt="">
+            <div class="lightbox-info-container">
+                <div class="lightbox-info" id="lightboxInfo">
+                    <!-- 动态显示图片信息 -->
+                </div>
+                <button class="lightbox-info-btn" id="lightboxInfoBtn" onclick="toggleLightboxInfo(event)">📋 查看信息</button>
+            </div>
+        </div>
+    </div>
+    </div>
+    
+    <script>
+        // 侧边栏收缩功能
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebarNav');
+            const toggleIcon = document.getElementById('toggleIcon');
+            if (sidebar && toggleIcon) {
+                sidebar.classList.toggle('collapsed');
+                toggleIcon.textContent = sidebar.classList.contains('collapsed') ? '›' : '‹';
+                localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+            }
+        }
+    </script>
+    
+    <script>
+        let records = [];
+        let currentPage = 1;
+        let pageSize = 20;
+        let totalRecords = 0;
+        let currentLightboxIndex = -1;
+        let selectedRecords = new Set();
+        
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 侧边栏初始化
+            const sidebar = document.getElementById('sidebarNav');
+            const toggleIcon = document.getElementById('toggleIcon');
+            if (sidebar && toggleIcon) {
+                const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+                if (isCollapsed) {
+                    sidebar.classList.add('collapsed');
+                    toggleIcon.textContent = '›';
+                }
+                
+                const currentPath = window.location.pathname;
+                document.querySelectorAll('.sidebar-nav-item').forEach(item => {
+                    item.classList.remove('active');
+                    if (item.getAttribute('href') === currentPath) {
+                        item.classList.add('active');
+                    }
+                });
+            }
+            
+            // 加载记录
+            loadRecords();
+        });
+        
+        // 加载记录
+        async function loadRecords() {
+            const loading = document.getElementById('loadingArea');
+            const empty = document.getElementById('emptyArea');
+            const table = document.getElementById('tableContainer');
+            const pagination = document.getElementById('pagination');
+            
+            loading.style.display = 'block';
+            empty.style.display = 'none';
+            table.style.display = 'none';
+            pagination.style.display = 'none';
+            
+            try {
+                const searchTerm = document.getElementById('searchInput').value;
+                const offset = (currentPage - 1) * pageSize;
+                
+                const response = await fetch(`/api/records?limit=${pageSize}&offset=${offset}&search=${encodeURIComponent(searchTerm)}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    records = data.records || [];
+                    totalRecords = data.total || 0;
+                    
+                    const totalCountEl = document.getElementById('totalCount');
+                    if (totalCountEl) {
+                        totalCountEl.textContent = totalRecords;
+                    }
+                    
+                    if (records.length === 0) {
+                        empty.style.display = 'block';
+                        loading.style.display = 'none';
+                    } else {
+                        renderRecords();
+                        table.style.display = 'block';
+                        pagination.style.display = 'flex';
+                        updatePagination();
+                        loading.style.display = 'none';
+                    }
+                } else {
+                    console.error('加载记录失败:', data.error || '未知错误');
+                    alert('加载记录失败: ' + (data.error || '未知错误'));
+                    loading.style.display = 'none';
+                    empty.style.display = 'block';
+                }
+            } catch (error) {
+                console.error('加载记录失败:', error);
+                alert('加载记录失败: ' + error.message);
+                loading.style.display = 'none';
+                empty.style.display = 'block';
+            }
+        }
+        
+        // 渲染记录表格
+        function renderRecords() {
+            const tbody = document.getElementById('recordsTableBody');
+            tbody.innerHTML = '';
+            
+            records.forEach((record, index) => {
+                const tr = document.createElement('tr');
+                
+                // 格式化时间
+                const date = new Date(record.created_at);
+                const dateStr = date.toLocaleString('zh-CN');
+                
+                // 处理示例图
+                let sampleImagesHTML = '';
+                if (record.sample_images && record.sample_images.length > 0) {
+                    sampleImagesHTML = record.sample_images.map(img => 
+                        `<img src="${img.url}" class="sample-thumb" onclick="openLightbox('${img.url}', event)" title="${img.filename}">`
+                    ).join('');
+                } else {
+                    sampleImagesHTML = '<span style="color: #999;">无</span>';
+                }
+                
+                const isChecked = selectedRecords.has(record.id) ? 'checked' : '';
+                
+                tr.innerHTML = `
+                    <td>
+                        <input type="checkbox" class="record-checkbox" 
+                               data-id="${record.id}" 
+                               data-filename="${record.filename}"
+                               onchange="toggleRecordSelection(${record.id}, '${record.filename}', this.checked)"
+                               ${isChecked}>
+                    </td>
+                    <td>${record.id}</td>
+                    <td>${dateStr}</td>
+                    <td class="prompt-cell" title="${record.prompt}">${record.prompt}</td>
+                    <td>${record.aspect_ratio || '-'}</td>
+                    <td>
+                        <div class="sample-images-cell">
+                            ${sampleImagesHTML}
+                        </div>
+                    </td>
+                    <td>${record.resolution || '-'}<br>${record.width}×${record.height}</td>
+                    <td>${record.filename || '-'}</td>
+                    <td>
+                        <img src="${record.image_path}" 
+                             class="thumbnail" 
+                             onclick="openLightboxWithRecord(${index})"
+                             onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%2250%22 font-size=%2220%22%3E加载失败%3C/text%3E%3C/svg%3E'">
+                    </td>
+                    <td>
+                        <button class="download-btn" onclick="downloadRecordImage('${record.image_path}', '${record.filename}')">
+                            ⬇️ 下载
+                        </button>
+                        <button class="delete-btn" onclick="deleteRecord(${record.id})">
+                            🗑️ 删除
+                        </button>
+                    </td>
+                `;
+                
+                tbody.appendChild(tr);
+            });
+        }
+        
+        // 当前记录信息（用于切换显示）
+        let currentRecordInfo = null;
+        let isInfoExpanded = false;
+        
+        // 打开图片放大查看（带记录信息）
+        function openLightboxWithRecord(index) {
+            currentLightboxIndex = index;
+            const record = records[index];
+            currentRecordInfo = record;
+            isInfoExpanded = false;
+            
+            const img = document.getElementById('lightboxImage');
+            img.src = record.image_path;
+            
+            // 默认只显示文件名和尺寸
+            const btn = document.getElementById('lightboxInfoBtn');
+            if (btn) btn.style.display = 'block';
+            updateLightboxInfo(false);
+            
+            document.getElementById('lightbox').classList.add('active');
+        }
+        
+        // 更新lightbox信息显示
+        function updateLightboxInfo(expanded) {
+            const info = document.getElementById('lightboxInfo');
+            const btn = document.getElementById('lightboxInfoBtn');
+            
+            if (!currentRecordInfo) {
+                info.innerHTML = '';
+                if (btn) btn.style.display = 'none';
+                return;
+            }
+            
+            if (expanded) {
+                // 显示完整信息
+                info.innerHTML = `
+                    <p><strong>文件名:</strong> ${currentRecordInfo.filename || '-'}</p>
+                    <p><strong>尺寸:</strong> ${currentRecordInfo.width} × ${currentRecordInfo.height} (${currentRecordInfo.aspect_ratio || '-'})</p>
+                    <p><strong>提示词:</strong> ${currentRecordInfo.prompt || '-'}</p>
+                    <p><strong>分辨率:</strong> ${currentRecordInfo.resolution || '-'}</p>
+                    <p><strong>生成时间:</strong> ${new Date(currentRecordInfo.created_at).toLocaleString('zh-CN')}</p>
+                    ${currentRecordInfo.seed ? `<p><strong>种子值:</strong> ${currentRecordInfo.seed}</p>` : ''}
+                    ${currentRecordInfo.image_style ? `<p><strong>图片风格:</strong> ${currentRecordInfo.image_style}</p>` : ''}
+                `;
+                info.classList.add('active');
+                if (btn) btn.textContent = '🔽 收起信息';
+            } else {
+                // 只显示文件名和尺寸
+                info.innerHTML = `
+                    <p><strong>文件名:</strong> ${currentRecordInfo.filename || '-'}</p>
+                    <p><strong>尺寸:</strong> ${currentRecordInfo.width} × ${currentRecordInfo.height} (${currentRecordInfo.aspect_ratio || '-'})</p>
+                `;
+                info.classList.remove('active');
+                if (btn) btn.textContent = '📋 查看信息';
+            }
+        }
+        
+        // 切换信息显示
+        function toggleLightboxInfo(event) {
+            if (event) {
+                event.stopPropagation();
+            }
+            isInfoExpanded = !isInfoExpanded;
+            updateLightboxInfo(isInfoExpanded);
+        }
+        
+        // 打开图片放大查看（仅图片）
+        function openLightbox(url, event) {
+            event.stopPropagation();
+            currentLightboxIndex = -1;
+            currentRecordInfo = null;
+            isInfoExpanded = false;
+            
+            const img = document.getElementById('lightboxImage');
+            img.src = url;
+            
+            const info = document.getElementById('lightboxInfo');
+            const btn = document.getElementById('lightboxInfoBtn');
+            info.innerHTML = '<p>参考示例图</p>';
+            info.classList.remove('active');
+            if (btn) btn.style.display = 'none';
+            
+            document.getElementById('lightbox').classList.add('active');
+        }
+        
+        // 关闭图片放大查看
+        function closeLightbox(event) {
+            if (event.target.id === 'lightbox' || event.target.classList.contains('lightbox-close')) {
+                document.getElementById('lightbox').classList.remove('active');
+                currentLightboxIndex = -1;
+                currentRecordInfo = null;
+                isInfoExpanded = false;
+            }
+        }
+        
+        // 切换图片（上一张/下一张）
+        function navigateLightbox(direction, event) {
+            event.stopPropagation();
+            
+            if (currentLightboxIndex === -1) return;
+            
+            currentLightboxIndex += direction;
+            
+            if (currentLightboxIndex < 0) {
+                currentLightboxIndex = records.length - 1;
+            } else if (currentLightboxIndex >= records.length) {
+                currentLightboxIndex = 0;
+            }
+            
+            openLightboxWithRecord(currentLightboxIndex);
+            // 切换图片时重置信息展开状态
+            isInfoExpanded = false;
+        }
+        
+        // 键盘导航
+        document.addEventListener('keydown', function(e) {
+            const lightbox = document.getElementById('lightbox');
+            if (!lightbox.classList.contains('active')) return;
+            
+            if (e.key === 'Escape') {
+                closeLightbox({ target: lightbox });
+            } else if (e.key === 'ArrowLeft') {
+                navigateLightbox(-1, { stopPropagation: () => {} });
+            } else if (e.key === 'ArrowRight') {
+                navigateLightbox(1, { stopPropagation: () => {} });
+            }
+        });
+        
+        // 删除记录
+        async function deleteRecord(id) {
+            if (!confirm('确定要删除这条记录吗？')) return;
+            
+            try {
+                const response = await fetch(`/api/records/${id}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    alert('删除成功');
+                    loadRecords();
+                } else {
+                    alert('删除失败: ' + result.error);
+                }
+            } catch (error) {
+                alert('删除失败: ' + error.message);
+            }
+        }
+        
+        // 搜索
+        function handleSearch(event) {
+            if (event.key === 'Enter') {
+                currentPage = 1;
+                loadRecords();
+            }
+        }
+        
+        // 翻页
+        function changePage(delta) {
+            const totalPages = Math.ceil(totalRecords / pageSize);
+            const newPage = currentPage + delta;
+            
+            if (newPage >= 1 && newPage <= totalPages) {
+                currentPage = newPage;
+                loadRecords();
+            }
+        }
+        
+        // 更新分页按钮状态
+        function updatePagination() {
+            const totalPages = Math.ceil(totalRecords / pageSize);
+            
+            const currentPageEl = document.getElementById('currentPage');
+            const totalPagesEl = document.getElementById('totalPages');
+            if (currentPageEl) {
+                currentPageEl.textContent = currentPage;
+            }
+            if (totalPagesEl) {
+                totalPagesEl.textContent = totalPages;
+            }
+            document.getElementById('prevBtn').disabled = currentPage <= 1;
+            document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+        }
+        
+        // 切换单个记录选择
+        function toggleRecordSelection(id, filename, checked) {
+            if (checked) {
+                selectedRecords.add(id);
+            } else {
+                selectedRecords.delete(id);
+            }
+            updateBatchDownloadButton();
+        }
+        
+        // 全选/取消全选
+        function toggleSelectAll(checked) {
+            selectedRecords.clear();
+            
+            if (checked) {
+                records.forEach(record => {
+                    selectedRecords.add(record.id);
+                });
+            }
+            
+            // 更新所有复选框状态
+            document.querySelectorAll('.record-checkbox').forEach(checkbox => {
+                checkbox.checked = checked;
+            });
+            
+            updateBatchDownloadButton();
+        }
+        
+        // 更新批量下载按钮和批量删除按钮
+        function updateBatchDownloadButton() {
+            const count = selectedRecords.size;
+            const downloadBtn = document.getElementById('batchDownloadBtn');
+            const deleteBtn = document.getElementById('batchDeleteBtn');
+            const downloadCountSpan = document.getElementById('selectedCount');
+            const deleteCountSpan = document.getElementById('selectedCountDelete');
+            
+            // 安全地更新计数，检查元素是否存在
+            if (downloadCountSpan) {
+                downloadCountSpan.textContent = count;
+            }
+            if (deleteCountSpan) {
+                deleteCountSpan.textContent = count;
+            }
+            
+            // 安全地显示/隐藏按钮，检查元素是否存在
+            if (downloadBtn) {
+                downloadBtn.style.display = count > 0 ? 'inline-block' : 'none';
+            }
+            if (deleteBtn) {
+                deleteBtn.style.display = count > 0 ? 'inline-block' : 'none';
+            }
+            
+            // 更新全选复选框状态
+            const selectAll = document.getElementById('selectAll');
+            if (selectAll) {
+                selectAll.checked = count > 0 && count === records.length;
+                selectAll.indeterminate = count > 0 && count < records.length;
+            }
+        }
+        
+        // 批量下载
+        async function batchDownload() {
+            if (selectedRecords.size === 0) {
+                alert('请先选择要下载的记录');
+                return;
+            }
+            
+            const btn = document.getElementById('batchDownloadBtn');
+            if (!btn) {
+                alert('批量下载按钮未找到，请刷新页面重试');
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = '打包中...';
+            
+            try {
+                const zip = new JSZip();
+                const selectedList = Array.from(selectedRecords);
+                
+                // 获取选中的记录
+                const selectedItems = records.filter(r => selectedRecords.has(r.id));
+                
+                let successCount = 0;
+                let failCount = 0;
+                
+                // 逐个下载图片并添加到zip
+                for (let i = 0; i < selectedItems.length; i++) {
+                    const record = selectedItems[i];
+                    if (btn) {
+                        btn.textContent = `打包中 ${i + 1}/${selectedItems.length}...`;
+                    }
+                    
+                    try {
+                        const response = await fetch(record.image_path);
+                        if (response.ok) {
+                            const blob = await response.blob();
+                            zip.file(record.filename, blob);
+                            successCount++;
+                        } else {
+                            console.error(`下载失败: ${record.filename}`);
+                            failCount++;
+                        }
+                    } catch (error) {
+                        console.error(`下载出错: ${record.filename}`, error);
+                        failCount++;
+                    }
+                }
+                
+                // 生成zip文件
+                if (btn) {
+                    btn.textContent = '生成压缩包...';
+                }
+                const content = await zip.generateAsync({ type: 'blob' });
+                
+                // 下载
+                const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                saveAs(content, `ai_images_${timestamp}.zip`);
+                
+                alert(`批量下载完成！\\n成功: ${successCount} 个\\n失败: ${failCount} 个`);
+                
+            } catch (error) {
+                console.error('批量下载失败:', error);
+                alert('批量下载失败: ' + error.message);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '📦 批量下载 (<span id="selectedCount">' + selectedRecords.size + '</span>)';
+                }
+            }
+        }
+        
+        // 批量删除记录
+        async function deleteBatchRecords() {
+            if (selectedRecords.size === 0) {
+                alert('请先选择要删除的记录');
+                return;
+            }
+            
+            if (!confirm(`确定要删除选中的 ${selectedRecords.size} 条记录吗？此操作不可恢复！`)) {
+                return;
+            }
+            
+            const btn = document.getElementById('batchDeleteBtn');
+            if (!btn) {
+                alert('批量删除按钮未找到，请刷新页面重试');
+                return;
+            }
+            
+            btn.disabled = true;
+            const originalText = btn.innerHTML;
+            btn.textContent = '删除中...';
+            
+            try {
+                const selectedList = Array.from(selectedRecords);
+                const response = await fetch('/api/batch-delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ ids: selectedList })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert(`批量删除完成！\\n成功: ${result.deleted} 条\\n失败: ${result.failed} 条`);
+                    
+                    // 清空选择
+                    selectedRecords.clear();
+                    const selectAllCheckbox = document.getElementById('selectAll');
+                    if (selectAllCheckbox) {
+                        selectAllCheckbox.checked = false;
+                    }
+                    updateBatchDownloadButton();
+                    
+                    // 重新加载记录
+                    loadRecords();
+                } else {
+                    alert('批量删除失败: ' + result.message);
+                }
+            } catch (error) {
+                console.error('批量删除失败:', error);
+                alert('批量删除失败: ' + error.message);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                }
+            }
+        }
+        
+        // 下载记录图片
+        function downloadRecordImage(url, filename) {
+            try {
+                // 阻止默认行为
+                if (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+                
+                // 使用后端代理下载，避免CORS问题
+                const downloadUrl = `/api/download-file?url=${encodeURIComponent(url)}`;
+                const link = document.createElement('a');
+                link.href = downloadUrl;
+                link.download = filename || 'download';
+                link.style.display = 'none';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            } catch (error) {
+                console.error('下载失败:', error);
+                // 如果代理下载失败，尝试直接下载
+                try {
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = filename || 'download';
+                    link.target = '_blank';
+                    link.style.display = 'none';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                } catch (fallbackError) {
+                    console.error('备用下载也失败:', fallbackError);
+                    alert('下载失败，请检查网络连接或文件是否存在');
+                }
+            }
+        }
+
+    </script>
+    <script src="/static/sidebar-nav.js"></script>
+</body>
+</html>

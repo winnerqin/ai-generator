@@ -1,0 +1,79 @@
+{
+  "styles": [
+    {
+      "id": "sanxuaner",
+      "name": "三渲二",
+      "prompt": "三渲二风格，3D渲染成2D效果"
+    },
+    {
+      "id": "fujimoto",
+      "name": "藤本树",
+      "prompt": "藤本树风格，独特的视觉表现"
+    },
+    {
+      "id": "konoha",
+      "name": "木叶村",
+      "prompt": "木叶村风格，火影忍者风格"
+    },
+    {
+      "id": "ghibli",
+      "name": "吉卜力",
+      "prompt": "吉卜力工作室风格，宫崎骏动画风格"
+    },
+    {
+      "id": "3d_chinese",
+      "name": "3D国创",
+      "prompt": "3D国创风格，中国原创3D动画风格"
+    },
+    {
+      "id": "2d_comic",
+      "name": "2D漫剧",
+      "prompt": "2D漫剧风格，2D漫画剧集风格"
+    },
+    {
+      "id": "block_world",
+      "name": "方块世界",
+      "prompt": "方块世界风格，像素方块风格"
+    },
+    {
+      "id": "healing_cute",
+      "name": "治愈Q萌",
+      "prompt": "治愈Q萌风格，可爱治愈系风格"
+    },
+    {
+      "id": "korean_urban",
+      "name": "韩系都市",
+      "prompt": "韩系都市风格，韩国城市风格"
+    },
+    {
+      "id": "clay_toy",
+      "name": "粘土玩具",
+      "prompt": "粘土玩具风格，粘土模型风格"
+    },
+    {
+      "id": "american_3d",
+      "name": "美式3D",
+      "prompt": "美式3D风格，美国3D动画风格"
+    },
+    {
+      "id": "80s",
+      "name": "80年代",
+      "prompt": "80年代风格，复古80年代风格"
+    },
+    {
+      "id": "animal_crossing",
+      "name": "动物森友会",
+      "prompt": "动物森友会风格，Animal Crossing风格"
+    },
+    {
+      "id": "lego",
+      "name": "乐高",
+      "prompt": "乐高风格，LEGO积木风格"
+    },
+    {
+      "id": "american_comic",
+      "name": "美式漫画",
+      "prompt": "美式漫画风格，美国漫画风格"
+    }
+  ]
+}

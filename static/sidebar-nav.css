@@ -1,0 +1,226 @@
+/* 左侧导航栏样式 */
+.sidebar-nav {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 250px;
+    height: 100vh;
+    background: #1e3a5f; /* 深蓝色 */
+    box-shadow: 2px 0 10px rgba(0,0,0,0.2);
+    transition: width 0.3s ease;
+    z-index: 1000;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.sidebar-nav.collapsed {
+    width: 70px;
+}
+
+.sidebar-nav-header {
+    padding: 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 70px;
+}
+
+.sidebar-nav-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    transition: opacity 0.3s;
+}
+
+.sidebar-nav.collapsed .sidebar-nav-title {
+    opacity: 0;
+    width: 0;
+}
+
+.sidebar-nav-toggle {
+    background: rgba(255,255,255,0.1);
+    border: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s;
+    flex-shrink: 0;
+    color: #ffffff;
+}
+
+.sidebar-nav-toggle:hover {
+    background: rgba(255,255,255,0.2);
+}
+
+.sidebar-nav-menu {
+    padding: 10px 0;
+}
+
+.sidebar-nav-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 20px;
+    color: rgba(255,255,255,0.8);
+    text-decoration: none;
+    transition: all 0.3s;
+    position: relative;
+}
+
+.sidebar-nav-item:hover {
+    background: rgba(255,255,255,0.1);
+    color: #ffffff;
+}
+
+.sidebar-nav-item.active {
+    background: #28a745; /* 绿色高亮 */
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.sidebar-nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: #28a745;
+}
+
+.sidebar-nav-icon {
+    font-size: 20px;
+    width: 24px;
+    text-align: center;
+    flex-shrink: 0;
+    margin-right: 12px;
+}
+
+.sidebar-nav.collapsed .sidebar-nav-icon {
+    margin-right: 0;
+}
+
+.sidebar-nav-text {
+    white-space: nowrap;
+    overflow: hidden;
+    transition: opacity 0.3s;
+}
+
+.sidebar-nav.collapsed .sidebar-nav-text {
+    opacity: 0;
+    width: 0;
+}
+
+.sidebar-nav-divider {
+    height: 1px;
+    background: rgba(255,255,255,0.1);
+    margin: 10px 20px;
+}
+
+.sidebar-nav-user {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 15px 20px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    background: rgba(0,0,0,0.2);
+}
+
+.sidebar-nav-user-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.sidebar-nav-user-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #28a745; /* 绿色 */
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.sidebar-nav-user-name {
+    font-weight: 600;
+    color: rgba(255,255,255,0.9);
+    white-space: nowrap;
+    overflow: hidden;
+    transition: opacity 0.3s;
+}
+
+.sidebar-nav.collapsed .sidebar-nav-user-name {
+    opacity: 0;
+    width: 0;
+}
+
+.sidebar-nav-logout {
+    width: 100%;
+    padding: 8px;
+    background: #1e3a5f; /* 深蓝色 */
+    color: white;
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.3s;
+}
+
+.sidebar-nav-logout:hover {
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.3);
+}
+
+.sidebar-nav.collapsed .sidebar-nav-logout {
+    padding: 8px;
+    font-size: 0;
+}
+
+.sidebar-nav.collapsed .sidebar-nav-logout::before {
+    content: '🚪';
+    font-size: 16px;
+}
+
+/* 主内容区域 */
+.main-content {
+    margin-left: 250px;
+    transition: margin-left 0.3s ease;
+    min-height: 100vh;
+    background: #f5f5f5; /* 浅灰色 */
+    padding: 20px;
+}
+
+.sidebar-nav.collapsed ~ .main-content {
+    margin-left: 70px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .sidebar-nav {
+        width: 70px;
+    }
+    
+    .sidebar-nav.collapsed {
+        width: 0;
+    }
+    
+    .main-content {
+        margin-left: 70px;
+    }
+    
+    .sidebar-nav.collapsed ~ .main-content {
+        margin-left: 0;
+    }
+}

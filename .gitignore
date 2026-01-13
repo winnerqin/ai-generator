@@ -1,0 +1,70 @@
+# 环境变量文件
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Python虚拟环境
+venv/
+env/
+pyvenv.cfg
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# IDE和编辑器文件
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# 日志文件
+*.log
+logs/
+
+# 输出目录
+output/
+images/
+
+# 上传文件
+uploads/
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 应用日志
+app.log
+ai_generator.log
+
+# 依赖文件
+*.egg
+*.egg-info/
+build/
+dist/
+*.tar.gz
+*.zip
+
+# 测试文件
+.pytest_cache/
+
+# 其他
+*.pem
+*.key
+*.cert
+*.p12
+*.pfx
+
+# 临时文件
+.tmp/
+.temp/
+.cache/

@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>视频生成 - Ai创作工具</title>
+    <script src="/static/state-manager.js"></script>
+    <link rel="stylesheet" href="/static/sidebar-nav.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .form-section {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .form-group label {
+            font-weight: 600;
+            color: #333;
+            font-size: 0.95em;
+        }
+        
+        .form-group input[type="text"],
+        .form-group textarea,
+        .form-group select,
+        .form-group input[type="number"] {
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+        
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #28a745; /* 绿色 */
+        }
+        
+        .form-group small {
+            display: block;
+            margin-top: 4px;
+            color: #666;
+            font-size: 0.85em;
+        }
+        
+        .form-group textarea {
+            min-height: 120px;
+            resize: vertical;
+            font-family: inherit;
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        #firstLastFrameSection {
+            display: none;
+            gap: 15px;
+        }
+        
+        #firstLastFrameSection .form-group {
+            margin-bottom: 0;
+        }
+        
+        .generate-type-selector {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .generate-type-option {
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+            background: #f8f9ff;
+        }
+        
+        .generate-type-option:hover {
+            border-color: #28a745; /* 绿色 */
+            background: #f0f9f4;
+        }
+        
+        .generate-type-option.active {
+            border-color: #28a745; /* 绿色 */
+            background: #28a745;
+            color: white;
+        }
+        
+        .generate-type-option .icon {
+            font-size: 2em;
+            margin-bottom: 8px;
+        }
+        
+        .generate-type-option .title {
+            font-weight: 600;
+            font-size: 1em;
+            margin-bottom: 4px;
+        }
+        
+        .generate-type-option .desc {
+            font-size: 0.85em;
+            opacity: 0.8;
+        }
+        
+        .image-upload-section {
+            border: 2px dashed #28a745; /* 绿色 */
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            background-color: #f0f9f4;
+        }
+        
+        .image-upload-section:hover {
+            background-color: #e8f5ed;
+        }
+        
+        .image-upload-section input[type="file"] {
+            display: none;
+        }
+        
+        .image-upload-section .upload-icon {
+            font-size: 3em;
+            color: #28a745; /* 绿色 */
+            margin-bottom: 10px;
+        }
+        
+        .image-preview {
+            margin-top: 5px;
+            display: none;
+            position: relative;
+        }
+        
+        .image-preview img {
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: block;
+        }
+        
+        #firstLastFrameSection {
+            display: none;
+            gap: 15px;
+        }
+        
+        #firstLastFrameSection .form-group {
+            margin-bottom: 0;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #28a745; /* 绿色 */
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #218838;
+        }
+        
+        .btn-primary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .error-message {
+            padding: 12px;
+            background: #fee;
+            color: #c33;
+            border-radius: 8px;
+            display: none;
+            margin-bottom: 15px;
+        }
+        
+        .success-message {
+            padding: 12px;
+            background: #efe;
+            color: #3c3;
+            border-radius: 8px;
+            display: none;
+            margin-bottom: 15px;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #28a745; /* 绿色 */
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .result-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f0f9f4;
+            border-radius: 10px;
+            display: none;
+        }
+        
+        .result-section h3 {
+            margin-bottom: 15px;
+            color: #28a745; /* 绿色 */
+        }
+        
+        .result-section .task-id {
+            padding: 10px;
+            background: white;
+            border-radius: 6px;
+            font-family: monospace;
+            word-break: break-all;
+        }
+        
+        .library-tab-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s;
+            background: #6c757d;
+            color: white;
+        }
+        
+        .library-tab-btn:hover {
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <!-- 左侧导航栏 -->
+    <nav class="sidebar-nav" id="sidebarNav">
+        <div class="sidebar-nav-header">
+            <div class="sidebar-nav-title">Ai创作工具</div>
+            <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收缩/展开">
+                <span id="toggleIcon">‹</span>
+            </button>
+        </div>
+        <div class="sidebar-nav-menu">
+            <a href="/" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎨</span>
+                <span class="sidebar-nav-text">单图生成</span>
+            </a>
+            <a href="/batch" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📦</span>
+                <span class="sidebar-nav-text">批量生成</span>
+            </a>
+            <a href="/records" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📊</span>
+                <span class="sidebar-nav-text">生图任务</span>
+            </a>
+            <a href="/video-generate" class="sidebar-nav-item active">
+                <span class="sidebar-nav-icon">🎬</span>
+                <span class="sidebar-nav-text">视频生成</span>
+            </a>
+            <a href="/video-tasks" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📹</span>
+                <span class="sidebar-nav-text">视频任务</span>
+            </a>
+            <a href="/script-analysis" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎬</span>
+                <span class="sidebar-nav-text">剧本分析</span>
+            </a>
+            <a href="/content-management" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📚</span>
+                <span class="sidebar-nav-text">内容管理</span>
+            </a>
+            {% if user.username == 'system_admin' %}
+            <div class="sidebar-nav-divider"></div>
+            <a href="/stats" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📈</span>
+                <span class="sidebar-nav-text">系统统计</span>
+            </a>
+            {% endif %}
+        </div>
+        <div class="sidebar-nav-user">
+            <div class="sidebar-nav-user-info">
+                <div class="sidebar-nav-user-avatar">👤</div>
+                <div class="sidebar-nav-user-name">{{ user.username }}</div>
+            </div>
+            <a href="/logout" class="sidebar-nav-logout">登出</a>
+        </div>
+    </nav>
+    
+    <div class="main-content">
+        <div class="container">
+        <div class="content">
+            <h1 style="margin-bottom: 20px; color: #28a745;">🎬 视频生成</h1>
+            
+            <div class="error-message" id="errorMessage"></div>
+            <div class="success-message" id="successMessage"></div>
+            
+            <form id="videoGenerateForm">
+                <!-- 生成方式选择 -->
+                <div class="form-group">
+                    <label>生成方式 *</label>
+                    <div class="generate-type-selector">
+                        <div class="generate-type-option active" data-type="text">
+                            <div class="icon">📝</div>
+                            <div class="title">文生视频</div>
+                            <div class="desc">仅使用文字提示词</div>
+                        </div>
+                        <div class="generate-type-option" data-type="first_frame">
+                            <div class="icon">🖼️</div>
+                            <div class="title">首帧生成</div>
+                            <div class="desc">上传首帧图片</div>
+                        </div>
+                        <div class="generate-type-option" data-type="first_last_frame">
+                            <div class="icon">🖼️🖼️</div>
+                            <div class="title">首尾帧生成</div>
+                            <div class="desc">上传首尾帧图片</div>
+                        </div>
+                        <div class="generate-type-option" data-type="reference_image">
+                            <div class="icon">🎨</div>
+                            <div class="title">参考图生成</div>
+                            <div class="desc">上传参考图片</div>
+                        </div>
+                    </div>
+                    <input type="hidden" id="generateType" name="generate_type" value="text">
+                </div>
+                
+                <!-- 提示词 -->
+                <div class="form-group">
+                    <label for="prompt">提示词 *</label>
+                    <textarea id="prompt" name="prompt" placeholder="描述你想要生成的视频内容..." required></textarea>
+                </div>
+                
+                <!-- 首尾帧图片选择（并排显示） -->
+                <div class="form-row" id="firstLastFrameSection" style="display: none;">
+                    <!-- 首帧图片选择 -->
+                    <div class="form-group">
+                        <label>首帧图片 *</label>
+                        <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                            <button type="button" class="btn" onclick="openImageSelector('firstFrameInPair')" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
+                                📚 从库选择
+                            </button>
+                            <button type="button" class="btn" onclick="document.getElementById('firstFrameInPairUpload').click()" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
+                                📁 上传
+                            </button>
+                        </div>
+                        <input type="file" id="firstFrameInPairUpload" accept="image/*" onchange="handleImageUpload(event, 'firstFrameInPair')" style="display: none;">
+                        <input type="hidden" id="firstFrameInPairUrl" name="first_frame_url">
+                        <div class="image-preview" id="firstFrameInPairPreview" style="margin-top: 5px; position: relative;">
+                            <button type="button" onclick="clearImage('firstFrameInPair')" style="display: none; position: absolute; top: 5px; right: 5px; background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8em;" id="firstFrameInPairClearBtn">✕ 删除</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 尾帧图片选择 -->
+                    <div class="form-group" id="lastFrameSection">
+                        <label>尾帧图片 *</label>
+                        <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                            <button type="button" class="btn" onclick="openImageSelector('lastFrame')" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
+                                📚 从库选择
+                            </button>
+                            <button type="button" class="btn" onclick="document.getElementById('lastFrameUpload').click()" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
+                                📁 上传
+                            </button>
+                        </div>
+                        <input type="file" id="lastFrameUpload" accept="image/*" onchange="handleImageUpload(event, 'lastFrame')" style="display: none;">
+                        <input type="hidden" id="lastFrameUrl" name="last_frame_url">
+                        <div class="image-preview" id="lastFramePreview" style="margin-top: 5px; position: relative;">
+                            <button type="button" onclick="clearImage('lastFrame')" style="display: none; position: absolute; top: 5px; right: 5px; background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8em;" id="lastFrameClearBtn">✕ 删除</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 首帧图片选择（单独显示，用于first_frame模式） -->
+                <div class="form-group" id="firstFrameOnlySection" style="display: none;">
+                    <label>首帧图片 *</label>
+                    <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                        <button type="button" class="btn" onclick="openImageSelector('firstFrame')" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
+                            📚 从库选择
+                        </button>
+                        <button type="button" class="btn" onclick="document.getElementById('firstFrameOnlyUpload').click()" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
+                            📁 上传
+                        </button>
+                    </div>
+                    <input type="file" id="firstFrameOnlyUpload" accept="image/*" onchange="handleImageUpload(event, 'firstFrame')" style="display: none;">
+                    <input type="hidden" id="firstFrameUrl" name="first_frame_url">
+                    <div class="image-preview" id="firstFramePreview" style="margin-top: 5px; position: relative;">
+                        <button type="button" onclick="clearImage('firstFrame')" style="display: none; position: absolute; top: 5px; right: 5px; background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8em;" id="firstFrameClearBtn">✕ 删除</button>
+                    </div>
+                </div>
+                
+                <!-- 参考图选择（支持1-4张） -->
+                <div class="form-group" id="referenceImageSection" style="display: none;">
+                    <label>参考图片 * (1-4张)</label>
+                    <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                        <button type="button" class="btn" onclick="openImageSelector('referenceImage')" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
+                            📚 从库选择
+                        </button>
+                        <button type="button" class="btn" onclick="document.getElementById('referenceImageUpload').click()" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
+                            📁 上传
+                        </button>
+                    </div>
+                    <input type="file" id="referenceImageUpload" accept="image/*" multiple onchange="handleMultipleImageUpload(event, 'referenceImage')" style="display: none;">
+                    <div id="referenceImageList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 10px;"></div>
+                    <small style="color: #666; font-size: 0.85em; margin-top: 5px; display: block;">已选择 <span id="referenceImageCount">0</span> 张图片（最多4张）</small>
+                </div>
+                
+                <!-- 参数设置 -->
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="resolution">分辨率</label>
+                        <select id="resolution" name="resolution">
+                            <option value="480p">480p</option>
+                            <option value="720p" selected>720p</option>
+                            <option value="1080p" id="resolution1080p">1080p</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="ratio">视频比例</label>
+                        <select id="ratio" name="ratio">
+                            <option value="16:9" selected>16:9</option>
+                            <option value="4:3">4:3</option>
+                            <option value="1:1">1:1</option>
+                            <option value="3:4">3:4</option>
+                            <option value="9:16">9:16</option>
+                            <option value="21:9">21:9</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="duration">视频长度（秒）</label>
+                        <input type="number" id="duration" name="duration" min="2" max="12" value="5" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="seed">种子值（默认-1表示随机）</label>
+                        <input type="number" id="seed" name="seed" value="-1">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group" id="cameraFixedGroup">
+                        <label for="camera_fixed">是否固定摄像机</label>
+                        <select id="camera_fixed" name="camera_fixed">
+                            <option value="false" selected>否</option>
+                            <option value="true">是</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="watermark">是否添加水印</label>
+                        <select id="watermark" name="watermark">
+                            <option value="false" selected>否</option>
+                            <option value="true">是</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="generate_audio">是否包含声音</label>
+                        <select id="generate_audio" name="generate_audio">
+                            <option value="false" selected>否</option>
+                            <option value="true">是</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="return_last_frame">是否生成尾帧图像</label>
+                        <select id="return_last_frame" name="return_last_frame">
+                            <option value="false" selected>否</option>
+                            <option value="true">是</option>
+                        </select>
+                        <small style="color: #666; font-size: 0.85em; margin-top: 4px; display: block;">如果选择"是"，尾帧图像将自动添加到图片库</small>
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn btn-primary" id="submitBtn" style="width: 100%; margin-top: 20px;">
+                    🚀 开始生成视频
+                </button>
+            </form>
+            
+            <div class="loading" id="loading">
+                <div class="loading-spinner"></div>
+                <p>正在创建视频生成任务...</p>
+            </div>
+            
+            <div class="result-section" id="resultSection">
+                <h3>✅ 任务创建成功</h3>
+                <p>任务ID：</p>
+                <div class="task-id" id="taskId"></div>
+                <p style="margin-top: 15px;">
+                    <a href="/video-tasks" class="btn btn-primary">查看任务管理</a>
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 图片选择模态框 -->
+    <div id="imageSelectorModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 10000; overflow-y: auto;">
+        <div style="max-width: 1200px; margin: 50px auto; background: white; border-radius: 8px; padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3>选择首帧图片</h3>
+                <button onclick="closeImageSelector()" style="background: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">关闭</button>
+            </div>
+            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                <button onclick="switchImageLibrary('person')" class="library-tab-btn" data-library="person">👤 人物库</button>
+                <button onclick="switchImageLibrary('scene')" class="library-tab-btn" data-library="scene">🌆 场景库</button>
+                <button onclick="switchImageLibrary('image')" class="library-tab-btn" data-library="image">🖼️ 图片库</button>
+            </div>
+            <div id="imageSelectorGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 15px; max-height: 600px; overflow-y: auto;"></div>
+        </div>
+    </div>
+    
+    <script>
+        // 页面加载时，检查URL参数并填充表单
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            if (urlParams.has('prompt')) {
+                // 填充提示词
+                document.getElementById('prompt').value = urlParams.get('prompt');
+                
+                // 填充其他参数
+                if (urlParams.has('resolution')) {
+                    document.getElementById('resolution').value = urlParams.get('resolution');
+                }
+                if (urlParams.has('ratio')) {
+                    document.getElementById('ratio').value = urlParams.get('ratio');
+                }
+                if (urlParams.has('duration')) {
+                    document.getElementById('duration').value = urlParams.get('duration');
+                }
+                if (urlParams.has('seed')) {
+                    document.getElementById('seed').value = urlParams.get('seed');
+                }
+                if (urlParams.has('camera_fixed')) {
+                    document.getElementById('camera_fixed').value = urlParams.get('camera_fixed');
+                }
+                if (urlParams.has('watermark')) {
+                    document.getElementById('watermark').value = urlParams.get('watermark');
+                }
+                if (urlParams.has('generate_audio')) {
+                    document.getElementById('generate_audio').value = urlParams.get('generate_audio');
+                }
+                if (urlParams.has('return_last_frame')) {
+                    document.getElementById('return_last_frame').value = urlParams.get('return_last_frame');
+                }
+                
+                // 设置生成方式
+                const generateType = urlParams.get('generate_type') || 'text';
+                document.getElementById('generateType').value = generateType;
+                
+                // 更新UI显示
+                document.querySelectorAll('.generate-type-option').forEach(opt => {
+                    opt.classList.remove('active');
+                    if (opt.dataset.type === generateType) {
+                        opt.classList.add('active');
+                    }
+                });
+                
+                // 显示/隐藏相应的上传区域
+                document.getElementById('firstLastFrameSection').style.display = 
+                    (generateType === 'first_last_frame') ? 'flex' : 'none';
+                document.getElementById('firstFrameOnlySection').style.display = 
+                    (generateType === 'first_frame') ? 'block' : 'none';
+                document.getElementById('referenceImageSection').style.display = 
+                    (generateType === 'reference_image') ? 'block' : 'none';
+                
+                // 参考图模式下禁用1080p分辨率和固定摄像机
+                const resolutionSelect = document.getElementById('resolution');
+                const resolution1080p = document.getElementById('resolution1080p');
+                const cameraFixedGroup = document.getElementById('cameraFixedGroup');
+                
+                if (generateType === 'reference_image') {
+                    // 禁用1080p选项
+                    if (resolutionSelect.value === '1080p') {
+                        resolutionSelect.value = '720p';
+                    }
+                    resolution1080p.disabled = true;
+                    resolution1080p.style.display = 'none';
+                    
+                    // 隐藏固定摄像机选项
+                    cameraFixedGroup.style.display = 'none';
+                    document.getElementById('camera_fixed').value = 'false';
+                } else {
+                    // 恢复1080p选项
+                    resolution1080p.disabled = false;
+                    resolution1080p.style.display = 'block';
+                    
+                    // 显示固定摄像机选项
+                    cameraFixedGroup.style.display = 'block';
+                }
+                
+                // 填充首帧图片（根据当前生成类型选择正确的预览区域）
+                if (urlParams.has('first_frame_url')) {
+                    const firstFrameUrl = urlParams.get('first_frame_url');
+                    const generateType = urlParams.get('generate_type') || document.getElementById('generateType').value;
+                    
+                    if (generateType === 'first_frame') {
+                        // 首帧单独模式
+                        document.getElementById('firstFrameUrl').value = firstFrameUrl;
+                        const preview = document.getElementById('firstFramePreview');
+                        preview.style.display = 'block';
+                        preview.style.position = 'relative';
+                        preview.innerHTML = `<img src="${firstFrameUrl}" alt="预览" style="max-width: 100%; max-height: 200px; border-radius: 8px; display: block;">`;
+                        // 添加删除按钮
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.onclick = () => clearImage('firstFrame');
+                        btn.style.cssText = 'position: absolute; top: 5px; right: 5px; background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8em;';
+                        btn.textContent = '✕ 删除';
+                        btn.id = 'firstFrameClearBtn';
+                        preview.appendChild(btn);
+                    } else if (generateType === 'first_last_frame') {
+                        // 首尾帧模式
+                        document.getElementById('firstFrameInPairUrl').value = firstFrameUrl;
+                        const preview = document.getElementById('firstFrameInPairPreview');
+                        preview.style.display = 'block';
+                        preview.style.position = 'relative';
+                        preview.innerHTML = `<img src="${firstFrameUrl}" alt="预览" style="max-width: 100%; max-height: 200px; border-radius: 8px; display: block;">`;
+                        // 添加删除按钮
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.onclick = () => clearImage('firstFrameInPair');
+                        btn.style.cssText = 'position: absolute; top: 5px; right: 5px; background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8em;';
+                        btn.textContent = '✕ 删除';
+                        btn.id = 'firstFrameInPairClearBtn';
+                        preview.appendChild(btn);
+                    }
+                }
+                
+                // 填充尾帧图片
+                if (urlParams.has('last_frame_url')) {
+                    const lastFrameUrl = urlParams.get('last_frame_url');
+                    document.getElementById('lastFrameUrl').value = lastFrameUrl;
+                    const preview = document.getElementById('lastFramePreview');
+                    preview.style.display = 'block';
+                    preview.style.position = 'relative';
+                    preview.innerHTML = `<img src="${lastFrameUrl}" alt="预览" style="max-width: 100%; max-height: 200px; border-radius: 8px; display: block;">`;
+                    // 添加删除按钮
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.onclick = () => clearImage('lastFrame');
+                    btn.style.cssText = 'position: absolute; top: 5px; right: 5px; background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8em;';
+                    btn.textContent = '✕ 删除';
+                    btn.id = 'lastFrameClearBtn';
+                    preview.appendChild(btn);
+                }
+                
+                // 填充参考图
+                // 处理多张参考图URL参数（用于重新生成）
+                if (urlParams.has('reference_image_url')) {
+                    const referenceImageUrl = urlParams.get('reference_image_url');
+                    referenceImageList.push({
+                        url: referenceImageUrl,
+                        filename: '参考图',
+                        source: 'library'
+                    });
+                    updateReferenceImageList();
+                }
+                
+                // 显示成功消息
+                const successMsg = document.getElementById('successMessage');
+                successMsg.textContent = '已加载任务参数，可以修改后重新生成';
+                successMsg.style.display = 'block';
+            }
+        });
+        
+        // 生成方式选择
+        document.querySelectorAll('.generate-type-option').forEach(option => {
+            option.addEventListener('click', function() {
+                document.querySelectorAll('.generate-type-option').forEach(opt => opt.classList.remove('active'));
+                this.classList.add('active');
+                document.getElementById('generateType').value = this.dataset.type;
+                
+                // 显示/隐藏相应的上传区域
+                const type = this.dataset.type;
+                document.getElementById('firstLastFrameSection').style.display = 
+                    (type === 'first_last_frame') ? 'flex' : 'none';
+                document.getElementById('firstFrameOnlySection').style.display = 
+                    (type === 'first_frame') ? 'block' : 'none';
+                document.getElementById('referenceImageSection').style.display = 
+                    (type === 'reference_image') ? 'block' : 'none';
+            });
+        });
+        
+        let currentImageSelectorType = null;
+        let imageSelectorAssets = [];
+        let currentImageLibrary = 'person';
+        let referenceImageList = []; // 存储参考图列表（最多4张）
+        
+        // 打开图片选择器
+        function openImageSelector(type) {
+            currentImageSelectorType = type;
+            document.getElementById('imageSelectorModal').style.display = 'block';
+            switchImageLibrary('person');
+            
+            // 如果是参考图，更新选择器标题
+            const modalTitle = document.querySelector('#imageSelectorModal h3');
+            if (modalTitle) {
+                if (type === 'referenceImage') {
+                    modalTitle.textContent = `选择参考图片 (已选${referenceImageList.length}/4)`;
+                } else {
+                    modalTitle.textContent = '选择首帧图片';
+                }
+            }
+        }
+        
+        // 关闭图片选择器
+        function closeImageSelector() {
+            document.getElementById('imageSelectorModal').style.display = 'none';
+            currentImageSelectorType = null;
+        }
+        
+        // 更新图片选择器标题（当参考图数量变化时）
+        function updateImageSelectorTitle() {
+            if (currentImageSelectorType === 'referenceImage') {
+                const modalTitle = document.querySelector('#imageSelectorModal h3');
+                if (modalTitle) {
+                    modalTitle.textContent = `选择参考图片 (已选${referenceImageList.length}/4)`;
+                }
+            }
+        }
+        
+        // 切换图片库
+        async function switchImageLibrary(library) {
+            currentImageLibrary = library;
+            document.querySelectorAll('.library-tab-btn').forEach(btn => {
+                btn.style.background = btn.dataset.library === library ? '#28a745' : '#6c757d';
+                btn.style.color = 'white';
+            });
+            
+            try {
+                const response = await fetch(`/api/content-library?type=${library}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    imageSelectorAssets = data.assets || [];
+                    renderImageSelector();
+                } else {
+                    alert('加载失败: ' + data.error);
+                }
+            } catch (error) {
+                console.error('加载图片库失败:', error);
+                alert('加载失败: ' + error.message);
+            }
+        }
+        
+        // 渲染图片选择器
+        function renderImageSelector() {
+            const grid = document.getElementById('imageSelectorGrid');
+            grid.innerHTML = '';
+            
+            if (imageSelectorAssets.length === 0) {
+                grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #999;">暂无图片</div>';
+                return;
+            }
+            
+            imageSelectorAssets.forEach((asset, index) => {
+                const card = document.createElement('div');
+                card.style.cssText = 'position: relative; border: 2px solid #e0e0e0; border-radius: 8px; overflow: hidden; cursor: pointer; transition: all 0.3s;';
+                card.onmouseover = function() { this.style.borderColor = '#28a745'; this.style.transform = 'scale(1.05)'; };
+                card.onmouseout = function() { this.style.borderColor = '#e0e0e0'; this.style.transform = 'scale(1)'; };
+                if (currentImageSelectorType === 'referenceImage') {
+                    card.onclick = () => addReferenceImageFromLibrary(asset);
+                } else {
+                    card.onclick = () => selectImageForFirstFrame(asset);
+                }
+                
+                card.innerHTML = `
+                    <img src="${asset.url}" alt="${asset.filename}" style="width: 100%; height: 150px; object-fit: cover;" 
+                         onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%2250%22 font-size=%2215%22%3E加载失败%3C/text%3E%3C/svg%3E'">
+                    <div style="padding: 8px; font-size: 0.85em; word-break: break-all; background: #f8f9fa;">
+                        ${asset.filename}
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+        
+        // 选择图片作为首帧或尾帧
+        function selectImageForFirstFrame(asset) {
+            if (!currentImageSelectorType) return;
+            
+            const preview = document.getElementById(currentImageSelectorType + 'Preview');
+            const urlInput = document.getElementById(currentImageSelectorType + 'Url');
+            
+            preview.style.display = 'block';
+            preview.style.position = 'relative';
+            preview.innerHTML = `<img src="${asset.url}" alt="预览" style="max-width: 100%; max-height: 200px; border-radius: 8px; display: block;">`;
+            
+            // 添加删除按钮
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.onclick = () => clearImage(currentImageSelectorType);
+            btn.style.cssText = 'position: absolute; top: 5px; right: 5px; background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8em;';
+            btn.textContent = '✕ 删除';
+            btn.id = currentImageSelectorType + 'ClearBtn';
+            preview.appendChild(btn);
+            
+            if (urlInput) {
+                urlInput.value = asset.url;
+            }
+            
+            // 清空文件输入
+            const fileInput = document.getElementById(currentImageSelectorType + 'Upload');
+            if (fileInput) {
+                fileInput.value = '';
+            }
+            
+            closeImageSelector();
+        }
+        
+        // 清除图片
+        function clearImage(type) {
+            const preview = document.getElementById(type + 'Preview');
+            const urlInput = document.getElementById(type + 'Url');
+            const fileInput = document.getElementById(type + 'Upload');
+            const clearBtn = document.getElementById(type + 'ClearBtn');
+            
+            preview.style.display = 'none';
+            preview.innerHTML = '';
+            
+            if (urlInput) {
+                urlInput.value = '';
+            }
+            
+            if (fileInput) {
+                fileInput.value = '';
+            }
+            
+            if (clearBtn) {
+                clearBtn.remove();
+            }
+        }
+        
+        // 从库中添加参考图
+        function addReferenceImageFromLibrary(asset) {
+            if (referenceImageList.length >= 4) {
+                alert('最多只能选择4张参考图');
+                return;
+            }
+            
+            // 检查是否已存在
+            if (referenceImageList.some(img => img.url === asset.url)) {
+                alert('该图片已添加');
+                return;
+            }
+            
+            referenceImageList.push({
+                url: asset.url,
+                filename: asset.filename,
+                source: 'library'
+            });
+            
+            updateReferenceImageList();
+            updateImageSelectorTitle();
+            // 不关闭选择器，允许继续选择
+        }
+        
+        // 处理多张图片上传
+        function handleMultipleImageUpload(event, type) {
+            if (type !== 'referenceImage') return;
+            
+            const files = Array.from(event.target.files);
+            if (files.length === 0) return;
+            
+            // 检查总数
+            if (referenceImageList.length + files.length > 4) {
+                alert(`最多只能选择4张参考图，当前已选${referenceImageList.length}张，本次只能选择${4 - referenceImageList.length}张`);
+                files.splice(4 - referenceImageList.length);
+            }
+            
+            files.forEach(file => {
+                if (referenceImageList.length >= 4) return;
+                
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    referenceImageList.push({
+                        url: e.target.result,
+                        filename: file.name,
+                        source: 'upload',
+                        file: file
+                    });
+                    updateReferenceImageList();
+                };
+                reader.readAsDataURL(file);
+            });
+            
+            // 清空文件输入，允许重复选择同一文件
+            event.target.value = '';
+        }
+        
+        // 更新参考图列表显示
+        function updateReferenceImageList() {
+            const listContainer = document.getElementById('referenceImageList');
+            const countSpan = document.getElementById('referenceImageCount');
+            
+            countSpan.textContent = referenceImageList.length;
+            
+            if (referenceImageList.length === 0) {
+                listContainer.innerHTML = '';
+                return;
+            }
+            
+            listContainer.innerHTML = referenceImageList.map((img, index) => {
+                const imgUrl = img.source === 'upload' ? img.url : img.url;
+                return `
+                    <div style="position: relative; border: 2px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+                        <img src="${imgUrl}" alt="${img.filename}" style="width: 100%; height: 150px; object-fit: cover;">
+                        <button type="button" onclick="removeReferenceImage(${index})" style="position: absolute; top: 5px; right: 5px; background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8em;">✕</button>
+                        <div style="padding: 5px; font-size: 0.75em; word-break: break-all; background: #f8f9fa; text-align: center;">
+                            ${img.filename}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // 移除参考图
+        function removeReferenceImage(index) {
+            referenceImageList.splice(index, 1);
+            updateReferenceImageList();
+            updateImageSelectorTitle();
+        }
+        
+        // 图片上传处理
+        function handleImageUpload(event, type) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const preview = document.getElementById(type + 'Preview');
+                const urlInput = document.getElementById(type + 'Url');
+                const clearBtn = document.getElementById(type + 'ClearBtn');
+                
+                preview.style.display = 'block';
+                preview.style.position = 'relative';
+                preview.innerHTML = `<img src="${e.target.result}" alt="预览" style="max-width: 100%; max-height: 200px; border-radius: 8px; display: block;">`;
+                
+                // 添加删除按钮
+                if (clearBtn) {
+                    clearBtn.style.display = 'block';
+                    preview.appendChild(clearBtn);
+                } else {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.onclick = () => clearImage(type);
+                    btn.style.cssText = 'position: absolute; top: 5px; right: 5px; background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8em;';
+                    btn.textContent = '✕ 删除';
+                    btn.id = type + 'ClearBtn';
+                    preview.appendChild(btn);
+                }
+                
+                // 清空URL输入（使用上传的文件）
+                if (urlInput) {
+                    urlInput.value = '';
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+        
+        // 表单提交
+        document.getElementById('videoGenerateForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const errorMsg = document.getElementById('errorMessage');
+            const successMsg = document.getElementById('successMessage');
+            const loading = document.getElementById('loading');
+            const resultSection = document.getElementById('resultSection');
+            const submitBtn = document.getElementById('submitBtn');
+            
+            errorMsg.style.display = 'none';
+            successMsg.style.display = 'none';
+            resultSection.style.display = 'none';
+            
+            // 收集表单数据
+            const generateType = document.getElementById('generateType').value;
+            const prompt = document.getElementById('prompt').value.trim();
+            
+            // 验证提示词
+            if (!prompt) {
+                errorMsg.textContent = '请输入提示词';
+                errorMsg.style.display = 'block';
+                return;
+            }
+            
+            // 验证首帧图片（可以是上传的文件或从库中选择的URL）
+            if (generateType === 'first_frame') {
+                const firstFrameFile = document.getElementById('firstFrameOnlyUpload').files[0];
+                const firstFrameUrl = document.getElementById('firstFrameUrl').value.trim();
+                if (!firstFrameFile && !firstFrameUrl) {
+                    errorMsg.textContent = '请选择或上传首帧图片';
+                    errorMsg.style.display = 'block';
+                    return;
+                }
+            } else if (generateType === 'first_last_frame') {
+                const firstFrameFile = document.getElementById('firstFrameInPairUpload').files[0];
+                const firstFrameUrl = document.getElementById('firstFrameInPairUrl').value.trim();
+                if (!firstFrameFile && !firstFrameUrl) {
+                    errorMsg.textContent = '请选择或上传首帧图片';
+                    errorMsg.style.display = 'block';
+                    return;
+                }
+            }
+            
+            if (generateType === 'first_last_frame') {
+                const lastFrameFile = document.getElementById('lastFrameUpload').files[0];
+                const lastFrameUrl = document.getElementById('lastFrameUrl').value.trim();
+                if (!lastFrameFile && !lastFrameUrl) {
+                    errorMsg.textContent = '请选择或上传尾帧图片';
+                    errorMsg.style.display = 'block';
+                    return;
+                }
+            }
+            
+            if (generateType === 'reference_image') {
+                if (referenceImageList.length === 0) {
+                    errorMsg.textContent = '请至少选择1张参考图片（最多4张）';
+                    errorMsg.style.display = 'block';
+                    return;
+                }
+                if (referenceImageList.length > 4) {
+                    errorMsg.textContent = '最多只能选择4张参考图片';
+                    errorMsg.style.display = 'block';
+                    return;
+                }
+            }
+            
+            // 显示加载状态
+            loading.style.display = 'block';
+            submitBtn.disabled = true;
+            
+            try {
+                // 使用FormData上传文件
+                const formData = new FormData();
+                formData.append('generate_type', generateType);
+                formData.append('prompt', prompt);
+                formData.append('resolution', document.getElementById('resolution').value);
+                formData.append('ratio', document.getElementById('ratio').value);
+                formData.append('duration', document.getElementById('duration').value);
+                formData.append('seed', document.getElementById('seed').value);
+                formData.append('camera_fixed', document.getElementById('camera_fixed').value);
+                formData.append('watermark', document.getElementById('watermark').value);
+                formData.append('generate_audio', document.getElementById('generate_audio').value);
+                formData.append('return_last_frame', document.getElementById('return_last_frame').value);
+                
+                // 添加首帧图片（优先使用上传的文件，如果没有则使用URL）
+                if (generateType === 'first_frame') {
+                    const firstFrameFile = document.getElementById('firstFrameOnlyUpload').files[0];
+                    const firstFrameUrl = document.getElementById('firstFrameUrl').value.trim();
+                    if (firstFrameFile) {
+                        formData.append('first_frame', firstFrameFile);
+                    } else if (firstFrameUrl) {
+                        formData.append('first_frame_url', firstFrameUrl);
+                    }
+                } else if (generateType === 'first_last_frame') {
+                    const firstFrameFile = document.getElementById('firstFrameInPairUpload').files[0];
+                    const firstFrameUrl = document.getElementById('firstFrameInPairUrl').value.trim();
+                    if (firstFrameFile) {
+                        formData.append('first_frame', firstFrameFile);
+                    } else if (firstFrameUrl) {
+                        formData.append('first_frame_url', firstFrameUrl);
+                    }
+                }
+                
+                if (generateType === 'first_last_frame') {
+                    const lastFrameFile = document.getElementById('lastFrameUpload').files[0];
+                    const lastFrameUrl = document.getElementById('lastFrameUrl').value.trim();
+                    if (lastFrameFile) {
+                        formData.append('last_frame', lastFrameFile);
+                    } else if (lastFrameUrl) {
+                        formData.append('last_frame_url', lastFrameUrl);
+                    }
+                }
+                
+                if (generateType === 'reference_image') {
+                    // 添加多张参考图
+                    referenceImageList.forEach((img, index) => {
+                        if (img.source === 'upload' && img.file) {
+                            formData.append(`reference_image_${index}`, img.file);
+                        } else if (img.url) {
+                            formData.append(`reference_image_url_${index}`, img.url);
+                        }
+                    });
+                    formData.append('reference_image_count', referenceImageList.length);
+                }
+                
+                const response = await fetch('/api/video-generate', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                loading.style.display = 'none';
+                submitBtn.disabled = false;
+                
+                if (data.success) {
+                    successMsg.textContent = '视频生成任务创建成功！';
+                    successMsg.style.display = 'block';
+                    document.getElementById('taskId').textContent = data.task_id;
+                    resultSection.style.display = 'block';
+                    
+                    // 滚动到结果区域
+                    resultSection.scrollIntoView({ behavior: 'smooth' });
+                } else {
+                    errorMsg.textContent = data.error || '创建任务失败';
+                    errorMsg.style.display = 'block';
+                }
+            } catch (error) {
+                loading.style.display = 'none';
+                submitBtn.disabled = false;
+                errorMsg.textContent = '请求失败: ' + error.message;
+                errorMsg.style.display = 'block';
+            }
+        });
+    </script>
+    <script src="/static/sidebar-nav.js"></script>
+</body>
+</html>
