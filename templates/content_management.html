@@ -562,6 +562,12 @@
                 <div class="search-box">
                     <input type="text" id="searchInput" placeholder="搜索资源名称..." oninput="filterAssets()">
                 </div>
+                <div class="date-filter" style="display: flex; gap: 10px; align-items: center;">
+                    <input type="date" id="startDateFilter" placeholder="开始日期" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onchange="filterAssets()">
+                    <span>至</span>
+                    <input type="date" id="endDateFilter" placeholder="结束日期" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onchange="filterAssets()">
+                    <button class="btn btn-secondary" onclick="clearDateFilter()" style="padding: 8px 12px;">清除日期</button>
+                </div>
                 <button class="btn btn-primary" onclick="loadAssets()">🔄 刷新</button>
                 <!-- 图片库的"添加到"按钮 -->
                 <div id="addToLibraryButtons" style="display: none;">
@@ -772,6 +778,30 @@
                            👁️ 预览
                        </button>`;
                 
+                // 格式化时间显示
+                const createdAt = asset.created_at || '';
+                let timeDisplay = '';
+                if (createdAt) {
+                    try {
+                        const date = new Date(createdAt);
+                        if (!isNaN(date.getTime())) {
+                            timeDisplay = date.toLocaleString('zh-CN', {
+                                year: 'numeric',
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                            });
+                        } else {
+                            timeDisplay = createdAt;
+                        }
+                    } catch (e) {
+                        timeDisplay = createdAt;
+                    }
+                } else {
+                    timeDisplay = '-';
+                }
+                
                 card.innerHTML = `
                     <input type="checkbox" class="asset-checkbox" 
                            onchange="toggleSelection('${assetId}', this.checked)"
@@ -781,6 +811,7 @@
                     </div>
                     <div class="asset-info">
                         <div class="asset-name" title="${asset.filename}">${asset.filename}</div>
+                        <div class="asset-time" style="font-size: 0.85em; color: #666; margin-top: 4px;">${timeDisplay}</div>
                         <div class="asset-actions">
                             ${actionButton}
                             <button class="asset-btn asset-btn-delete" onclick="deleteAsset('${assetId}', '${asset.filename}')">
@@ -797,16 +828,52 @@
         // 过滤资源
         function filterAssets() {
             const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const startDate = document.getElementById('startDateFilter').value;
+            const endDate = document.getElementById('endDateFilter').value;
             
-            if (searchTerm) {
-                filteredAssets = allAssets.filter(asset => 
-                    asset.filename.toLowerCase().includes(searchTerm)
-                );
-            } else {
-                filteredAssets = [...allAssets];
-            }
+            filteredAssets = allAssets.filter(asset => {
+                // 名称过滤
+                if (searchTerm && !asset.filename.toLowerCase().includes(searchTerm)) {
+                    return false;
+                }
+                
+                // 日期过滤
+                if (startDate || endDate) {
+                    const createdAt = asset.created_at || '';
+                    if (!createdAt) {
+                        return false; // 如果没有创建时间，不显示
+                    }
+                    
+                    try {
+                        const assetDate = new Date(createdAt);
+                        if (isNaN(assetDate.getTime())) {
+                            return false; // 无效日期，不显示
+                        }
+                        
+                        const assetDateStr = assetDate.toISOString().split('T')[0];
+                        
+                        if (startDate && assetDateStr < startDate) {
+                            return false;
+                        }
+                        if (endDate && assetDateStr > endDate) {
+                            return false;
+                        }
+                    } catch (e) {
+                        return false; // 日期解析失败，不显示
+                    }
+                }
+                
+                return true;
+            });
             
             renderAssets();
+        }
+        
+        // 清除日期过滤
+        function clearDateFilter() {
+            document.getElementById('startDateFilter').value = '';
+            document.getElementById('endDateFilter').value = '';
+            filterAssets();
         }
         
         // 切换选择

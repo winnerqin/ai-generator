@@ -353,6 +353,8 @@
                     <option value="failed">失败</option>
                     <option value="cancelled">已取消</option>
                 </select>
+                <input type="date" id="startDate" placeholder="开始日期" style="width: 150px;" title="创建日期（开始）">
+                <input type="date" id="endDate" placeholder="结束日期" style="width: 150px;" title="创建日期（结束）">
                 <input type="number" id="pageSize" value="10" min="1" max="100" style="width: 100px;" placeholder="每页数量">
                 <button class="btn btn-primary" onclick="loadTasks()">🔍 查询</button>
                 <button class="btn btn-secondary" onclick="loadTasks()">🔄 刷新</button>
@@ -411,6 +413,8 @@
             try {
                 const taskId = document.getElementById('taskIdSearch').value.trim();
                 const status = document.getElementById('statusFilter').value;
+                const startDate = document.getElementById('startDate').value;
+                const endDate = document.getElementById('endDate').value;
                 const pageSize = parseInt(document.getElementById('pageSize').value) || 10;
                 
                 let url = `/api/video-tasks?page=${currentPage}&page_size=${pageSize}`;
@@ -419,6 +423,12 @@
                 }
                 if (status) {
                     url += `&status=${encodeURIComponent(status)}`;
+                }
+                if (startDate) {
+                    url += `&start_date=${encodeURIComponent(startDate)}`;
+                }
+                if (endDate) {
+                    url += `&end_date=${encodeURIComponent(endDate)}`;
                 }
                 
                 const response = await fetch(url);
@@ -461,15 +471,19 @@
                                 <th>任务ID</th>
                                 <th>状态</th>
                                 <th>提示词</th>
-                                <th>视频地址</th>
+                                <th>首尾帧</th>
+                                <th>分辨率</th>
+                                <th>视频比例</th>
+                                <th>视频长度</th>
+                                <th>种子数</th>
+                                <th>固定镜头</th>
+                                <th>水印</th>
+                                <th>包含声音</th>
+                                <th>返回尾帧</th>
+                                <th>视频URL</th>
                                 <th>Token</th>
                                 <th>创建时间</th>
                                 <th>更新时间</th>
-                                <th>分辨率</th>
-                                <th>视频比例</th>
-                                <th>种子数</th>
-                                <th>视频长度</th>
-                                <th>包含声音</th>
                                 <th>操作</th>
                             </tr>
                         </thead>
@@ -483,58 +497,91 @@
                     const taskId = task.task_id || task.id || '-';
                     const status = task.status || 'unknown';
                     
-                    // 从 content.video_url 获取视频URL
-                    const content = task.content || {};
-                    const videoUrl = content.video_url || '-';
+                    // 从服务器获取视频URL（优先使用task.video_url，否则从content中获取）
+                    const videoUrl = task.video_url || (task.content && task.content.video_url) || '-';
                     
-                    // 获取提示词 - 从 content 或 content.content 中提取
-                    let prompt = '-';
-                    if (content && Array.isArray(content.content)) {
-                        const textContent = content.content.find(item => item.type === 'text');
-                        if (textContent && textContent.text) {
-                            prompt = textContent.text;
+                    // 获取提示词（优先从task.prompt获取）
+                    let prompt = task.prompt || '-';
+                    if (prompt === '-' && task.content) {
+                        const content = task.content;
+                        if (content && Array.isArray(content.content)) {
+                            const textContent = content.content.find(item => item.type === 'text');
+                            if (textContent && textContent.text) {
+                                prompt = textContent.text;
+                            }
+                        } else if (Array.isArray(content)) {
+                            const textContent = content.find(item => item.type === 'text');
+                            if (textContent && textContent.text) {
+                                prompt = textContent.text;
+                            }
                         }
-                    } else if (task.content && Array.isArray(task.content)) {
-                        const textContent = task.content.find(item => item.type === 'text');
-                        if (textContent && textContent.text) {
-                            prompt = textContent.text;
-                        }
-                    } else if (task.prompt) {
-                        prompt = task.prompt;
                     }
                     // 限制提示词显示长度
                     const promptDisplay = prompt.length > 50 ? prompt.substring(0, 50) + '...' : prompt;
                     
-                    // 优先使用task.token字段（后端已提取），否则从usage中获取
-                    const tokens = task.token !== undefined ? task.token : (task.usage?.total_tokens || task.usage?.tokens || '-');
+                    // 获取首尾帧URL
+                    const firstFrameUrl = task.first_frame_url || null;
+                    const lastFrameUrl = task.last_frame_url || task.last_frame_image_url || null;
+                    
+                    // 构建首尾帧显示
+                    let framesDisplay = '-';
+                    if (firstFrameUrl || lastFrameUrl) {
+                        framesDisplay = '<div style="display: flex; gap: 5px; align-items: center;">';
+                        if (firstFrameUrl) {
+                            framesDisplay += `<img src="${firstFrameUrl}" alt="首帧" style="width: 60px; height: 40px; object-fit: cover; border-radius: 4px; cursor: pointer;" onclick="window.open('${firstFrameUrl}', '_blank')" title="首帧">`;
+                        }
+                        if (lastFrameUrl) {
+                            framesDisplay += `<img src="${lastFrameUrl}" alt="尾帧" style="width: 60px; height: 40px; object-fit: cover; border-radius: 4px; cursor: pointer;" onclick="window.open('${lastFrameUrl}', '_blank')" title="尾帧">`;
+                        }
+                        framesDisplay += '</div>';
+                    }
+                    
+                    // 从服务器获取token
+                    const tokens = task.token !== undefined ? task.token : (task.usage?.completion_tokens || task.usage?.total_tokens || '-');
+                    
+                    // 时间戳
                     const createdAt = task.created_at || task.created || 0;
                     const updatedAt = task.updated_at || task.updated || 0;
+                    
+                    // 所有生成参数（从任务对象中获取）
                     const resolution = task.resolution || '-';
                     const ratio = task.ratio || '-';
+                    const duration = task.duration !== undefined ? (task.duration + '秒') : '-';
                     const seed = task.seed !== undefined ? task.seed : '-';
-                    const duration = task.duration || '-';
+                    const cameraFixed = task.camera_fixed !== undefined ? (task.camera_fixed ? '是' : '否') : '-';
+                    const watermark = task.watermark !== undefined ? (task.watermark ? '是' : '否') : '-';
                     const generateAudio = task.generate_audio !== undefined ? (task.generate_audio ? '是' : '否') : '-';
+                    const returnLastFrame = task.return_last_frame !== undefined ? (task.return_last_frame ? '是' : '否') : '-';
+                    
+                    // 检查视频是否超过7天
+                    const isVideoOld = videoUrl !== '-' && createdAt && (Date.now() / 1000 - createdAt) > (7 * 24 * 60 * 60);
+                    const downloadBtnClass = isVideoOld ? 'btn btn-secondary action-btn' : 'btn btn-primary action-btn';
+                    const downloadBtnDisabled = isVideoOld ? 'disabled' : '';
+                    const downloadBtnText = isVideoOld ? '⬇️ 下载（已过期）' : '⬇️ 下载视频';
                     
                     tableHTML += `
                         <tr>
                             <td class="task-id">${taskId}</td>
                             <td>${formatStatus(status)}</td>
                             <td title="${prompt}">${promptDisplay}</td>
+                            <td>${framesDisplay}</td>
+                            <td>${resolution}</td>
+                            <td>${ratio}</td>
+                            <td>${duration}</td>
+                            <td>${seed}</td>
+                            <td>${cameraFixed}</td>
+                            <td>${watermark}</td>
+                            <td>${generateAudio}</td>
+                            <td>${returnLastFrame}</td>
                             <td class="video-url">
-                                ${videoUrl !== '-' ? `<button class="btn btn-primary action-btn" onclick="downloadVideo('${videoUrl}', '${taskId}')">⬇️ 下载视频</button>` : '-'}
+                                ${videoUrl !== '-' ? `<button class="${downloadBtnClass}" onclick="downloadVideo('${videoUrl}', '${taskId}')" ${downloadBtnDisabled}>${downloadBtnText}</button>` : '-'}
                             </td>
                             <td>${tokens}</td>
                             <td>${formatTime(createdAt)}</td>
                             <td>${formatTime(updatedAt)}</td>
-                            <td>${resolution}</td>
-                            <td>${ratio}</td>
-                            <td>${seed}</td>
-                            <td>${duration}秒</td>
-                            <td>${generateAudio}</td>
                             <td>
                                 ${videoUrl !== '-' ? `<button class="btn btn-primary action-btn" onclick="playVideo('${videoUrl.replace(/'/g, "\\'")}', '${taskId}')" style="margin-right: 5px;">▶️ 播放</button>` : ''}
-                                <button class="btn btn-info action-btn" onclick="regenerateVideo('${taskId}')" style="margin-right: 5px; background: #17a2b8; color: white;">🔄 重新生成</button>
-                                <button class="btn btn-danger action-btn" onclick="deleteTask('${taskId}')">🗑️ 删除</button>
+                                <button class="btn btn-info action-btn" onclick="regenerateVideo('${taskId}')" style="background: #17a2b8; color: white;">🔄 重新生成</button>
                             </td>
                         </tr>
                     `;
@@ -543,11 +590,15 @@
                 tableHTML += '</tbody></table>';
                 container.innerHTML = tableHTML;
                 
-                // 更新分页信息
-                document.getElementById('pageInfo').textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页（共 ${total} 条）`;
-                document.getElementById('pagination').style.display = 'flex';
-                document.getElementById('prevPage').disabled = currentPage <= 1;
-                document.getElementById('nextPage').disabled = currentPage >= totalPages;
+                // 更新分页信息（只有在记录大于10条时才显示分页）
+                if (total > 10) {
+                    document.getElementById('pageInfo').textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页（共 ${total} 条）`;
+                    document.getElementById('pagination').style.display = 'flex';
+                    document.getElementById('prevPage').disabled = currentPage <= 1;
+                    document.getElementById('nextPage').disabled = currentPage >= totalPages;
+                } else {
+                    document.getElementById('pagination').style.display = 'none';
+                }
                 
             } catch (error) {
                 container.innerHTML = '';

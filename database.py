@@ -152,6 +152,44 @@ def init_database():
         )
     ''')
     
+    # 创建视频任务表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS video_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            task_id TEXT UNIQUE NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'pending',
+            prompt TEXT,
+            generate_type TEXT,
+            resolution TEXT,
+            ratio TEXT,
+            duration INTEGER,
+            seed INTEGER,
+            camera_fixed INTEGER DEFAULT 0,
+            watermark INTEGER DEFAULT 0,
+            generate_audio INTEGER DEFAULT 0,
+            return_last_frame INTEGER DEFAULT 0,
+            first_frame_url TEXT,
+            last_frame_url TEXT,
+            reference_image_urls TEXT,
+            video_url TEXT,
+            last_frame_image_url TEXT,
+            token INTEGER,
+            usage TEXT,
+            content TEXT,
+            error_message TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
+    
+    # 创建索引以提高查询性能
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_user_id ON video_tasks(user_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_task_id ON video_tasks(task_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_status ON video_tasks(status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_created_at ON video_tasks(created_at)')
+    
     conn.commit()
     conn.close()
     print(f"数据库初始化完成: {DB_PATH}")
@@ -371,6 +409,151 @@ def get_video_by_task_id(user_id, task_id):
                 return asset
         except Exception:
             pass
+    conn.close()
+    return None
+
+def save_video_task(data):
+    """保存视频任务记录"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    local_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # 检查任务是否已存在
+    cursor.execute('SELECT id FROM video_tasks WHERE task_id = ?', (data.get('task_id'),))
+    existing = cursor.fetchone()
+    
+    if existing:
+        # 更新现有记录
+        cursor.execute('''
+            UPDATE video_tasks SET
+                updated_at = ?,
+                status = ?,
+                video_url = ?,
+                last_frame_image_url = ?,
+                token = ?,
+                usage = ?,
+                content = ?,
+                error_message = ?
+            WHERE task_id = ?
+        ''', (
+            local_time,
+            data.get('status', 'pending'),
+            data.get('video_url'),
+            data.get('last_frame_image_url'),
+            data.get('token'),
+            json.dumps(data.get('usage', {})) if data.get('usage') else None,
+            json.dumps(data.get('content', {})) if data.get('content') else None,
+            data.get('error_message'),
+            data.get('task_id')
+        ))
+        task_id = existing[0]
+    else:
+        # 插入新记录
+        cursor.execute('''
+            INSERT INTO video_tasks 
+            (user_id, task_id, created_at, updated_at, status, prompt, generate_type, resolution, ratio,
+             duration, seed, camera_fixed, watermark, generate_audio, return_last_frame,
+             first_frame_url, last_frame_url, reference_image_urls, video_url, last_frame_image_url,
+             token, usage, content, error_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            data.get('user_id'),
+            data.get('task_id'),
+            local_time,
+            local_time,
+            data.get('status', 'pending'),
+            data.get('prompt'),
+            data.get('generate_type'),
+            data.get('resolution'),
+            data.get('ratio'),
+            data.get('duration'),
+            data.get('seed'),
+            1 if data.get('camera_fixed') else 0,
+            1 if data.get('watermark') else 0,
+            1 if data.get('generate_audio') else 0,
+            1 if data.get('return_last_frame') else 0,
+            data.get('first_frame_url'),
+            data.get('last_frame_url'),
+            json.dumps(data.get('reference_image_urls', [])) if data.get('reference_image_urls') else None,
+            data.get('video_url'),
+            data.get('last_frame_image_url'),
+            data.get('token'),
+            json.dumps(data.get('usage', {})) if data.get('usage') else None,
+            json.dumps(data.get('content', {})) if data.get('content') else None,
+            data.get('error_message')
+        ))
+        task_id = cursor.lastrowid
+    
+    conn.commit()
+    conn.close()
+    return task_id
+
+def get_video_tasks(user_id, status=None, start_date=None, end_date=None, limit=100, offset=0):
+    """获取视频任务列表"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    query = 'SELECT * FROM video_tasks WHERE user_id = ?'
+    params = [user_id]
+    
+    if status:
+        query += ' AND status = ?'
+        params.append(status)
+    
+    if start_date:
+        query += ' AND created_at >= ?'
+        params.append(start_date)
+    
+    if end_date:
+        query += ' AND created_at <= ?'
+        params.append(end_date)
+    
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    params.extend([limit, offset])
+    
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    tasks = []
+    for row in rows:
+        task = dict(row)
+        # 解析JSON字段
+        try:
+            if task.get('reference_image_urls'):
+                task['reference_image_urls'] = json.loads(task['reference_image_urls'])
+            if task.get('usage'):
+                task['usage'] = json.loads(task['usage'])
+            if task.get('content'):
+                task['content'] = json.loads(task['content'])
+        except Exception:
+            pass
+        tasks.append(task)
+    
+    conn.close()
+    return tasks
+
+def get_video_task_by_id(task_id):
+    """根据任务ID获取视频任务"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM video_tasks WHERE task_id = ?', (task_id,))
+    row = cursor.fetchone()
+    if row:
+        task = dict(row)
+        # 解析JSON字段
+        try:
+            if task.get('reference_image_urls'):
+                task['reference_image_urls'] = json.loads(task['reference_image_urls'])
+            if task.get('usage'):
+                task['usage'] = json.loads(task['usage'])
+            if task.get('content'):
+                task['content'] = json.loads(task['content'])
+        except Exception:
+            pass
+        conn.close()
+        return task
     conn.close()
     return None
 

@@ -109,8 +109,12 @@ def log_response(endpoint, status, message=None):
 batch_progress = {}
 batch_progress_lock = threading.Lock()
 
+# 全局变量：存储正在上传的视频任务，防止重复上传
+video_uploading = {}
+video_upload_lock = threading.Lock()
+
 # 阿里云 OSS 上传支持
-def upload_to_aliyun_oss(file_path, user_id=None, is_sample=False):
+def upload_to_aliyun_oss(file_path, user_id=None, is_sample=False, is_video=False):
     """
     上传文件到阿里云 OSS（对象存储服务）
     需要配置以下环境变量：
@@ -123,6 +127,7 @@ def upload_to_aliyun_oss(file_path, user_id=None, is_sample=False):
         file_path: 本地文件路径
         user_id: 用户ID，用于隔离用户文件
         is_sample: 是否为示例图（示例图保存到sample/user_{user_id}/目录）
+        is_video: 是否为视频文件（视频保存到video_generator/user_{user_id}/目录）
     """
     try:
         import oss2
@@ -157,6 +162,9 @@ def upload_to_aliyun_oss(file_path, user_id=None, is_sample=False):
         if is_sample and user_id:
             # 示例图按用户隔离：sample/user_{user_id}/filename
             object_key = f"sample/user_{user_id}/{filename}"
+        elif is_video and user_id:
+            # 视频按用户隔离：video_generator/user_{user_id}/filename
+            object_key = f"video_generator/user_{user_id}/{filename}"
         else:
             # 生成的图片
             object_key = f"ai-images/{timestamp}/{filename}"
@@ -208,6 +216,59 @@ def get_oss_bucket():
         return bucket, oss_endpoint_full
     except:
         return None, None
+
+def safe_object_exists(bucket, object_key):
+    """
+    安全地检查OSS对象是否存在，捕获异常并返回布尔值
+    """
+    if not bucket:
+        return False
+    try:
+        return bucket.object_exists(object_key)
+    except Exception as e:
+        # 如果对象不存在，OSS会抛出异常，此时返回False
+        # 检查异常类型和内容
+        error_str = str(e)
+        error_repr = repr(e)
+        
+        # 检查是否是文件不存在的错误（NoSuchKey）
+        is_no_such_key = False
+        
+        # 方法1: 检查异常对象的属性（如果异常是对象）
+        if hasattr(e, 'code') and e.code == 'NoSuchKey':
+            is_no_such_key = True
+        elif hasattr(e, 'status') and e.status == 404:
+            is_no_such_key = True
+        elif hasattr(e, 'details'):
+            # 检查details属性（某些OSS SDK格式）
+            details = e.details
+            if isinstance(details, dict) and details.get('Code') == 'NoSuchKey':
+                is_no_such_key = True
+        
+        # 方法2: 检查异常字符串表示
+        if not is_no_such_key:
+            error_lower = error_str.lower()
+            if ('nosuchkey' in error_lower or 
+                '404' in error_str or 
+                'does not exist' in error_lower or
+                'the specified key does not exist' in error_lower):
+                is_no_such_key = True
+        
+        # 方法3: 检查异常字典表示（某些OSS SDK可能返回字典格式的异常）
+        if not is_no_such_key and isinstance(e, dict):
+            if e.get('Code') == 'NoSuchKey' or e.get('status') == 404:
+                is_no_such_key = True
+            elif 'details' in e and isinstance(e['details'], dict):
+                if e['details'].get('Code') == 'NoSuchKey':
+                    is_no_such_key = True
+        
+        if is_no_such_key:
+            # 文件不存在是正常情况，不需要记录日志
+            return False
+        
+        # 其他异常记录日志但返回False，避免影响主流程
+        log_operation('检查OSS对象存在性时出错', f'对象键: {object_key}, 错误: {error_str}', 'WARNING')
+        return False
 
 def list_sample_images_from_oss(user_id=None):
     """
@@ -1227,16 +1288,18 @@ def batch_generate():
 @app.route('/api/video-tasks', methods=['GET'])
 @login_required
 def api_video_tasks_list():
-    """查询视频任务列表"""
+    """查询视频任务列表 - 从服务器获取最新信息"""
     try:
         user_id = session.get('user_id')
         page = int(request.args.get('page', 1))
         page_size = int(request.args.get('page_size', 10))
         task_id = request.args.get('task_id', '').strip()
         status = request.args.get('status', '').strip() or None
+        start_date = request.args.get('start_date', '').strip() or None
+        end_date = request.args.get('end_date', '').strip() or None
         
         log_request('GET', '/api/video-tasks', user_id, 
-                   f'任务ID: {task_id}, 页码: {page}, 每页: {page_size}, 状态: {status}')
+                   f'任务ID: {task_id}, 页码: {page}, 每页: {page_size}, 状态: {status}, 开始日期: {start_date}, 结束日期: {end_date}')
         
         # 检查是否配置了 ARK_API_KEY
         ark_api_key = os.environ.get('ARK_API_KEY')
@@ -1251,9 +1314,10 @@ def api_video_tasks_list():
                 'message': '视频任务功能需要配置 ARK_API_KEY 环境变量'
             })
         
-        # 如果配置了 API Key，但 SDK 未安装
+        # 初始化客户端
         try:
             from volcenginesdkarkruntime import Ark
+            client = Ark(api_key=ark_api_key)
         except ImportError:
             return jsonify({
                 'success': True,
@@ -1265,196 +1329,48 @@ def api_video_tasks_list():
                 'message': '需要安装火山方舟 SDK: pip install volcenginesdkarkruntime'
             })
         
-        # 初始化客户端
-        client = Ark(api_key=ark_api_key)
-        
-        # 如果指定了任务ID，直接查询该任务
+        # 如果指定了任务ID，从服务器查询单个任务
         if task_id:
             try:
                 resp = client.content_generation.tasks.get(task_id=task_id)
                 resp_dict = convert_to_dict(resp)
-                
-                if not resp_dict:
+                if resp_dict:
+                    # 同步到数据库（如果不存在则保存，存在则更新）
+                    sync_task_to_database(resp_dict, user_id)
+                    # 转换为统一格式返回
+                    result_task = convert_api_task_to_unified_format(resp_dict, user_id)
                     return jsonify({
                         'success': True,
-                        'items': [],
-                        'tasks': [],
-                        'total': 0,
+                        'items': [result_task],
+                        'tasks': [result_task],
+                        'total': 1,
                         'page': 1,
                         'page_size': 1
                     })
-                
-                # 检查是否在7天内
-                created_at = resp_dict.get('created_at', 0)
-                seven_days_ago = int(time.time()) - (7 * 24 * 60 * 60)
-                if created_at and created_at < seven_days_ago:
+            except Exception as e:
+                log_operation('查询单个任务失败', f'用户ID: {user_id}, 任务ID: {task_id}, 错误: {str(e)}', 'WARNING')
+                # 如果API查询失败，尝试从数据库查询
+                db_task = database.get_video_task_by_id(task_id)
+                if db_task and db_task.get('user_id') == user_id:
+                    result_task = convert_db_task_to_api_format(db_task)
                     return jsonify({
                         'success': True,
-                        'items': [],
-                        'tasks': [],
-                        'total': 0,
+                        'items': [result_task],
+                        'tasks': [result_task],
+                        'total': 1,
                         'page': 1,
-                        'page_size': 1,
-                        'message': '该任务超过7天，不在查询范围内'
+                        'page_size': 1
                     })
-                
-                # 处理尾帧图像（如果任务已完成且包含尾帧图像）
-                status = resp_dict.get('status', '')
-                content = resp_dict.get('content', {})
-                task_id_str = resp_dict.get('task_id') or resp_dict.get('id', 'unknown')
-                
-                # 提取提示词 - 从content数组中查找type为text的项
-                prompt_text = None
-                
-                # 首先尝试从content字段提取
-                if isinstance(content, dict):
-                    # 检查是否有嵌套的content字段
-                    if 'content' in content:
-                        content_array = content.get('content', [])
-                        if isinstance(content_array, list):
-                            for item in content_array:
-                                if isinstance(item, dict) and item.get('type') == 'text':
-                                    prompt_text = item.get('text', '')
-                                    break
-                    # 检查content本身是否是数组
-                    elif isinstance(content, list):
-                        for item in content:
-                            if isinstance(item, dict) and item.get('type') == 'text':
-                                prompt_text = item.get('text', '')
-                                break
-                elif isinstance(content, list):
-                    # content直接是数组
-                    for item in content:
-                        if isinstance(item, dict) and item.get('type') == 'text':
-                            prompt_text = item.get('text', '')
-                            break
-                
-                # 如果还没找到，尝试从请求参数中获取（某些API可能将content作为请求参数返回）
-                if not prompt_text:
-                    # 检查是否有其他字段包含提示词
-                    if 'prompt' in resp_dict:
-                        prompt_text = resp_dict.get('prompt')
-                    elif 'input' in resp_dict:
-                        input_data = resp_dict.get('input', {})
-                        if isinstance(input_data, dict) and 'content' in input_data:
-                            content_array = input_data.get('content', [])
-                            if isinstance(content_array, list):
-                                for item in content_array:
-                                    if isinstance(item, dict) and item.get('type') == 'text':
-                                        prompt_text = item.get('text', '')
-                                        break
-                
-                # 将提示词添加到响应中
-                if prompt_text:
-                    resp_dict['prompt'] = prompt_text
-                else:
-                    # 如果仍然没有找到，设置为空字符串而不是None，避免前端显示问题
-                    resp_dict['prompt'] = ''
-                
-                # 提取usage中的total_tokens并记录到token字段
-                usage = resp_dict.get('usage', {})
-                if isinstance(usage, dict):
-                    total_tokens = usage.get('total_tokens')
-                    if total_tokens is not None:
-                        resp_dict['token'] = total_tokens
-                
-                if status == 'succeeded':
-                    # 处理视频上传到OSS并保存到视频库
-                    video_url = content.get('video_url')
-                    if video_url and video_url != '-':
-                        try:
-                            # 检查视频库中是否已有该任务的视频（避免重复上传）
-                            existing_video = database.get_video_by_task_id(user_id, task_id_str)
-                            if not existing_video:
-                                # 下载视频并上传到OSS
-                                import requests
-                                video_response = requests.get(video_url, timeout=60, stream=True)
-                                if video_response.status_code == 200:
-                                    # 使用iter_content处理大文件，避免内存溢出
-                                    video_data = b''
-                                    for chunk in video_response.iter_content(chunk_size=8192):
-                                        if chunk:
-                                            video_data += chunk
-                                    
-                                    # 上传到OSS
-                                    oss_enabled = os.environ.get('OSS_ENABLED', 'false').lower() == 'true'
-                                    if oss_enabled:
-                                        bucket, endpoint_full = get_oss_bucket()
-                                        if bucket:
-                                            object_key = f"video_generator/user_{user_id}/video_{task_id_str}.mp4"
-                                            bucket.put_object(object_key, video_data)
-                                            final_url = f"https://{endpoint_full}/{object_key}"
-                                            
-                                            # 保存到视频库
-                                            filename = f"video_{task_id_str}.mp4"
-                                            database.save_video_asset(user_id, filename, final_url, meta={'task_id': task_id_str, 'status': status})
-                                            log_operation('视频上传OSS并保存到库成功', f'用户ID: {user_id}, 任务ID: {task_id_str}, OSS URL: {final_url}')
-                                    else:
-                                        # 如果未启用OSS，直接保存原始URL到视频库
-                                        filename = f"video_{task_id_str}.mp4"
-                                        database.save_video_asset(user_id, filename, video_url, meta={'task_id': task_id_str, 'status': status})
-                                        log_operation('视频保存到库成功（未启用OSS）', f'用户ID: {user_id}, 任务ID: {task_id_str}, URL: {video_url}')
-                            else:
-                                # 如果已存在，更新content中的video_url为OSS URL
-                                content['video_url'] = existing_video['url']
-                                resp_dict['content'] = content
-                                log_operation('视频已存在于库中', f'用户ID: {user_id}, 任务ID: {task_id_str}, URL: {existing_video["url"]}')
-                        except Exception as e:
-                            log_operation('视频上传OSS失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 视频URL: {video_url}, 错误: {str(e)}', 'WARNING')
-                    
-                    # 处理尾帧图像（如果任务已完成且包含尾帧图像）
-                    last_frame_url = content.get('last_frame_image_url') or content.get('last_frame_url') or content.get('last_frame')
-                    if last_frame_url and last_frame_url != '-':
-                        try:
-                            # 检查是否已经保存过（避免重复保存）
-                            image_assets = database.get_image_assets(user_id, limit=1000)
-                            existing = any(
-                                asset.get('meta') and 
-                                isinstance(asset.get('meta'), dict) and 
-                                asset.get('meta').get('task_id') == task_id_str and 
-                                asset.get('meta').get('type') == 'video_last_frame'
-                                for asset in image_assets
-                            )
-                            
-                            if not existing:
-                                # 下载尾帧图像并上传到OSS
-                                import requests
-                                img_response = requests.get(last_frame_url, timeout=30)
-                                if img_response.status_code == 200:
-                                    img_data = img_response.content
-                                    
-                                    # 上传到OSS
-                                    oss_enabled = os.environ.get('OSS_ENABLED', 'false').lower() == 'true'
-                                    if oss_enabled:
-                                        bucket, endpoint_full = get_oss_bucket()
-                                        if bucket:
-                                            object_key = f"video_generator/user_{user_id}/last_frame_{task_id_str}.jpg"
-                                            bucket.put_object(object_key, img_data)
-                                            final_url = f"https://{endpoint_full}/{object_key}"
-                                            
-                                            # 保存到图片库
-                                            filename = f"last_frame_{task_id_str}.jpg"
-                                            database.save_image_asset(user_id, filename, final_url, meta={'task_id': task_id_str, 'type': 'video_last_frame'})
-                                            log_operation('尾帧图像保存成功', f'用户ID: {user_id}, 任务ID: {task_id_str}, URL: {final_url}')
-                        except Exception as e:
-                            log_operation('处理尾帧图像失败', f'用户ID: {user_id}, 任务ID: {task_id}, 错误: {str(e)}', 'WARNING')
-                
-                # 将单个任务转换为列表格式
-                tasks = [resp_dict]
-                
                 return jsonify({
                     'success': True,
-                    'items': tasks,
-                    'tasks': tasks,
-                    'total': len(tasks),
+                    'items': [],
+                    'tasks': [],
+                    'total': 0,
                     'page': 1,
                     'page_size': 1
                 })
-            except Exception as e:
-                log_operation('查询视频任务失败', f'用户ID: {user_id}, 任务ID: {task_id}, 错误: {str(e)}', 'ERROR')
-                return jsonify({'success': False, 'error': f'查询任务失败: {str(e)}'}), 500
         
-        # 查询任务列表
+        # 从服务器查询任务列表
         try:
             query_params = {
                 "page_size": page_size,
@@ -1469,182 +1385,125 @@ def api_video_tasks_list():
             resp = client.content_generation.tasks.list(**query_params)
             resp_dict = convert_to_dict(resp)
             
-            # 提取任务列表 - API返回结构为 {"total": 3, "items": [...]}
-            tasks = []
+            # 提取任务列表
+            api_tasks = []
             if isinstance(resp_dict, dict):
-                # 优先使用 items 字段（标准返回格式）
                 if 'items' in resp_dict and isinstance(resp_dict['items'], list):
-                    tasks = resp_dict['items']
+                    api_tasks = resp_dict['items']
                 else:
-                    # 尝试其他可能的字段名
                     for key in ['tasks', 'data', 'results', 'list', 'content']:
                         if key in resp_dict and isinstance(resp_dict[key], list):
-                            tasks = resp_dict[key]
+                            api_tasks = resp_dict[key]
                             break
-                    # 如果没找到，检查是否有直接包含列表的字段
-                    if not tasks:
+                    if not api_tasks:
                         for key, value in resp_dict.items():
                             if isinstance(value, list):
-                                tasks = value
+                                api_tasks = value
                                 break
             elif isinstance(resp_dict, list):
-                tasks = resp_dict
+                api_tasks = resp_dict
             
-            # 过滤7天内的任务，并处理尾帧图像
+            log_operation('从服务器查询任务', f'用户ID: {user_id}, 服务器返回任务数: {len(api_tasks)}')
+            print(f"[视频任务查询] 从服务器查询到 {len(api_tasks)} 个任务")
+            
+            # 过滤7天内的任务
             seven_days_ago = int(time.time()) - (7 * 24 * 60 * 60)
-            filtered_tasks = []
-            for task in tasks:
+            filtered_api_tasks = []
+            for task in api_tasks:
                 created_at = task.get('created_at', 0)
                 if created_at and created_at >= seven_days_ago:
-                    # 处理尾帧图像（如果任务已完成且包含尾帧图像）
-                    status = task.get('status', '')
-                    content = task.get('content', {})
-                    task_id_str = task.get('task_id') or task.get('id', 'unknown')
-                    
-                    # 提取提示词 - 从content数组中查找type为text的项
-                    prompt_text = None
-                    
-                    # 首先尝试从content字段提取
-                    if isinstance(content, dict):
-                        # 检查是否有嵌套的content字段
-                        if 'content' in content:
-                            content_array = content.get('content', [])
-                            if isinstance(content_array, list):
-                                for item in content_array:
-                                    if isinstance(item, dict) and item.get('type') == 'text':
-                                        prompt_text = item.get('text', '')
-                                        break
-                        # 检查content本身是否是数组（某些API可能直接返回数组）
-                        elif isinstance(content, list):
-                            for item in content:
-                                if isinstance(item, dict) and item.get('type') == 'text':
-                                    prompt_text = item.get('text', '')
-                                    break
-                    elif isinstance(content, list):
-                        # content直接是数组
-                        for item in content:
-                            if isinstance(item, dict) and item.get('type') == 'text':
-                                prompt_text = item.get('text', '')
-                                break
-                    
-                    # 如果还没找到，尝试从其他字段获取
-                    if not prompt_text:
-                        if 'prompt' in task:
-                            prompt_text = task.get('prompt')
-                        elif 'input' in task:
-                            input_data = task.get('input', {})
-                            if isinstance(input_data, dict) and 'content' in input_data:
-                                content_array = input_data.get('content', [])
-                                if isinstance(content_array, list):
-                                    for item in content_array:
-                                        if isinstance(item, dict) and item.get('type') == 'text':
-                                            prompt_text = item.get('text', '')
-                                            break
-                    
-                    # 将提示词添加到任务中
-                    if prompt_text:
-                        task['prompt'] = prompt_text
-                    else:
-                        # 如果仍然没有找到，设置为空字符串而不是None，避免前端显示问题
-                        task['prompt'] = ''
-                    
-                    # 提取usage中的total_tokens并记录到token字段
-                    usage = task.get('usage', {})
-                    if isinstance(usage, dict):
-                        total_tokens = usage.get('total_tokens')
-                        if total_tokens is not None:
-                            task['token'] = total_tokens
-                    
-                    # 处理视频上传到OSS并保存到视频库
-                    if status == 'succeeded':
-                        video_url = content.get('video_url')
-                        if video_url and video_url != '-':
-                            try:
-                                # 检查视频库中是否已有该任务的视频（避免重复上传）
-                                existing_video = database.get_video_by_task_id(user_id, task_id_str)
-                                if not existing_video:
-                                    # 下载视频并上传到OSS
-                                    import requests
-                                    video_response = requests.get(video_url, timeout=60, stream=True)
-                                    if video_response.status_code == 200:
-                                        # 使用iter_content处理大文件，避免内存溢出
-                                        video_data = b''
-                                        for chunk in video_response.iter_content(chunk_size=8192):
-                                            if chunk:
-                                                video_data += chunk
-                                        
-                                        # 上传到OSS
-                                        oss_enabled = os.environ.get('OSS_ENABLED', 'false').lower() == 'true'
-                                        if oss_enabled:
-                                            bucket, endpoint_full = get_oss_bucket()
-                                            if bucket:
-                                                object_key = f"video_generator/user_{user_id}/video_{task_id_str}.mp4"
-                                                bucket.put_object(object_key, video_data)
-                                                final_url = f"https://{endpoint_full}/{object_key}"
-                                                
-                                                # 保存到视频库
-                                                filename = f"video_{task_id_str}.mp4"
-                                                database.save_video_asset(user_id, filename, final_url, meta={'task_id': task_id_str, 'status': status})
-                                                log_operation('视频上传OSS并保存到库成功', f'用户ID: {user_id}, 任务ID: {task_id_str}, OSS URL: {final_url}')
-                                        else:
-                                            # 如果未启用OSS，直接保存原始URL到视频库
-                                            filename = f"video_{task_id_str}.mp4"
-                                            database.save_video_asset(user_id, filename, video_url, meta={'task_id': task_id_str, 'status': status})
-                                            log_operation('视频保存到库成功（未启用OSS）', f'用户ID: {user_id}, 任务ID: {task_id_str}, URL: {video_url}')
-                                else:
-                                    # 如果已存在，更新content中的video_url为OSS URL
-                                    content['video_url'] = existing_video['url']
-                                    task['content'] = content
-                                    log_operation('视频已存在于库中', f'用户ID: {user_id}, 任务ID: {task_id_str}, URL: {existing_video["url"]}')
-                            except Exception as e:
-                                log_operation('视频上传OSS失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 视频URL: {video_url}, 错误: {str(e)}', 'WARNING')
-                        
-                        # 处理尾帧图像（如果任务已完成且包含尾帧图像）
-                        last_frame_url = content.get('last_frame_image_url') or content.get('last_frame_url') or content.get('last_frame')
-                        if last_frame_url and last_frame_url != '-':
-                            # 检查是否已经保存过（避免重复保存）
-                            try:
-                                # 查询图片库中是否已有该任务的尾帧图像
-                                image_assets = database.get_image_assets(user_id, limit=1000)
-                                existing = any(
-                                    asset.get('meta') and 
-                                    isinstance(asset.get('meta'), dict) and 
-                                    asset.get('meta').get('task_id') == task_id_str and 
-                                    asset.get('meta').get('type') == 'video_last_frame'
-                                    for asset in image_assets
-                                )
-                                
-                                if not existing:
-                                    # 下载尾帧图像并上传到OSS
-                                    import requests
-                                    img_response = requests.get(last_frame_url, timeout=30)
-                                    if img_response.status_code == 200:
-                                        img_data = img_response.content
-                                        
-                                        # 上传到OSS
-                                        oss_enabled = os.environ.get('OSS_ENABLED', 'false').lower() == 'true'
-                                        if oss_enabled:
-                                            bucket, endpoint_full = get_oss_bucket()
-                                            if bucket:
-                                                object_key = f"video_generator/user_{user_id}/last_frame_{task_id_str}.jpg"
-                                                bucket.put_object(object_key, img_data)
-                                                final_url = f"https://{endpoint_full}/{object_key}"
-                                                
-                                                # 保存到图片库
-                                                filename = f"last_frame_{task_id_str}.jpg"
-                                                database.save_image_asset(user_id, filename, final_url, meta={'task_id': task_id_str, 'type': 'video_last_frame'})
-                                                log_operation('尾帧图像保存成功', f'用户ID: {user_id}, 任务ID: {task_id_str}, URL: {final_url}')
-                            except Exception as e:
-                                log_operation('处理尾帧图像失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
-                    
+                    filtered_api_tasks.append(task)
+            
+            # 同步所有任务到数据库（如果不存在则保存，存在则更新）
+            saved_count = 0
+            updated_count = 0
+            for api_task in filtered_api_tasks:
+                task_id_str = api_task.get('task_id') or api_task.get('id', 'unknown')
+                if task_id_str == 'unknown':
+                    continue
+                
+                db_task = database.get_video_task_by_id(task_id_str)
+                if not db_task:
+                    # 数据库无记录，保存到数据库
+                    task_data = convert_api_task_to_db_format(api_task, user_id)
+                    if task_data:
+                        try:
+                            database.save_video_task(task_data)
+                            saved_count += 1
+                            log_operation('从服务器保存任务到数据库', f'用户ID: {user_id}, 任务ID: {task_id_str}')
+                        except Exception as e:
+                            log_operation('保存任务到数据库失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
+                else:
+                    # 数据库已有记录，更新服务器最新信息
+                    sync_task_to_database(api_task, user_id)
+                    updated_count += 1
+            
+            print(f"[视频任务查询] 保存到数据库: {saved_count} 个, 更新: {updated_count} 个")
+            
+            # 将服务器返回的任务转换为统一格式（优先使用服务器数据）
+            tasks = []
+            for api_task in filtered_api_tasks:
+                try:
+                    unified_task = convert_api_task_to_unified_format(api_task, user_id)
+                    if unified_task:
+                        tasks.append(unified_task)
+                except Exception as e:
+                    log_operation('转换任务格式失败', f'用户ID: {user_id}, 任务ID: {api_task.get("task_id")}, 错误: {str(e)}', 'WARNING')
+            
+            # 应用日期过滤（如果指定了日期范围）
+            if start_date or end_date:
+                filtered_tasks = []
+                for task in tasks:
+                    created_at = task.get('created_at', 0)
+                    if created_at:
+                        created_date = datetime.fromtimestamp(created_at).strftime('%Y-%m-%d')
+                        if start_date and created_date < start_date:
+                            continue
+                        if end_date and created_date > end_date:
+                            continue
                     filtered_tasks.append(task)
+                tasks = filtered_tasks
             
-            tasks = filtered_tasks
+            # 应用状态过滤（如果指定了状态）
+            if status:
+                tasks = [t for t in tasks if t.get('status') == status]
             
-            # 获取总数（如果有）
-            total = resp_dict.get('total', len(tasks)) if isinstance(resp_dict, dict) else len(tasks)
+            # 分页处理
+            total = len(tasks)
+            start_idx = (page - 1) * page_size
+            end_idx = start_idx + page_size
+            paginated_tasks = tasks[start_idx:end_idx]
             
-            log_operation('查询视频任务列表成功', f'用户ID: {user_id}, 任务数: {len(tasks)}')
+            log_operation('查询视频任务列表成功', f'用户ID: {user_id}, 任务数: {len(paginated_tasks)}, 总数: {total}')
+            print(f"[视频任务查询] 最终返回任务数: {len(paginated_tasks)}, 总数: {total}")
+            
+            return jsonify({
+                'success': True,
+                'items': paginated_tasks,
+                'tasks': paginated_tasks,
+                'total': total,
+                'page': page,
+                'page_size': page_size
+            })
+            
+        except Exception as e:
+            log_operation('从服务器查询任务列表失败', f'用户ID: {user_id}, 错误: {str(e)}', 'WARNING')
+            import traceback
+            traceback.print_exc()
+            # 如果服务器查询失败，从数据库查询
+            offset = (page - 1) * page_size
+            db_tasks = database.get_video_tasks(user_id, status=status, start_date=start_date, end_date=end_date, limit=page_size, offset=offset)
+            tasks = []
+            for t in db_tasks:
+                try:
+                    converted_task = convert_db_task_to_api_format(t)
+                    if converted_task:
+                        tasks.append(converted_task)
+                except Exception as e:
+                    log_operation('转换任务格式失败', f'用户ID: {user_id}, 任务ID: {t.get("task_id")}, 错误: {str(e)}', 'WARNING')
+            
+            total_db_tasks = database.get_video_tasks(user_id, status=status, start_date=start_date, end_date=end_date, limit=10000, offset=0)
+            total = len(total_db_tasks)
             
             return jsonify({
                 'success': True,
@@ -1652,14 +1511,9 @@ def api_video_tasks_list():
                 'tasks': tasks,
                 'total': total,
                 'page': page,
-                'page_size': page_size
+                'page_size': page_size,
+                'message': '服务器查询失败，仅显示数据库中的任务'
             })
-            
-        except Exception as e:
-            log_operation('查询视频任务列表失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
-            import traceback
-            traceback.print_exc()
-            return jsonify({'success': False, 'error': f'查询任务列表失败: {str(e)}'}), 500
     
     except Exception as e:
         user_id = session.get('user_id')
@@ -1673,6 +1527,557 @@ def api_video_tasks_list():
             'tasks': [],
             'total': 0
         }), 500
+
+def sync_task_to_database(api_task, user_id):
+    """同步服务器任务到数据库"""
+    if not api_task:
+        return
+    
+    task_id_str = api_task.get('task_id') or api_task.get('id', 'unknown')
+    if task_id_str == 'unknown':
+        return
+    
+    # 检查数据库是否存在
+    db_task = database.get_video_task_by_id(task_id_str)
+    
+    # 从服务器获取最新信息
+    server_status = api_task.get('status', 'pending')
+    server_video_url = None
+    server_last_frame_url = None
+    server_token = None
+    server_usage = api_task.get('usage', {})
+    server_content = api_task.get('content', {})
+    
+    if isinstance(server_content, dict):
+        server_video_url = server_content.get('video_url')
+        server_last_frame_url = server_content.get('last_frame_image_url') or server_content.get('last_frame_url')
+    
+    if isinstance(server_usage, dict):
+        server_token = server_usage.get('completion_tokens') or server_usage.get('total_tokens')
+    
+    if not db_task:
+        # 数据库无记录，保存到数据库
+        task_data = convert_api_task_to_db_format(api_task, user_id)
+        if task_data:
+            try:
+                database.save_video_task(task_data)
+                log_operation('从服务器保存任务到数据库', f'用户ID: {user_id}, 任务ID: {task_id_str}')
+            except Exception as e:
+                log_operation('保存任务到数据库失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
+        
+        # 如果视频状态为succeeded且有video_url，自动下载并上传到OSS，保存到video_library
+        if server_status == 'succeeded' and server_video_url:
+            # 检查视频库中是否已存在该任务ID的视频
+            existing_video = database.get_video_by_task_id(user_id, task_id_str)
+            if not existing_video:
+                # 异步下载并上传视频到OSS
+                import threading
+                def download_and_upload_video():
+                    try:
+                        import requests
+                        import tempfile
+                        import os
+                        
+                        # 下载视频
+                        log_operation('开始下载视频', f'用户ID: {user_id}, 任务ID: {task_id_str}, URL: {server_video_url}')
+                        response = requests.get(server_video_url, timeout=300, stream=True)
+                        if response.status_code == 200:
+                            # 创建临时文件
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
+                                tmp_path = tmp_file.name
+                                for chunk in response.iter_content(chunk_size=8192):
+                                    tmp_file.write(chunk)
+                            
+                            # 上传到OSS
+                            oss_enabled = os.environ.get('OSS_ENDPOINT') and os.environ.get('OSS_ACCESS_KEY_ID')
+                            if oss_enabled:
+                                # 生成文件名
+                                filename = f"video_{task_id_str}.mp4"
+                                oss_url = upload_to_aliyun_oss(tmp_path, user_id=user_id, is_video=True)
+                                
+                                if oss_url:
+                                    # 保存到视频库
+                                    meta = {
+                                        'task_id': task_id_str,
+                                        'original_url': server_video_url,
+                                        'oss_url': oss_url
+                                    }
+                                    database.save_video_asset(user_id, filename, oss_url, meta)
+                                    log_operation('视频已同步到OSS和视频库', f'用户ID: {user_id}, 任务ID: {task_id_str}, OSS URL: {oss_url}')
+                                else:
+                                    # 如果OSS上传失败，使用原始URL保存到视频库
+                                    filename = f"video_{task_id_str}.mp4"
+                                    meta = {
+                                        'task_id': task_id_str,
+                                        'original_url': server_video_url
+                                    }
+                                    database.save_video_asset(user_id, filename, server_video_url, meta)
+                                    log_operation('视频已保存到视频库（OSS上传失败）', f'用户ID: {user_id}, 任务ID: {task_id_str}')
+                            else:
+                                # 如果没有配置OSS，直接使用原始URL保存到视频库
+                                filename = f"video_{task_id_str}.mp4"
+                                meta = {
+                                    'task_id': task_id_str,
+                                    'original_url': server_video_url
+                                }
+                                database.save_video_asset(user_id, filename, server_video_url, meta)
+                                log_operation('视频已保存到视频库', f'用户ID: {user_id}, 任务ID: {task_id_str}')
+                            
+                            # 删除临时文件
+                            try:
+                                os.unlink(tmp_path)
+                            except Exception:
+                                pass
+                        else:
+                            log_operation('下载视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP状态码: {response.status_code}', 'WARNING')
+                    except Exception as e:
+                        log_operation('下载并上传视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
+                        import traceback
+                        traceback.print_exc()
+                
+                # 在后台线程中执行下载和上传
+                thread = threading.Thread(target=download_and_upload_video)
+                thread.daemon = True
+                thread.start()
+    else:
+        # 数据库已有记录，更新服务器最新信息（任务ID、状态、token、URL）
+        update_data = {
+            'task_id': task_id_str,
+            'status': server_status,  # 使用服务器状态
+            'video_url': server_video_url,  # 使用服务器URL
+            'last_frame_image_url': server_last_frame_url,
+            'token': server_token,  # 使用服务器token
+            'usage': server_usage,
+            'content': server_content,
+            'error_message': api_task.get('error_message')
+        }
+        try:
+            database.save_video_task(update_data)
+        except Exception as e:
+            log_operation('更新任务到数据库失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
+    
+    # 如果视频状态为succeeded且有video_url，自动下载并上传到OSS，保存到video_library
+    if server_status == 'succeeded' and server_video_url:
+        log_operation('检测到视频生成成功', f'用户ID: {user_id}, 任务ID: {task_id_str}, 视频URL: {server_video_url}')
+        # 检查视频库中是否已存在该任务ID的视频
+        existing_video = database.get_video_by_task_id(user_id, task_id_str)
+        if not existing_video:
+            log_operation('视频库中不存在该视频，开始下载并上传', f'用户ID: {user_id}, 任务ID: {task_id_str}')
+            # 异步下载并上传视频到OSS
+            import threading
+            def download_and_upload_video():
+                try:
+                    import requests
+                    import tempfile
+                    import os
+                    
+                    # 下载视频
+                    log_operation('开始下载视频', f'用户ID: {user_id}, 任务ID: {task_id_str}, URL: {server_video_url}')
+                    response = requests.get(server_video_url, timeout=300, stream=True)
+                    if response.status_code == 200:
+                        # 创建临时文件
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
+                            tmp_path = tmp_file.name
+                            for chunk in response.iter_content(chunk_size=8192):
+                                tmp_file.write(chunk)
+                        
+                        # 上传到OSS
+                        oss_enabled = os.environ.get('OSS_ENDPOINT') and os.environ.get('OSS_ACCESS_KEY_ID')
+                        log_operation('检查OSS配置', f'用户ID: {user_id}, 任务ID: {task_id_str}, OSS已启用: {oss_enabled}')
+                        if oss_enabled:
+                            # 生成文件名
+                            filename = f"video_{task_id_str}.mp4"
+                            log_operation('开始上传视频到OSS', f'用户ID: {user_id}, 任务ID: {task_id_str}, 文件路径: {tmp_path}')
+                            oss_url = upload_to_aliyun_oss(tmp_path, user_id=user_id, is_video=True)
+                            
+                            if oss_url:
+                                # 保存到视频库
+                                meta = {
+                                    'task_id': task_id_str,
+                                    'original_url': server_video_url,
+                                    'oss_url': oss_url
+                                }
+                                database.save_video_asset(user_id, filename, oss_url, meta)
+                                log_operation('视频已同步到OSS和视频库', f'用户ID: {user_id}, 任务ID: {task_id_str}, OSS URL: {oss_url}')
+                                print(f"[视频同步] 成功: 任务ID={task_id_str}, OSS URL={oss_url}")
+                            else:
+                                # 如果OSS上传失败，使用原始URL保存到视频库
+                                filename = f"video_{task_id_str}.mp4"
+                                meta = {
+                                    'task_id': task_id_str,
+                                    'original_url': server_video_url
+                                }
+                                database.save_video_asset(user_id, filename, server_video_url, meta)
+                                log_operation('视频已保存到视频库（OSS上传失败）', f'用户ID: {user_id}, 任务ID: {task_id_str}', 'WARNING')
+                                print(f"[视频同步] OSS上传失败: 任务ID={task_id_str}, 使用原始URL")
+                        else:
+                            # 如果没有配置OSS，直接使用原始URL保存到视频库
+                            filename = f"video_{task_id_str}.mp4"
+                            meta = {
+                                'task_id': task_id_str,
+                                'original_url': server_video_url
+                            }
+                            database.save_video_asset(user_id, filename, server_video_url, meta)
+                            log_operation('视频已保存到视频库（未配置OSS）', f'用户ID: {user_id}, 任务ID: {task_id_str}')
+                            print(f"[视频同步] 未配置OSS: 任务ID={task_id_str}, 使用原始URL")
+                        
+                        # 删除临时文件
+                        try:
+                            os.unlink(tmp_path)
+                        except Exception:
+                            pass
+                    else:
+                        log_operation('下载视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP状态码: {response.status_code}', 'WARNING')
+                except Exception as e:
+                    log_operation('下载并上传视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
+                    import traceback
+                    traceback.print_exc()
+            
+            # 在后台线程中执行下载和上传
+            thread = threading.Thread(target=download_and_upload_video)
+            thread.daemon = True
+            thread.start()
+
+def convert_api_task_to_unified_format(api_task, user_id):
+    """将API任务转换为统一格式，包含所有生成参数和服务器信息"""
+    if not api_task:
+        return None
+    
+    task_id_str = api_task.get('task_id') or api_task.get('id', 'unknown')
+    if task_id_str == 'unknown':
+        return None
+    
+    # 从服务器获取最新信息
+    server_status = api_task.get('status', 'pending')
+    server_content = api_task.get('content', {})
+    server_usage = api_task.get('usage', {})
+    
+    # 提取视频URL
+    video_url = None
+    last_frame_image_url = None
+    if isinstance(server_content, dict):
+        video_url = server_content.get('video_url')
+        last_frame_image_url = server_content.get('last_frame_image_url') or server_content.get('last_frame_url')
+    
+    # 提取token
+    token = None
+    if isinstance(server_usage, dict):
+        token = server_usage.get('completion_tokens') or server_usage.get('total_tokens')
+    
+    # 提取提示词
+    prompt_text = None
+    if isinstance(server_content, dict):
+        if 'content' in server_content:
+            content_array = server_content.get('content', [])
+            if isinstance(content_array, list):
+                for item in content_array:
+                    if isinstance(item, dict) and item.get('type') == 'text':
+                        prompt_text = item.get('text', '')
+                        break
+        elif isinstance(server_content, list):
+            for item in server_content:
+                if isinstance(item, dict) and item.get('type') == 'text':
+                    prompt_text = item.get('text', '')
+                    break
+    elif isinstance(server_content, list):
+        for item in server_content:
+            if isinstance(item, dict) and item.get('type') == 'text':
+                prompt_text = item.get('text', '')
+                break
+    
+    if not prompt_text:
+        if 'prompt' in api_task:
+            prompt_text = api_task.get('prompt')
+    
+    # 从数据库获取生成参数（如果存在）
+    db_task = database.get_video_task_by_id(task_id_str)
+    
+    # 构建统一格式的任务对象
+    unified_task = {
+        # 服务器信息（优先）
+        'task_id': task_id_str,
+        'id': task_id_str,
+        'status': server_status,  # 从服务器获取
+        'token': token,  # 从服务器获取
+        'created_at': api_task.get('created_at', int(time.time())),
+        'updated_at': api_task.get('updated_at', api_task.get('created_at', int(time.time()))),
+        
+        # 视频URL（从服务器获取）
+        'video_url': video_url,
+        'last_frame_image_url': last_frame_image_url,
+        
+        # 提示词
+        'prompt': prompt_text or '',
+        
+        # 生成参数（从数据库获取，如果不存在则从API推断）
+        'generate_type': None,
+        'resolution': None,
+        'ratio': None,
+        'duration': None,
+        'seed': None,
+        'camera_fixed': False,
+        'watermark': False,
+        'generate_audio': False,
+        'return_last_frame': False,
+        'first_frame_url': None,
+        'last_frame_url': None,
+        'reference_image_urls': [],
+        
+        # 其他信息
+        'usage': server_usage,
+        'content': server_content,
+        'error_message': api_task.get('error_message')
+    }
+    
+    # 如果数据库中有记录，使用数据库中的生成参数和提示词
+    if db_task:
+        # 优先使用数据库中的提示词
+        if db_task.get('prompt'):
+            unified_task['prompt'] = db_task.get('prompt')
+        unified_task['generate_type'] = db_task.get('generate_type')
+        unified_task['resolution'] = db_task.get('resolution')
+        unified_task['ratio'] = db_task.get('ratio')
+        unified_task['duration'] = db_task.get('duration')
+        unified_task['seed'] = db_task.get('seed')
+        unified_task['camera_fixed'] = bool(db_task.get('camera_fixed', 0))
+        unified_task['watermark'] = bool(db_task.get('watermark', 0))
+        unified_task['generate_audio'] = bool(db_task.get('generate_audio', 0))
+        unified_task['return_last_frame'] = bool(db_task.get('return_last_frame', 0))
+        unified_task['first_frame_url'] = db_task.get('first_frame_url')
+        unified_task['last_frame_url'] = db_task.get('last_frame_url')
+        unified_task['reference_image_urls'] = db_task.get('reference_image_urls', [])
+    else:
+        # 从API任务中推断生成参数
+        if isinstance(server_content, dict) and 'content' in server_content:
+            content_array = server_content.get('content', [])
+            if isinstance(content_array, list):
+                for item in content_array:
+                    if isinstance(item, dict) and item.get('type') == 'image_url':
+                        image_url = item.get('image_url', {}).get('url') if isinstance(item.get('image_url'), dict) else item.get('image_url')
+                        role = item.get('role', '')
+                        if role == 'first_frame':
+                            unified_task['first_frame_url'] = image_url
+                            unified_task['generate_type'] = 'first_frame'
+                        elif role == 'last_frame':
+                            unified_task['last_frame_url'] = image_url
+                            unified_task['generate_type'] = 'first_last_frame'
+                        elif role == 'reference_image':
+                            if not unified_task['reference_image_urls']:
+                                unified_task['reference_image_urls'] = []
+                            unified_task['reference_image_urls'].append(image_url)
+                            unified_task['generate_type'] = 'reference_image'
+        
+        # 从API任务中获取其他参数
+        unified_task['resolution'] = api_task.get('resolution')
+        unified_task['ratio'] = api_task.get('ratio')
+        unified_task['duration'] = api_task.get('duration')
+        unified_task['seed'] = api_task.get('seed')
+        unified_task['camera_fixed'] = api_task.get('camera_fixed', False)
+        unified_task['watermark'] = api_task.get('watermark', False)
+        unified_task['generate_audio'] = api_task.get('generate_audio', False)
+        unified_task['return_last_frame'] = api_task.get('return_last_frame', False)
+        
+        if not unified_task['generate_type']:
+            unified_task['generate_type'] = 'text'
+    
+    # 设置content中的video_url（用于前端兼容）
+    if isinstance(unified_task.get('content'), dict):
+        if video_url:
+            unified_task['content']['video_url'] = video_url
+        if last_frame_image_url:
+            unified_task['content']['last_frame_image_url'] = last_frame_image_url
+    
+    return unified_task
+
+def safe_parse_timestamp(date_str):
+    """安全地解析时间戳字符串"""
+    if not date_str:
+        return int(time.time())
+    try:
+        # 尝试多种日期格式
+        for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%f']:
+            try:
+                return int(datetime.strptime(date_str, fmt).timestamp())
+            except ValueError:
+                continue
+        # 如果都失败，返回当前时间戳
+        return int(time.time())
+    except Exception:
+        return int(time.time())
+
+def convert_api_task_to_db_format(api_task, user_id):
+    """将API返回的任务格式转换为数据库格式"""
+    if not api_task:
+        return None
+    
+    task_id_str = api_task.get('task_id') or api_task.get('id', 'unknown')
+    if task_id_str == 'unknown':
+        return None
+    
+    # 提取提示词
+    prompt_text = None
+    content = api_task.get('content', {})
+    
+    # 从content数组中查找type为text的项
+    if isinstance(content, dict):
+        if 'content' in content:
+            content_array = content.get('content', [])
+            if isinstance(content_array, list):
+                for item in content_array:
+                    if isinstance(item, dict) and item.get('type') == 'text':
+                        prompt_text = item.get('text', '')
+                        break
+        elif isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict) and item.get('type') == 'text':
+                    prompt_text = item.get('text', '')
+                    break
+    elif isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict) and item.get('type') == 'text':
+                prompt_text = item.get('text', '')
+                break
+    
+    # 如果没有找到，尝试从其他字段获取
+    if not prompt_text:
+        if 'prompt' in api_task:
+            prompt_text = api_task.get('prompt')
+        elif 'input' in api_task:
+            input_data = api_task.get('input', {})
+            if isinstance(input_data, dict) and 'content' in input_data:
+                content_array = input_data.get('content', [])
+                if isinstance(content_array, list):
+                    for item in content_array:
+                        if isinstance(item, dict) and item.get('type') == 'text':
+                            prompt_text = item.get('text', '')
+                            break
+    
+    # 提取生成参数（从content或其他字段）
+    generate_type = None
+    resolution = None
+    ratio = None
+    duration = None
+    seed = None
+    camera_fixed = False
+    watermark = False
+    generate_audio = False
+    return_last_frame = False
+    first_frame_url = None
+    last_frame_url = None
+    reference_image_urls = []
+    
+    # 尝试从content中提取参数
+    if isinstance(content, dict):
+        # 检查是否有模型信息或其他参数
+        if 'model' in api_task:
+            model = api_task.get('model', '')
+            if 'lite' in model.lower():
+                generate_type = 'reference_image'
+            elif 'pro' in model.lower():
+                generate_type = 'text'  # 默认类型
+        
+        # 从content中提取图片URL
+        if isinstance(content, dict) and 'content' in content:
+            content_array = content.get('content', [])
+            if isinstance(content_array, list):
+                for item in content_array:
+                    if isinstance(item, dict):
+                        if item.get('type') == 'image_url':
+                            image_url = item.get('image_url', {}).get('url') if isinstance(item.get('image_url'), dict) else item.get('image_url')
+                            role = item.get('role', '')
+                            if role == 'first_frame':
+                                first_frame_url = image_url
+                                if not generate_type:
+                                    generate_type = 'first_frame'
+                            elif role == 'last_frame':
+                                last_frame_url = image_url
+                                if not generate_type:
+                                    generate_type = 'first_last_frame'
+                            elif role == 'reference_image':
+                                reference_image_urls.append(image_url)
+                                if not generate_type:
+                                    generate_type = 'reference_image'
+    
+    # 从API任务中提取参数（如果存在）
+    # 注意：API返回的任务可能没有这些参数，所以允许为None
+    api_resolution = api_task.get('resolution')
+    api_ratio = api_task.get('ratio')
+    api_duration = api_task.get('duration')
+    api_seed = api_task.get('seed')
+    api_camera_fixed = api_task.get('camera_fixed')
+    api_watermark = api_task.get('watermark')
+    api_generate_audio = api_task.get('generate_audio')
+    api_return_last_frame = api_task.get('return_last_frame')
+    
+    # 构建数据库格式的任务数据
+    task_data = {
+        'user_id': user_id,
+        'task_id': task_id_str,
+        'status': api_task.get('status', 'pending'),
+        'prompt': prompt_text or '',
+        'generate_type': generate_type or 'text',  # 默认为text
+        'resolution': api_resolution or resolution,
+        'ratio': api_ratio or ratio,
+        'duration': api_duration or duration,
+        'seed': api_seed if api_seed is not None else seed,
+        'camera_fixed': api_camera_fixed if api_camera_fixed is not None else camera_fixed,
+        'watermark': api_watermark if api_watermark is not None else watermark,
+        'generate_audio': api_generate_audio if api_generate_audio is not None else generate_audio,
+        'return_last_frame': api_return_last_frame if api_return_last_frame is not None else return_last_frame,
+        'first_frame_url': first_frame_url,
+        'last_frame_url': last_frame_url,
+        'reference_image_urls': reference_image_urls if reference_image_urls else None,
+        'video_url': content.get('video_url') if isinstance(content, dict) else None,
+        'last_frame_image_url': content.get('last_frame_image_url') or content.get('last_frame_url') if isinstance(content, dict) else None,
+        'token': api_task.get('usage', {}).get('completion_tokens') or api_task.get('usage', {}).get('total_tokens') if isinstance(api_task.get('usage'), dict) else None,
+        'usage': api_task.get('usage'),
+        'content': content,
+        'error_message': api_task.get('error_message')
+    }
+    
+    return task_data
+
+def convert_db_task_to_api_format(db_task):
+    """将数据库任务格式转换为API格式"""
+    if not db_task:
+        return None
+    
+    # 构建API格式的任务对象
+    task = {
+        'task_id': db_task.get('task_id'),
+        'id': db_task.get('task_id'),
+        'status': db_task.get('status', 'pending'),
+        'prompt': db_task.get('prompt', ''),
+        'created_at': safe_parse_timestamp(db_task.get('created_at')),
+        'updated_at': safe_parse_timestamp(db_task.get('updated_at') or db_task.get('created_at')),
+        'token': db_task.get('token'),
+        'usage': db_task.get('usage', {}),
+        'content': db_task.get('content', {}),
+        # 添加所有生成参数
+        'generate_type': db_task.get('generate_type'),
+        'resolution': db_task.get('resolution'),
+        'ratio': db_task.get('ratio'),
+        'duration': db_task.get('duration'),
+        'seed': db_task.get('seed'),
+        'camera_fixed': bool(db_task.get('camera_fixed', 0)),
+        'watermark': bool(db_task.get('watermark', 0)),
+        'generate_audio': bool(db_task.get('generate_audio', 0)),
+        'return_last_frame': bool(db_task.get('return_last_frame', 0)),
+        'first_frame_url': db_task.get('first_frame_url'),
+        'last_frame_url': db_task.get('last_frame_url'),
+        'reference_image_urls': db_task.get('reference_image_urls', [])
+    }
+    
+    # 设置content中的video_url
+    content = task.get('content', {})
+    if isinstance(content, dict):
+        if db_task.get('video_url'):
+            content['video_url'] = db_task.get('video_url')
+        if db_task.get('last_frame_image_url'):
+            content['last_frame_image_url'] = db_task.get('last_frame_image_url')
+        task['content'] = content
+    
+    return task
 
 @app.route('/api/video-tasks/<task_id>', methods=['DELETE'])
 @login_required
@@ -1726,10 +2131,7 @@ def api_video_task_delete(task_id):
         log_operation('删除视频任务异常', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
         import traceback
         traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/video-generate', methods=['POST'])
 @login_required
@@ -1949,6 +2351,41 @@ def api_video_generate():
             if not task_id:
                 log_operation('视频生成失败', f'用户ID: {user_id}, 无法获取任务ID', 'ERROR')
                 return jsonify({'success': False, 'error': '创建任务失败，无法获取任务ID'}), 500
+            
+            # 保存任务记录到本地数据库
+            try:
+                task_data = {
+                    'user_id': user_id,
+                    'task_id': task_id,
+                    'status': resp_dict.get('status', 'pending'),
+                    'prompt': prompt,
+                    'generate_type': generate_type,
+                    'resolution': resolution,
+                    'ratio': ratio,
+                    'duration': duration,
+                    'seed': seed,
+                    'camera_fixed': camera_fixed,
+                    'watermark': watermark,
+                    'generate_audio': generate_audio,
+                    'return_last_frame': return_last_frame,
+                    'first_frame_url': first_frame_url,
+                    'last_frame_url': last_frame_url,
+                    'reference_image_urls': reference_image_urls if reference_image_urls else None,
+                    'video_url': None,
+                    'last_frame_image_url': None,
+                    'token': None,
+                    'usage': resp_dict.get('usage'),
+                    'content': resp_dict.get('content'),
+                    'error_message': None
+                }
+                task_db_id = database.save_video_task(task_data)
+                log_operation('视频任务记录已保存', f'用户ID: {user_id}, 任务ID: {task_id}, 数据库ID: {task_db_id}')
+                print(f"[视频任务] 任务已保存到数据库: task_id={task_id}, db_id={task_db_id}, status={task_data.get('status')}")
+            except Exception as db_err:
+                log_operation('保存视频任务记录失败', f'用户ID: {user_id}, 任务ID: {task_id}, 错误: {str(db_err)}', 'ERROR')
+                import traceback
+                traceback.print_exc()
+                print(f"[视频任务] 保存失败: {str(db_err)}")
             
             log_operation('视频生成任务创建成功', f'用户ID: {user_id}, 任务ID: {task_id}')
             
