@@ -29,9 +29,9 @@
         }
         
         .content {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
             padding: 20px;
         }
         
@@ -75,6 +75,11 @@
             min-height: 100px;
             resize: vertical;
             font-family: inherit;
+        }
+        
+        /* 提示词输入框拉宽 */
+        #prompt {
+            width: 100%;
         }
         
         .upload-area {
@@ -214,19 +219,29 @@
         
         .result-images {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fill, 200px);
+            gap: 15px;
+            margin-top: 20px;
         }
         
         .result-image {
-            border-radius: 12px;
+            width: 200px;
+            border-radius: 8px;
             overflow: hidden;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            transition: transform 0.3s;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: all 0.3s;
+            position: relative;
+            cursor: pointer;
         }
         
         .result-image:hover {
-            transform: scale(1.05);
+            transform: scale(1.02);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        
+        .result-image.selected {
+            border: 3px solid #28a745;
+            box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.3);
         }
         
         .result-image img {
@@ -240,6 +255,78 @@
         .result-image img:hover {
             opacity: 0.9;
         }
+        
+        /* 占位符样式 */
+        .result-image.placeholder {
+            background: #f0f0f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 200px;
+        }
+        
+        .image-placeholder {
+            text-align: center;
+            color: #666;
+        }
+        
+        .image-placeholder .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #28a745;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        .image-placeholder p {
+            margin: 0;
+            font-size: 0.9em;
+        }
+        
+        /* 图片选择复选框 */
+        .result-image-checkbox {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            width: 24px;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.9);
+            border: 2px solid #28a745;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            transition: all 0.3s;
+        }
+        
+        .result-image-checkbox.checked {
+            background: #28a745;
+            color: white;
+        }
+        
+        .result-image-checkbox.checked::after {
+            content: '✓';
+            font-size: 16px;
+            font-weight: bold;
+        }
+        
+        /* 图片操作按钮区域 */
+        .result-image-actions {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+            padding: 10px;
+            display: none;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        
         
         /* 图片放大模态框 */
         .image-modal {
@@ -625,6 +712,25 @@
                         <textarea id="prompt" name="prompt" placeholder="描述你想要生成的图片..." required></textarea>
                     </div>
                     
+                    <!-- 生成的图片显示区域 -->
+                    <div class="result-section" id="resultSection" style="display: none;">
+                        <div class="loading" id="loading">
+                            <div class="spinner"></div>
+                            <p>正在生成图片，请稍候...</p>
+                        </div>
+                        <!-- 批量操作按钮区域 -->
+                        <div class="batch-actions" id="batchActions" style="display: none; margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 8px;">
+                            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                <span style="font-weight: 600; color: #333;">已选择 <span id="selectedCount">0</span> 张图片：</span>
+                                <button class="btn btn-primary" onclick="batchAddToPersonLibrary()">➕ 批量添加到人物库</button>
+                                <button class="btn btn-primary" onclick="batchAddToSceneLibrary()">➕ 批量添加到场景库</button>
+                                <button class="btn" style="background: #dc3545; color: white;" onclick="batchDeleteImages()">🗑️ 批量删除</button>
+                                <button class="btn" onclick="clearSelection()">取消选择</button>
+                            </div>
+                        </div>
+                        <div class="result-images" id="resultImages"></div>
+                    </div>
+                    
                     <div class="sample-images-section">
                         <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
                             <div class="sample-images-title">🖼️ 选择示例图片（从OSS）</div>
@@ -647,7 +753,7 @@
                         <div class="upload-area" onclick="document.getElementById('imageUpload').click()">
                             <div class="upload-icon">📁</div>
                             <p>点击上传或拖拽图片到这里</p>
-                            <p style="font-size: 0.9em; color: #666; margin-top: 5px;">支持 JPG, PNG 格式</p>
+                            <p style="font-size: 0.9em; color: #666; margin-top: 5px;">支持 JPG, PNG 格式，可一次选择多张图片</p>
                             <input type="file" id="imageUpload" name="images" multiple accept="image/*" onchange="handleFileSelect(event)">
                         </div>
                         <div class="preview-images" id="previewImages"></div>
@@ -657,13 +763,13 @@
                         <div class="form-group">
                             <label for="aspect_ratio">图片比例</label>
                             <select id="aspect_ratio" name="aspect_ratio">
+                                <option value="9:16" selected>9:16 (手机屏)</option>
                                 <option value="1:1">1:1 (正方形)</option>
                                 <option value="2:3">2:3 (竖屏)</option>
                                 <option value="3:2">3:2 (横屏)</option>
                                 <option value="3:4">3:4 (竖屏)</option>
                                 <option value="4:3">4:3 (横屏)</option>
                                 <option value="16:9">16:9 (宽屏)</option>
-                                <option value="9:16">9:16 (手机屏)</option>
                             </select>
                         </div>
                         
@@ -678,15 +784,30 @@
                     
                     <div class="form-row">
                         <div class="form-group">
-                            <label for="num_images">生成数量（>1 时生成组图）</label>
-                            <input type="number" id="num_images" name="num_images" value="1" min="1" max="15">
+                            <label for="generate_mode">生图模式</label>
+                            <select id="generate_mode" name="generate_mode">
+                                <option value="single" selected>单图</option>
+                                <option value="group">组图</option>
+                            </select>
                         </div>
                         
+                        <div class="form-group">
+                            <label for="num_images">生成数量</label>
+                            <input type="number" id="num_images" name="num_images" value="4" min="1" max="20">
+                            <small style="color: #666; font-size: 0.85em;">单图模式：生成单图数量；组图模式：生成组数</small>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
                         <div class="form-group">
                             <label for="image_style">图片风格</label>
                             <select id="image_style" name="image_style">
                                 <option value="">无（使用默认风格）</option>
                             </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <!-- 占位，保持布局 -->
                         </div>
                     </div>
                     
@@ -716,14 +837,6 @@
                 </form>
             </div>
             
-            <div class="result-section">
-                <div class="loading" id="loading">
-                    <div class="spinner"></div>
-                    <p>正在生成图片，请稍候...</p>
-                </div>
-                
-                <div class="result-images" id="resultImages"></div>
-            </div>
         </div>
     </div>
     
@@ -803,7 +916,7 @@
                 if (saved) {
                     const formData = JSON.parse(saved);
                     document.getElementById('prompt').value = formData.prompt || '';
-                    document.getElementById('aspect_ratio').value = formData.aspect_ratio || '1:1';
+                    document.getElementById('aspect_ratio').value = formData.aspect_ratio || '9:16';
                     document.getElementById('resolution').value = formData.resolution || '2k';
                     document.getElementById('num_images').value = formData.num_images || 1;
                     document.getElementById('image_style').value = formData.image_style || '';
@@ -830,13 +943,27 @@
         function handleFileSelect(event) {
             const files = Array.from(event.target.files);
             
-            if (selectedFiles.length + files.length > 4) {
-                alert('最多只能上传 4 张图片');
+            if (files.length === 0) return;
+            
+            // 检查总数限制
+            const remainingSlots = 4 - selectedFiles.length;
+            if (remainingSlots <= 0) {
+                alert('最多只能上传 4 张图片，请先删除已选择的图片');
+                event.target.value = ''; // 清空选择，允许重新选择
                 return;
             }
             
-            selectedFiles = selectedFiles.concat(files.slice(0, 4 - selectedFiles.length));
+            // 如果选择的文件超过剩余槽位，只取前N个并提示
+            if (files.length > remainingSlots) {
+                alert(`最多只能上传 4 张图片，当前已选 ${selectedFiles.length} 张，本次将只添加前 ${remainingSlots} 张`);
+                selectedFiles = selectedFiles.concat(files.slice(0, remainingSlots));
+            } else {
+                selectedFiles = selectedFiles.concat(files);
+            }
+            
             updatePreview();
+            // 清空文件输入，允许重复选择同一文件
+            event.target.value = '';
         }
         
         function updatePreview() {
@@ -877,13 +1004,12 @@
                     const state = JSON.parse(savedState);
                     const elapsed = Date.now() - state.startTime;
                     
-                    // 如果是进行中的任务，直接清除状态
-                    // 原因：如果生成真的完成了，结果已经在数据库中了，用户可以在生图任务中查看
-                    // 如果生成还在进行，用户重新提交即可
+                    // 如果是进行中的任务，不清除状态，让生成继续
+                    // 生成任务会在后台继续执行（使用keepalive）
                     if (state.status === 'generating') {
-                        console.log('检测到未完成的生成状态，已清除。如果生成已完成，请在生图任务中查看。');
-                        localStorage.removeItem('singleGenerationState');
-                        resetGenerationUI();
+                        console.log('检测到进行中的生成任务，任务将在后台继续执行。');
+                        // 不清除状态，保持generating状态
+                        // 用户可以在生图任务页面查看结果
                     }
                     // 如果是已完成的任务，恢复显示结果（但只保留5分钟内的结果）
                     else if (state.status === 'completed' && state.result) {
@@ -923,7 +1049,7 @@
             const loading = document.getElementById('loading');
             const generateBtn = document.getElementById('generateBtn');
             const clearStateBtn = document.getElementById('clearGenerationStateBtn');
-            loading.classList.remove('active');
+            if (loading) loading.classList.remove('active');
             generateBtn.disabled = false;
             generateBtn.textContent = '🚀 开始生成';
             // 隐藏清除状态按钮
@@ -937,6 +1063,38 @@
             localStorage.removeItem('singleGenerationState');
             resetGenerationUI();
             alert('生成状态已清除。如果生成已完成，请在"生图任务"页面查看结果。');
+        }
+        
+        // 清除本地缓存（包括表单数据和生成状态）
+        function clearIndexCache() {
+            localStorage.removeItem('indexFormData');
+            localStorage.removeItem('singleGenerationState');
+            localStorage.removeItem('lastGenerationPayload');
+            // 重置表单到默认状态
+            document.getElementById('prompt').value = '';
+            document.getElementById('aspect_ratio').value = '9:16';
+            document.getElementById('resolution').value = '2k';
+            document.getElementById('generate_mode').value = 'single';
+            document.getElementById('num_images').value = '4';
+            document.getElementById('image_style').value = '';
+            document.getElementById('seed').value = '0';
+            document.getElementById('output_filename').value = '';
+            // 清空选中的文件和示例图
+            selectedFiles = [];
+            selectedSampleImages = [];
+            updatePreview();
+            updateSampleImagesUI();
+            // 重置生成UI
+            resetGenerationUI();
+            // 清空结果
+            const resultImages = document.getElementById('resultImages');
+            const resultSection = document.getElementById('resultSection');
+            if (resultImages) resultImages.innerHTML = '';
+            if (resultSection) resultSection.style.display = 'none';
+            // 清空选中状态
+            selectedResultImages.clear();
+            updateBatchActions();
+            alert('本地缓存已清除，表单已重置为默认状态。');
         }
         
         // 检查并显示清除状态按钮
@@ -966,6 +1124,7 @@
             const errorMessage = document.getElementById('errorMessage');
             const loading = document.getElementById('loading');
             const resultImages = document.getElementById('resultImages');
+            const resultSection = document.getElementById('resultSection');
             const generateBtn = document.getElementById('generateBtn');
             
             // 如果有正在进行的请求，先取消它（仅在用户明确提交新请求时）
@@ -979,21 +1138,49 @@
             // 开始新的生成，清空之前的结果和状态
 
             errorMessage.classList.remove('active');
-            loading.classList.add('active');
-            resultImages.innerHTML = '';
+            if (loading) loading.classList.add('active');
+            
+            // 获取生成数量和模式，提前创建占位区
+            const generateMode = document.getElementById('generate_mode').value;
+            const numImages = parseInt(document.getElementById('num_images').value) || 4;
+            const totalImages = generateMode === 'group' ? numImages * 4 : numImages; // 组图每组4张
+            
+            // 创建占位区
+            if (resultImages) {
+                resultImages.innerHTML = '';
+                for (let i = 0; i < totalImages; i++) {
+                    const placeholder = document.createElement('div');
+                    placeholder.className = 'result-image placeholder';
+                    placeholder.dataset.imageIndex = i;
+                    placeholder.innerHTML = `
+                        <div class="image-placeholder">
+                            <div class="spinner"></div>
+                            <p>生成中...</p>
+                        </div>
+                    `;
+                    resultImages.appendChild(placeholder);
+                }
+            }
+            
+            if (resultSection) resultSection.style.display = 'block';
             generateBtn.disabled = true;
             generateBtn.textContent = '生成中...';
             
             // 保存生成状态为进行中
             currentGenerationState = {
                 status: 'generating',
-                startTime: Date.now()
+                startTime: Date.now(),
+                totalImages: totalImages,
+                generatedCount: 0
             };
             localStorage.setItem('singleGenerationState', JSON.stringify(currentGenerationState));
             // 显示清除状态按钮
             checkAndShowClearButton();
             
             const formData = new FormData(this);
+            
+            // 添加流式输出参数（默认启用）
+            formData.append('stream', 'true');
             
             // 添加手动上传的文件
             selectedFiles.forEach(file => {
@@ -1006,61 +1193,126 @@
             });
             
             try {
-                // 使用 keepalive 选项，确保请求在页面切换后也能继续执行
-                // 注意：不使用 signal，因为页面切换时不应该中止请求
+                // 使用流式接收（Server-Sent Events）
                 const response = await fetch('/generate', {
                     method: 'POST',
                     body: formData,
-                    keepalive: true  // 关键：保持请求活跃，即使页面切换或关闭
+                    keepalive: true
                 });
                 
-                const data = await response.json();
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || '生成失败');
+                }
                 
-                if (data.error) {
-                    errorMessage.textContent = data.error;
-                    errorMessage.classList.add('active');
-                    // 更新状态为失败
-                    currentGenerationState = {
-                        status: 'failed',
-                        error: data.error,
-                        startTime: currentGenerationState.startTime
-                    };
-                    localStorage.setItem('singleGenerationState', JSON.stringify(currentGenerationState));
-                } else if (data.success) {
-                    displayResults(data);
-                    // 保存完成状态和结果
-                    currentGenerationState = {
-                        status: 'completed',
-                        result: data,
-                        startTime: currentGenerationState.startTime
-                    };
-                    localStorage.setItem('singleGenerationState', JSON.stringify(currentGenerationState));
+                // 检查是否是流式响应
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('text/event-stream')) {
+                    // 流式响应处理
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    const allImages = [];
                     
-                    // 提示用户可以在生图任务中查看
-                    if (data.images && data.images.length > 0) {
-                        console.log('图片生成成功，可在生图任务页面查看');
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() || ''; // 保留最后一个不完整的行
+                        
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                try {
+                                    const data = JSON.parse(line.slice(6));
+                                    
+                                    if (data.type === 'start') {
+                                        console.log('流式生成开始，总共:', data.total);
+                                    } else if (data.type === 'image') {
+                                        // 立即更新占位符
+                                        updateImagePlaceholder(data.index, {
+                                            url: data.url,
+                                            filename: data.filename,
+                                            seed: data.seed,
+                                            record_id: data.record_id
+                                        });
+                                        allImages.push({
+                                            url: data.url,
+                                            filename: data.filename,
+                                            seed: data.seed,
+                                            record_id: data.record_id
+                                        });
+                                    } else if (data.type === 'complete') {
+                                        // 保存完成状态
+                                        currentGenerationState = {
+                                            status: 'completed',
+                                            result: { images: allImages },
+                                            startTime: currentGenerationState.startTime
+                                        };
+                                        localStorage.setItem('singleGenerationState', JSON.stringify(currentGenerationState));
+                                        console.log('流式生成完成，总共:', data.total);
+                                    } else if (data.type === 'error') {
+                                        errorMessage.textContent = '生成失败: ' + (data.error || '未知错误');
+                                        errorMessage.classList.add('active');
+                                        currentGenerationState = {
+                                            status: 'failed',
+                                            error: data.error,
+                                            startTime: currentGenerationState.startTime
+                                        };
+                                        localStorage.setItem('singleGenerationState', JSON.stringify(currentGenerationState));
+                                    }
+                                } catch (e) {
+                                    console.error('解析流式数据失败:', e, line);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // 非流式响应（兼容旧版本）
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        errorMessage.textContent = data.error;
+                        errorMessage.classList.add('active');
+                        currentGenerationState = {
+                            status: 'failed',
+                            error: data.error,
+                            startTime: currentGenerationState.startTime
+                        };
+                        localStorage.setItem('singleGenerationState', JSON.stringify(currentGenerationState));
+                    } else if (data.success) {
+                        // 逐张显示图片（带延迟效果，模拟实时生成）
+                        if (data.images && data.images.length > 0) {
+                            data.images.forEach((img, index) => {
+                                setTimeout(() => {
+                                    updateImagePlaceholder(index, img);
+                                }, index * 200);
+                            });
+                        }
+                        currentGenerationState = {
+                            status: 'completed',
+                            result: data,
+                            startTime: currentGenerationState.startTime
+                        };
+                        localStorage.setItem('singleGenerationState', JSON.stringify(currentGenerationState));
                     }
                 }
             } catch (error) {
                 // 判断是否是由于用户取消导致的中止
                 if (error.name === 'AbortError') {
                     console.log('生成被用户取消');
-                    // 不显示错误信息，直接返回
                     return;
                 }
                 
                 let errorMsg = error.message;
                 if (error.message === 'Failed to fetch') {
-                    // 如果页面切换了，请求可能仍在后台执行
-                    // 不显示错误，而是提示用户可以在生图任务中查看
                     console.log('网络请求失败，但生成任务可能仍在后台执行。请在生图任务中查看结果。');
-                    // 不清除状态，让用户知道可能有任务在执行
                     return;
                 }
                 
                 errorMessage.textContent = '生成失败: ' + errorMsg;
                 errorMessage.classList.add('active');
-                // 更新状态为失败
                 currentGenerationState = {
                     status: 'failed',
                     error: errorMsg,
@@ -1071,7 +1323,8 @@
                 // 只有在页面仍然可见时才更新UI
                 // 如果页面已切换，UI更新可能会失败，但不影响后台任务
                 if (!document.hidden) {
-                    loading.classList.remove('active');
+                    const loading = document.getElementById('loading');
+                    if (loading) loading.classList.remove('active');
                     generateBtn.disabled = false;
                     generateBtn.textContent = '🚀 开始生成';
                 }
@@ -1084,22 +1337,16 @@
         document.addEventListener('visibilitychange', function() {
             if (document.hidden) {
                 // 页面隐藏时，不做任何操作
-                // 生成任务会继续在后台执行
+                // 生成任务会继续在后台执行（使用keepalive）
             } else {
-                // 页面返回时，清除任何 'generating' 状态
-                // 因为如果生成完成了，结果已经在数据库中了
+                // 页面返回时，检查生成状态
+                // 不自动清除generating状态，让生成继续
                 const savedState = localStorage.getItem('singleGenerationState');
                 if (savedState) {
                     try {
                         const state = JSON.parse(savedState);
-                        // 如果是生成中状态，直接清除
-                        if (state.status === 'generating') {
-                            console.log('页面返回，检测到生成中状态，已清除。如果生成已完成，请在生图任务中查看。');
-                            localStorage.removeItem('singleGenerationState');
-                            resetGenerationUI();
-                        }
                         // 如果已完成，显示结果（但只保留5分钟内的结果）
-                        else if (state.status === 'completed' && state.result) {
+                        if (state.status === 'completed' && state.result) {
                             const elapsed = Date.now() - state.startTime;
                             if (elapsed < 5 * 60 * 1000) {
                                 const resultImages = document.getElementById('resultImages');
@@ -1118,6 +1365,8 @@
                             localStorage.removeItem('singleGenerationState');
                             resetGenerationUI();
                         }
+                        // 如果是generating状态，保持状态，不清除
+                        // 生成任务会在后台继续执行
                     } catch (e) {
                         console.error('恢复生成状态失败:', e);
                         localStorage.removeItem('singleGenerationState');
@@ -1130,38 +1379,263 @@
             }
         });
         
+        // 选中的图片集合
+        let selectedResultImages = new Set();
+        // 存储所有生成的图片，用于左右切换
+        let allGeneratedImages = [];
+        
+        // 更新占位符为实际图片
+        function updateImagePlaceholder(index, img) {
+            const resultImages = document.getElementById('resultImages');
+            if (!resultImages) return;
+            
+            const placeholder = resultImages.querySelector(`.result-image[data-image-index="${index}"]`);
+            if (placeholder) {
+                placeholder.classList.remove('placeholder');
+                placeholder.dataset.imageUrl = img.url;
+                placeholder.dataset.imageFilename = img.filename;
+                placeholder.dataset.recordId = img.record_id || '';
+                placeholder.innerHTML = `
+                    <div class="result-image-checkbox" onclick="toggleImageSelection(${index}, event)"></div>
+                    <img src="${img.url}" alt="生成的图片 ${index + 1}" onclick="openResultImageModal(${index})">
+                `;
+                
+                // 更新allGeneratedImages数组
+                allGeneratedImages[index] = {
+                    url: img.url,
+                    filename: img.filename,
+                    recordId: img.record_id || ''
+                };
+            }
+        }
+        
         function displayResults(data) {
             const resultImages = document.getElementById('resultImages');
+            selectedResultImages.clear(); // 清空选中状态
+            allGeneratedImages = []; // 重置数组
             
-            data.images.forEach((img, index) => {
-                const div = document.createElement('div');
-                div.className = 'result-image';
-                div.innerHTML = `
-                    <img src="${img.url}" alt="生成的图片 ${index + 1}" onclick="openImageModal('${img.url}', '${img.filename}')">
-                    <div class="result-info">
-                        <p><strong>文件名:</strong> ${img.filename}</p>
-                        <p><strong>种子值:</strong> ${img.seed}</p>
-                        <p><strong>尺寸:</strong> ${data.params.width} × ${data.params.height}</p>
-                        <a href="${img.url}" download="${img.filename}">
-                            <button class="download-btn">⬇️ 下载图片</button>
-                        </a>
-                        <button class="download-btn" onclick="addToPersonLibrary('${img.url}', '${img.filename}')">➕ 添加到人物库</button>
-                        <button class="download-btn" onclick="addToSceneLibrary('${img.url}', '${img.filename}')">➕ 添加到场景库</button>
-                        <button class="download-btn" onclick="regenerateLast('${img.url}')">🔁 重新生成</button>
-                    </div>
-                `;
-                resultImages.appendChild(div);
-            });
-            // 保存最后一次生成的参数和图片URL，便于重新生成
+            // 逐张显示图片
+            if (data.images && data.images.length > 0) {
+                data.images.forEach((img, index) => {
+                    updateImagePlaceholder(index, img);
+                });
+            }
+            
+            // 显示结果区域
+            const resultSection = document.getElementById('resultSection');
+            if (resultSection && data.images && data.images.length > 0) {
+                resultSection.style.display = 'block';
+            }
+            // 保存最后一次生成的参数和图片URL
             try {
                 const payload = buildLastGeneratePayload();
-                // 保存最后生成的图片URL（第一张）
                 if (data.images && data.images.length > 0) {
                     payload.lastGeneratedImageUrl = data.images[0].url;
                 }
                 localStorage.setItem('lastGenerationPayload', JSON.stringify(payload));
             } catch (e) { console.error('保存最后生成参数失败', e); }
         }
+        
+        // 打开生成的图片模态框（支持左右切换）
+        function openResultImageModal(index) {
+            if (!allGeneratedImages || allGeneratedImages.length === 0) {
+                // 如果没有allGeneratedImages，从DOM中获取
+                const resultImages = document.getElementById('resultImages');
+                if (resultImages) {
+                    const imageDivs = resultImages.querySelectorAll('.result-image:not(.placeholder)');
+                    allGeneratedImages = Array.from(imageDivs).map(div => ({
+                        url: div.dataset.imageUrl,
+                        filename: div.dataset.imageFilename,
+                        recordId: div.dataset.recordId
+                    }));
+                }
+            }
+            
+            if (allGeneratedImages && allGeneratedImages.length > 0 && allGeneratedImages[index]) {
+                const img = allGeneratedImages[index];
+                openImageModal(img.url, img.filename, index, 'result');
+            }
+        }
+        
+        // 切换图片选择状态
+        function toggleImageSelection(index, event) {
+            event.stopPropagation();
+            const imageDiv = document.querySelector(`.result-image[data-image-index="${index}"]`);
+            if (!imageDiv) return;
+            
+            const checkbox = imageDiv.querySelector('.result-image-checkbox');
+            if (selectedResultImages.has(index)) {
+                selectedResultImages.delete(index);
+                imageDiv.classList.remove('selected');
+                checkbox.classList.remove('checked');
+            } else {
+                selectedResultImages.add(index);
+                imageDiv.classList.add('selected');
+                checkbox.classList.add('checked');
+            }
+            
+            // 更新批量操作按钮显示状态
+            updateBatchActions();
+        }
+        
+        // 更新批量操作按钮显示状态
+        function updateBatchActions() {
+            const batchActions = document.getElementById('batchActions');
+            const selectedCount = document.getElementById('selectedCount');
+            if (batchActions && selectedCount) {
+                const count = selectedResultImages.size;
+                selectedCount.textContent = count;
+                if (count > 0) {
+                    batchActions.style.display = 'block';
+                } else {
+                    batchActions.style.display = 'none';
+                }
+            }
+        }
+        
+        // 清除选择
+        function clearSelection() {
+            selectedResultImages.forEach(index => {
+                const imageDiv = document.querySelector(`.result-image[data-image-index="${index}"]`);
+                if (imageDiv) {
+                    imageDiv.classList.remove('selected');
+                    const checkbox = imageDiv.querySelector('.result-image-checkbox');
+                    if (checkbox) checkbox.classList.remove('checked');
+                }
+            });
+            selectedResultImages.clear();
+            updateBatchActions();
+        }
+        
+        // 批量添加到人物库
+        async function batchAddToPersonLibrary() {
+            if (selectedResultImages.size === 0) {
+                alert('请先选择图片');
+                return;
+            }
+            
+            const selectedUrls = [];
+            selectedResultImages.forEach(index => {
+                const imageDiv = document.querySelector(`.result-image[data-image-index="${index}"]`);
+                if (imageDiv) {
+                    selectedUrls.push({
+                        url: imageDiv.dataset.imageUrl,
+                        filename: imageDiv.dataset.imageFilename
+                    });
+                }
+            });
+            
+            let successCount = 0;
+            for (const img of selectedUrls) {
+                try {
+                    const resp = await fetch('/api/add-to-person-library', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: img.url, filename: img.filename })
+                    });
+                    const data = await resp.json();
+                    if (data.success) {
+                        successCount++;
+                    }
+                } catch (e) {
+                    console.error('添加到人物库失败:', e);
+                }
+            }
+            
+            alert(`成功添加 ${successCount}/${selectedUrls.length} 张图片到人物库`);
+            clearSelection();
+        }
+        
+        // 批量添加到场景库
+        async function batchAddToSceneLibrary() {
+            if (selectedResultImages.size === 0) {
+                alert('请先选择图片');
+                return;
+            }
+            
+            const selectedUrls = [];
+            selectedResultImages.forEach(index => {
+                const imageDiv = document.querySelector(`.result-image[data-image-index="${index}"]`);
+                if (imageDiv) {
+                    selectedUrls.push({
+                        url: imageDiv.dataset.imageUrl,
+                        filename: imageDiv.dataset.imageFilename
+                    });
+                }
+            });
+            
+            let successCount = 0;
+            for (const img of selectedUrls) {
+                try {
+                    const resp = await fetch('/api/add-to-scene-library', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: img.url, filename: img.filename })
+                    });
+                    const data = await resp.json();
+                    if (data.success) {
+                        successCount++;
+                    }
+                } catch (e) {
+                    console.error('添加到场景库失败:', e);
+                }
+            }
+            
+            alert(`成功添加 ${successCount}/${selectedUrls.length} 张图片到场景库`);
+            clearSelection();
+        }
+        
+        // 批量删除图片
+        async function batchDeleteImages() {
+            if (selectedResultImages.size === 0) {
+                alert('请先选择图片');
+                return;
+            }
+            
+            if (!confirm(`确定要删除选中的 ${selectedResultImages.size} 张图片吗？删除后将从图片库中一并删除。`)) {
+                return;
+            }
+            
+            const selectedItems = [];
+            selectedResultImages.forEach(index => {
+                const imageDiv = document.querySelector(`.result-image[data-image-index="${index}"]`);
+                if (imageDiv) {
+                    selectedItems.push({
+                        index: index,
+                        div: imageDiv,
+                        recordId: imageDiv.dataset.recordId
+                    });
+                }
+            });
+            
+            let successCount = 0;
+            for (const item of selectedItems) {
+                if (item.recordId) {
+                    try {
+                        const response = await fetch(`/api/records/${item.recordId}`, {
+                            method: 'DELETE'
+                        });
+                        const data = await response.json();
+                        if (data.success) {
+                            item.div.remove();
+                            selectedResultImages.delete(item.index);
+                            successCount++;
+                        }
+                    } catch (error) {
+                        console.error('删除图片失败:', error);
+                    }
+                } else {
+                    // 没有record_id，只从页面移除
+                    item.div.remove();
+                    selectedResultImages.delete(item.index);
+                    successCount++;
+                }
+            }
+            
+            alert(`成功删除 ${successCount}/${selectedItems.length} 张图片`);
+            updateBatchActions();
+        }
+        
         
         // 拖拽上传
         const uploadArea = document.querySelector('.upload-area');
@@ -1196,12 +1670,21 @@
                     return;
                 }
                 
-                if (selectedFiles.length + files.length > 4) {
-                    alert('最多只能上传 4 张图片');
+                // 检查总数限制
+                const remainingSlots = 4 - selectedFiles.length;
+                if (remainingSlots <= 0) {
+                    alert('最多只能上传 4 张图片，请先删除已选择的图片');
                     return;
                 }
                 
-                selectedFiles = selectedFiles.concat(files.slice(0, 4 - selectedFiles.length));
+                // 如果拖拽的文件超过剩余槽位，只取前N个并提示
+                if (files.length > remainingSlots) {
+                    alert(`最多只能上传 4 张图片，当前已选 ${selectedFiles.length} 张，本次将只添加前 ${remainingSlots} 张`);
+                    selectedFiles = selectedFiles.concat(files.slice(0, remainingSlots));
+                } else {
+                    selectedFiles = selectedFiles.concat(files);
+                }
+                
                 updatePreview();
             });
         }
@@ -1282,12 +1765,51 @@
         // 加载示例图片（按类别）
         async function loadSampleImages(category) {
             const grid = document.getElementById('sampleImagesGrid');
+            if (!grid) {
+                console.error('sampleImagesGrid 元素不存在');
+                return;
+            }
+            
+            console.log('开始加载示例图，类别:', category);
             grid.innerHTML = '<div class="sample-images-loading">加载中...</div>';
+            
             try {
-                const response = await fetch('/api/sample-images?category=' + encodeURIComponent(category));
+                const apiUrl = '/api/sample-images?category=' + encodeURIComponent(category || 'person');
+                console.log('请求URL:', apiUrl);
+                
+                // 添加超时处理（30秒超时）
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => {
+                    controller.abort();
+                }, 30000);
+                
+                let response;
+                try {
+                    response = await fetch(apiUrl, { signal: controller.signal });
+                    clearTimeout(timeoutId);
+                } catch (fetchError) {
+                    clearTimeout(timeoutId);
+                    if (fetchError.name === 'AbortError') {
+                        throw new Error('请求超时（30秒），请检查网络连接或服务器状态');
+                    }
+                    throw fetchError;
+                }
+                
+                console.log('响应状态:', response.status, response.statusText);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
                 const data = await response.json();
+                console.log('响应数据:', data);
 
-                if (data.success && data.images.length > 0) {
+                if (!data.success) {
+                    throw new Error(data.error || '服务器返回错误');
+                }
+
+                if (data.images && data.images.length > 0) {
+                    console.log('加载到', data.images.length, '张图片');
                     sampleImages = data.images;
                     grid.innerHTML = '';
                     data.images.forEach((img, index) => {
@@ -1304,7 +1826,7 @@
                             toggleSampleImage(index);
                         };
                         div.innerHTML = `
-                            <img src="${img.url}" alt="${img.filename}" title="点击图片放大，点击其他区域选择">
+                            <img src="${img.url}" alt="${img.filename}" title="点击图片放大，点击其他区域选择" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%22 height=%22100%22%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22%3E图片加载失败%3C/text%3E%3C/svg%3E';">
                             <div class="sample-image-count"></div>
                             <div class="sample-image-zoom" title="点击放大">🔍</div>
                         `;
@@ -1312,12 +1834,16 @@
                     });
                     // 加载完成后更新UI状态
                     updateSampleImagesUI();
+                    console.log('示例图加载完成');
                 } else {
-                    grid.innerHTML = '<div class="sample-images-loading">💭 暂无示例图片</div>';
+                    console.log('没有找到示例图片');
+                    grid.innerHTML = '<div class="sample-images-loading">💭 暂无示例图片<br><small style="color:#999;">提示：请检查OSS配置或上传示例图片</small></div>';
                 }
             } catch (error) {
                 console.error('加载示例图失败:', error);
-                grid.innerHTML = '<div class="sample-images-loading">❌ 加载失败: ' + (error.message || '未知错误') + '</div>';
+                console.error('错误堆栈:', error.stack);
+                const errorMsg = error.message || '未知错误';
+                grid.innerHTML = '<div class="sample-images-loading">❌ 加载失败: ' + errorMsg + '<br><small style="color:#999;">请检查浏览器控制台查看详细错误信息</small></div>';
             }
         }
 
@@ -1414,20 +1940,27 @@
         let currentModalImageUrl = null;
         let currentModalImageFilename = null;
         let currentModalImageIndex = -1;
+        let currentModalImageSource = null; // 'sample' 或 'result'
         
         // 图片放大功能
-        function openImageModal(imageUrl, filename, imageIndex) {
+        function openImageModal(imageUrl, filename, imageIndex, source) {
             const modal = document.getElementById('imageModal');
             const modalImg = document.getElementById('modalImage');
             const selectBtn = document.getElementById('selectAsReferenceBtn');
             const prevBtn = document.getElementById('prevImageBtn');
             const nextBtn = document.getElementById('nextImageBtn');
             
-            // 如果传入了索引，使用它；否则在 sampleImages 中查找
+            currentModalImageSource = source || 'sample'; // 默认为示例图
+            
+            // 如果传入了索引，使用它；否则在对应数组中查找
             if (imageIndex !== undefined && imageIndex >= 0) {
                 currentModalImageIndex = imageIndex;
             } else {
-                currentModalImageIndex = sampleImages.findIndex(img => img.url === imageUrl);
+                if (source === 'result') {
+                    currentModalImageIndex = allGeneratedImages.findIndex(img => img.url === imageUrl);
+                } else {
+                    currentModalImageIndex = sampleImages.findIndex(img => img.url === imageUrl);
+                }
             }
             
             currentModalImageUrl = imageUrl;
@@ -1439,14 +1972,21 @@
             // 更新导航按钮状态
             updateModalNavButtons();
             
-            // 检查是否已选择
-            const isSelected = selectedSampleImages.some(img => img.url === imageUrl);
-            if (isSelected) {
-                selectBtn.textContent = '✗ 取消选择';
-                selectBtn.classList.add('selected');
+            // 检查是否已选择（仅对示例图有效）
+            if (source === 'result') {
+                // 生成的图片，隐藏选择按钮
+                if (selectBtn) selectBtn.style.display = 'none';
             } else {
-                selectBtn.textContent = '✓ 选择为参考图';
-                selectBtn.classList.remove('selected');
+                // 示例图，显示选择按钮
+                if (selectBtn) selectBtn.style.display = 'block';
+                const isSelected = selectedSampleImages.some(img => img.url === imageUrl);
+                if (isSelected) {
+                    selectBtn.textContent = '✗ 取消选择';
+                    selectBtn.classList.add('selected');
+                } else {
+                    selectBtn.textContent = '✓ 选择为参考图';
+                    selectBtn.classList.remove('selected');
+                }
             }
         }
         
@@ -1455,7 +1995,21 @@
             const prevBtn = document.getElementById('prevImageBtn');
             const nextBtn = document.getElementById('nextImageBtn');
             
-            if (!prevBtn || !nextBtn || !sampleImages || sampleImages.length === 0) {
+            if (!prevBtn || !nextBtn) {
+                if (prevBtn) prevBtn.style.display = 'none';
+                if (nextBtn) nextBtn.style.display = 'none';
+                return;
+            }
+            
+            // 根据来源确定图片数组
+            let imageArray = [];
+            if (currentModalImageSource === 'result') {
+                imageArray = allGeneratedImages;
+            } else {
+                imageArray = sampleImages;
+            }
+            
+            if (!imageArray || imageArray.length === 0) {
                 if (prevBtn) prevBtn.style.display = 'none';
                 if (nextBtn) nextBtn.style.display = 'none';
                 return;
@@ -1467,19 +2021,30 @@
             
             // 更新按钮状态
             prevBtn.disabled = currentModalImageIndex <= 0;
-            nextBtn.disabled = currentModalImageIndex >= sampleImages.length - 1;
+            nextBtn.disabled = currentModalImageIndex >= imageArray.length - 1;
         }
         
         // 切换图片（上一张/下一张）
         function navigateImage(direction) {
-            if (!sampleImages || sampleImages.length === 0) return;
+            let imageArray = [];
+            if (currentModalImageSource === 'result') {
+                imageArray = allGeneratedImages;
+            } else {
+                imageArray = sampleImages;
+            }
+            
+            if (!imageArray || imageArray.length === 0) return;
             
             const newIndex = currentModalImageIndex + direction;
-            if (newIndex < 0 || newIndex >= sampleImages.length) return;
+            if (newIndex < 0 || newIndex >= imageArray.length) return;
             
-            const img = sampleImages[newIndex];
+            const img = imageArray[newIndex];
             if (img) {
-                openImageModal(img.url, img.filename, newIndex);
+                if (currentModalImageSource === 'result') {
+                    openImageModal(img.url, img.filename, newIndex, 'result');
+                } else {
+                    openImageModal(img.url, img.filename, newIndex, 'sample');
+                }
             }
         }
         
@@ -1556,97 +2121,12 @@
         function buildLastGeneratePayload() {
             return {
                 prompt: document.getElementById('prompt').value,
-                negative_prompt: document.getElementById('negative_prompt').value,
                 aspect_ratio: document.getElementById('aspect_ratio').value,
                 resolution: document.getElementById('resolution').value,
                 num_images: document.getElementById('num_images').value,
-                steps: document.getElementById('steps').value,
                 seed: document.getElementById('seed').value,
                 sample_image_urls: selectedSampleImages.map(img => img.url)
             };
-        }
-        
-        // 重新生成图片（使用指定的图片URL作为参考图）
-        async function regenerateLast(imageUrl) {
-            try {
-                const savedPayload = localStorage.getItem('lastGenerationPayload');
-                if (!savedPayload) {
-                    alert('没有找到上次生成的参数，请重新填写表单后生成');
-                    return;
-                }
-                
-                const payload = JSON.parse(savedPayload);
-                
-                // 清空提示词框，等待输入要调整的文字
-                document.getElementById('prompt').value = '';
-                
-                // 保留其他参数
-                document.getElementById('negative_prompt').value = payload.negative_prompt || '';
-                document.getElementById('aspect_ratio').value = payload.aspect_ratio || '1:1';
-                document.getElementById('resolution').value = payload.resolution || '2k';
-                document.getElementById('num_images').value = payload.num_images || 1;
-                document.getElementById('steps').value = payload.steps || 28;
-                document.getElementById('seed').value = payload.seed || 0;
-                
-                // 使用传入的图片URL作为参考图（最近一次生成的图片）
-                if (imageUrl) {
-                    // 检查是否是OSS URL（以https://开头）
-                    if (imageUrl.startsWith('https://')) {
-                        // OSS URL，可以直接使用
-                        const generatedImage = {
-                            url: imageUrl,
-                            filename: 'generated_reference.jpg'
-                        };
-                        
-                        // 先清空之前添加的生成图片，只保留最新的
-                        selectedSampleImages = selectedSampleImages.filter(img => 
-                            !img.url.startsWith('https://') || img.url === imageUrl
-                        );
-                        
-                        // 添加到选中的示例图列表（如果还没有添加）
-                        const exists = selectedSampleImages.find(img => img.url === imageUrl);
-                        if (!exists) {
-                            selectedSampleImages.push(generatedImage);
-                        }
-                        updateSampleImagesUI();
-                    } else {
-                        // 本地URL，API无法访问，提示用户配置OSS
-                        console.warn('生成的图片URL是本地地址，无法作为参考图使用。请配置OSS以使用此功能。');
-                        alert('提示：生成的图片是本地地址，无法作为参考图。\n\n如需使用重新生成功能，请在服务器配置OSS（对象存储），这样生成的图片会自动上传到OSS并可作为参考图使用。');
-                    }
-                }
-                
-                // 恢复原有的示例图选择（但不包括之前添加的生成图片）
-                if (payload.sample_image_urls && payload.sample_image_urls.length > 0) {
-                    payload.sample_image_urls.forEach(url => {
-                        // 跳过OSS URL（可能是之前添加的生成图片）
-                        if (url.startsWith('https://')) {
-                            return;
-                        }
-                        const img = sampleImages.find(i => i.url === url);
-                        if (img) {
-                            const exists = selectedSampleImages.find(i => i.url === url);
-                            if (!exists) {
-                                selectedSampleImages.push(img);
-                            }
-                        }
-                    });
-                    updateSampleImagesUI();
-                }
-                
-                // 清空已选择的本地文件（因为无法从localStorage恢复）
-                selectedFiles = [];
-                updatePreview();
-                
-                // 聚焦到提示词输入框
-                document.getElementById('prompt').focus();
-                
-                // 不自动提交表单，等待用户输入新的提示词
-                // document.getElementById('generateForm').dispatchEvent(new Event('submit'));
-            } catch (e) {
-                console.error('重新生成失败:', e);
-                alert('重新生成失败: ' + e.message);
-            }
         }
         
         // 加载风格列表
@@ -1668,8 +2148,16 @@
             }
         }
         
-        // 页面加载时获取示例图和恢复表单数据
-        document.addEventListener('DOMContentLoaded', function() {
+        // 页面加载时获取示例图（不恢复表单数据，让表单回到默认状态）
+        document.addEventListener('DOMContentLoaded', async function() {
+            console.log('DOMContentLoaded 事件触发');
+            
+            // 检查是否需要自动清除缓存
+            const autoClear = document.getElementById('autoClearOnReload');
+            if (autoClear && autoClear.checked) {
+                clearIndexCache();
+            }
+            
             // 初始化类别按钮
             const btnP = document.getElementById('samplePersonBtn');
             const btnS = document.getElementById('sampleSceneBtn');
@@ -1678,13 +2166,29 @@
                 btnP.addEventListener('click', () => switchSampleCategory('person'));
                 btnS.addEventListener('click', () => switchSampleCategory('scene'));
                 btnR.addEventListener('click', () => switchSampleCategory('recent'));
+            } else {
+                console.warn('示例图按钮元素未找到');
             }
+            
+            // 检查 sampleImagesGrid 是否存在
+            const grid = document.getElementById('sampleImagesGrid');
+            if (!grid) {
+                console.error('sampleImagesGrid 元素不存在，无法加载示例图');
+                return;
+            }
+            
             // 加载风格列表
             loadImageStyles();
-            // 默认加载
-            loadSampleImages(sampleCategory);
-            loadFormData();
-            setupAutoSave();
+            
+            // 默认加载（使用 await 确保异步操作完成）
+            try {
+                await loadSampleImages(sampleCategory);
+            } catch (error) {
+                console.error('初始化加载示例图失败:', error);
+            }
+            
+            // 不调用 loadFormData()，让表单保持默认状态
+            // 也不调用 setupAutoSave()，不在刷新时保存表单数据
         });
         
         // 侧边栏收缩功能

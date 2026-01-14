@@ -9,7 +9,7 @@ import string
 from datetime import datetime
 from pathlib import Path
 from functools import wraps
-from flask import Flask, render_template, request, jsonify, send_from_directory, session, redirect, url_for, flash
+from flask import Flask, render_template, request, jsonify, send_from_directory, session, redirect, url_for, flash, Response, stream_with_context
 from werkzeug.utils import secure_filename
 from openai import OpenAI
 import database
@@ -285,24 +285,56 @@ def list_sample_images_from_oss(user_id=None):
         if not bucket:
             return []
         
-        # 列出 sample/{category}/user_{user_id}/ 目录下的所有文件（同时列出人物和场景）
+        # 列出多个可能的路径（向后兼容不同的上传方式）
         sample_images = []
-        prefixes = [f'sample/person/user_{user_id}/', f'sample/scene/user_{user_id}/']
+        # 1. 标准路径：sample/person/user_{user_id}/ 和 sample/scene/user_{user_id}/
+        prefixes = [
+            f'sample/person/user_{user_id}/',
+            f'sample/scene/user_{user_id}/',
+            f'sample/user_{user_id}/',  # 兼容旧的上传路径
+            'ai-images/sample/',  # 兼容 upload_sample_images.py 脚本的路径
+        ]
+        
+        seen_keys = set()  # 用于去重
+        
         for prefix in prefixes:
-            for obj in oss2.ObjectIterator(bucket, prefix=prefix):
-                if obj.key.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
-                    # 生成公网访问URL
-                    url = f"https://{endpoint_full}/{obj.key}"
-                    filename = os.path.basename(obj.key)
-                    # 推断类别
-                    category = 'person' if '/person/' in obj.key else 'scene'
-                    sample_images.append({
-                        'url': url,
-                        'filename': filename,
-                        'size': obj.size,
-                        'key': obj.key,
-                        'category': category
-                    })
+            try:
+                count = 0
+                for obj in oss2.ObjectIterator(bucket, prefix=prefix):
+                    if obj.key in seen_keys:
+                        continue
+                    if obj.key.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+                        seen_keys.add(obj.key)
+                        count += 1
+                        # 生成公网访问URL
+                        url = f"https://{endpoint_full}/{obj.key}"
+                        filename = os.path.basename(obj.key)
+                        # 推断类别
+                        if '/person/' in obj.key:
+                            category = 'person'
+                        elif '/scene/' in obj.key:
+                            category = 'scene'
+                        else:
+                            # 对于没有明确分类的路径，默认归类为 person
+                            category = 'person'
+                        
+                        sample_images.append({
+                            'url': url,
+                            'filename': filename,
+                            'size': obj.size,
+                            'key': obj.key,
+                            'category': category
+                        })
+                if count > 0:
+                    print(f"[OSS] 从路径 {prefix} 加载到 {count} 张图片")
+            except Exception as prefix_err:
+                # 如果某个路径不存在或出错，继续处理其他路径
+                print(f"[OSS] 警告：读取路径 {prefix} 时出错: {prefix_err}")
+                import traceback
+                traceback.print_exc()
+                continue
+        
+        print(f"[OSS] 总计加载到 {len(sample_images)} 张示例图（用户ID: {user_id}）")
 
         return sample_images
     
@@ -496,6 +528,169 @@ def api_stats():
 def index():
     return render_template('index.html', user=get_current_user())
 
+def generate_images_stream(client, user_id, prompt, aspect_ratio, resolution, generate_mode,
+                           num_images, image_style, seed, output_filename, image_urls, width, height, oss_enabled):
+    """流式生成图片的生成器函数"""
+    try:
+        # 根据生成模式确定逻辑
+        use_group_images = generate_mode == 'group'
+        if use_group_images:
+            total_needed = num_images
+        else:
+            total_needed = num_images
+        
+        generated_count = 0
+        total_expected = total_needed * 4 if use_group_images else total_needed
+        
+        # 发送初始信息
+        yield f"data: {json.dumps({'type': 'start', 'total': total_expected, 'mode': generate_mode})}\n\n"
+        
+        for i in range(total_needed):
+            # 计算种子
+            if seed and seed != 0:
+                per_seed = seed + i
+                if per_seed > 99999999:
+                    per_seed = (per_seed % 99999999) + 1
+            else:
+                per_seed = random.randint(1, 99999999)
+            
+            # 构建提示词
+            full_prompt = prompt
+            if image_style:
+                try:
+                    styles_file = os.path.join('static', 'styles.json')
+                    if os.path.exists(styles_file):
+                        with open(styles_file, 'r', encoding='utf-8') as f:
+                            styles_data = json.load(f)
+                            style_obj = next((s for s in styles_data.get('styles', []) if s.get('id') == image_style), None)
+                            if style_obj:
+                                style_prompt = style_obj.get('prompt', '')
+                                if style_prompt:
+                                    full_prompt = f"{full_prompt}, {style_prompt}"
+                except Exception as e:
+                    print(f"[风格合并] 加载风格失败: {e}")
+            
+            try:
+                size_str = f"{width}x{height}"
+                extra_body_params = {"watermark": False}
+                
+                if use_group_images:
+                    extra_body_params["sequential_image_generation"] = "auto"
+                    extra_body_params["sequential_image_generation_options"] = {"max_images": 4}
+                else:
+                    extra_body_params["sequential_image_generation"] = "disabled"
+                
+                if image_urls:
+                    if len(image_urls) == 1:
+                        extra_body_params["image"] = image_urls[0]
+                    else:
+                        extra_body_params["image_urls"] = image_urls
+                        extra_body_params["image"] = image_urls[0]
+                
+                # 发送生成开始事件
+                yield f"data: {json.dumps({'type': 'generating', 'index': i + 1, 'total': total_needed})}\n\n"
+                
+                response = client.images.generate(
+                    model="doubao-seedream-4-5-251128",
+                    prompt=full_prompt,
+                    size=size_str,
+                    response_format="url",
+                    extra_body=extra_body_params
+                )
+                
+                if response.data and len(response.data) > 0:
+                    images_to_process = response.data if use_group_images else [response.data[0]]
+                    
+                    for img_idx, img_data_obj in enumerate(images_to_process):
+                        img_url = img_data_obj.url
+                        import requests
+                        img_response = requests.get(img_url)
+                        if img_response.status_code == 200:
+                            img_data = img_response.content
+                            user_output_folder = get_user_output_folder(user_id)
+                            
+                            if output_filename:
+                                if use_group_images:
+                                    base_name = output_filename if not output_filename.endswith('.jpg') else output_filename[:-4]
+                                    filename = get_unique_filename(user_output_folder, f"{base_name}_g{i+1}_{img_idx+1}", '.jpg')
+                                else:
+                                    base_name = output_filename if not output_filename.endswith('.jpg') else output_filename[:-4]
+                                    filename = get_unique_filename(user_output_folder, f"{base_name}_{i+1}", '.jpg')
+                            else:
+                                random_name = generate_random_filename(8)
+                                if use_group_images:
+                                    filename = f"{random_name}_g{i+1}_{img_idx+1}.jpg"
+                                else:
+                                    filename = f"{random_name}_{i+1}.jpg"
+                            
+                            output_path = os.path.join(user_output_folder, filename)
+                            with open(output_path, 'wb') as f:
+                                f.write(img_data)
+                            
+                            image_url = f'/output/{user_id}/{filename}'
+                            if oss_enabled:
+                                oss_url = upload_to_aliyun_oss(output_path, user_id=user_id)
+                                if oss_url:
+                                    image_url = oss_url
+                            
+                            # 保存记录到数据库
+                            record_id = None
+                            try:
+                                sample_images_list = [{'url': url, 'filename': os.path.basename(url)} for url in image_urls]
+                                record_id = database.save_generation_record({
+                                    'user_id': user_id,
+                                    'prompt': prompt,
+                                    'aspect_ratio': aspect_ratio,
+                                    'resolution': resolution,
+                                    'width': width,
+                                    'height': height,
+                                    'num_images': 1,
+                                    'seed': per_seed,
+                                    'image_style': image_style,
+                                    'sample_images': sample_images_list,
+                                    'image_path': image_url,
+                                    'filename': filename,
+                                    'status': 'success'
+                                })
+                            except Exception as db_err:
+                                print(f"[警告] 保存记录失败: {db_err}")
+                            
+                            # 计算图片索引
+                            if use_group_images:
+                                img_index = i * 4 + img_idx
+                            else:
+                                img_index = i
+                            
+                            generated_count += 1
+                            
+                            # 立即发送图片数据
+                            yield f"data: {json.dumps({
+                                'type': 'image',
+                                'index': img_index,
+                                'filename': filename,
+                                'url': image_url,
+                                'seed': per_seed,
+                                'record_id': record_id
+                            })}\n\n"
+                        else:
+                            # 下载失败，发送错误
+                            yield f"data: {json.dumps({'type': 'error', 'index': i * 4 + img_idx if use_group_images else i, 'error': f'下载图片失败: HTTP {img_response.status_code}'})}\n\n"
+                else:
+                    # API返回空数据
+                    yield f"data: {json.dumps({'type': 'error', 'index': i + 1, 'error': 'API返回数据为空'})}\n\n"
+                    
+            except Exception as e:
+                # 发送错误事件
+                yield f"data: {json.dumps({'type': 'error', 'index': i + 1, 'error': str(e)})}\n\n"
+                continue
+        
+        # 发送完成事件
+        yield f"data: {json.dumps({'type': 'complete', 'total': generated_count})}\n\n"
+        
+    except Exception as e:
+        yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+
+
 @app.route('/generate', methods=['POST'])
 @login_required
 def generate():
@@ -503,15 +698,17 @@ def generate():
         user_id = session.get('user_id')
         # 获取表单数据
         prompt = request.form.get('prompt', '').strip()
-        aspect_ratio = request.form.get('aspect_ratio', '1:1')
+        aspect_ratio = request.form.get('aspect_ratio', '9:16')
         resolution = request.form.get('resolution', '2k')
-        num_images = int(request.form.get('num_images', 1))
+        generate_mode = request.form.get('generate_mode', 'single')  # single 或 group
+        num_images = int(request.form.get('num_images', 4))
         image_style = request.form.get('image_style', '').strip()
         seed = int(request.form.get('seed', 0))
         output_filename = request.form.get('output_filename', '').strip()
+        stream = request.form.get('stream', 'true').lower() == 'true'  # 默认启用流式输出
         
         log_request('POST', '/generate', user_id, 
-                   f'提示词长度={len(prompt)}, 数量={num_images}, 尺寸={aspect_ratio}/{resolution}')
+                   f'提示词长度={len(prompt)}, 数量={num_images}, 尺寸={aspect_ratio}/{resolution}, 流式={stream}')
         
         if not prompt:
             log_operation('生成失败', f'用户ID: {user_id}, 原因: 缺少提示词', 'WARNING')
@@ -579,11 +776,31 @@ def generate():
         # 初始化 OpenAI 客户端（兼容方舟大模型）
         client = OpenAI(api_key=api_key, base_url=base_url)
         
+        # 如果启用流式输出，使用流式响应
+        if stream:
+            return Response(
+                stream_with_context(generate_images_stream(
+                    client, user_id, prompt, aspect_ratio, resolution, generate_mode,
+                    num_images, image_style, seed, output_filename, image_urls, width, height, oss_enabled
+                )),
+                mimetype='text/event-stream',
+                headers={
+                    'Cache-Control': 'no-cache',
+                    'X-Accel-Buffering': 'no'
+                }
+            )
+        
+        # 非流式输出（原有逻辑）
         # 生成图片
         generated_images = []
-        # 如果 num_images > 1，使用组图功能，只调用一次API；否则按num_images循环
-        use_group_images = num_images > 1
-        total_needed = 1 if use_group_images else num_images
+        # 根据生成模式确定逻辑
+        use_group_images = generate_mode == 'group'
+        if use_group_images:
+            # 组图模式：生成指定组数，每组调用一次API
+            total_needed = num_images
+        else:
+            # 单图模式：生成指定数量的单图，调用num_images次API
+            total_needed = num_images
         
         for i in range(total_needed):
             # 计算种子（方舟大模型 API 限制：最大 99999999）
@@ -632,12 +849,15 @@ def generate():
                     "watermark": False,  # 默认不添加水印
                 }
                 
-                # 添加组图生成参数（当 num_images > 1 时，使用组图功能，只生成一组）
-                if i == 0 and use_group_images:
+                # 添加组图生成参数
+                if use_group_images:
                     extra_body_params["sequential_image_generation"] = "auto"
                     extra_body_params["sequential_image_generation_options"] = {
-                        "max_images": num_images
+                        "max_images": 4  # 每组生成4张（组图固定每组4张）
                     }
+                else:
+                    # 单图模式：禁用组图生成
+                    extra_body_params["sequential_image_generation"] = "disabled"
                 
                 # 添加参考图片参数
                 if image_urls:
@@ -716,7 +936,7 @@ def generate():
                 # 处理响应（组图生成可能返回多张图片）
                 if response.data and len(response.data) > 0:
                     # 如果使用组图生成，处理所有返回的图片
-                    images_to_process = response.data if (i == 0 and use_group_images) else [response.data[0]]
+                    images_to_process = response.data if use_group_images else [response.data[0]]
                     
                     for img_idx, img_data_obj in enumerate(images_to_process):
                         img_url = img_data_obj.url
@@ -733,25 +953,20 @@ def generate():
                             if output_filename:
                                 # 如果指定了文件名
                                 if use_group_images:
-                                    # 组图模式：文件名_1, 文件名_2
+                                    # 组图模式：文件名_组号_序号
                                     base_name = output_filename if not output_filename.endswith('.jpg') else output_filename[:-4]
-                                    filename = get_unique_filename(user_output_folder, f"{base_name}_{img_idx+1}", '.jpg')
-                                elif num_images > 1:
-                                    # 多张图片：文件名_1, 文件名_2
+                                    filename = get_unique_filename(user_output_folder, f"{base_name}_g{i+1}_{img_idx+1}", '.jpg')
+                                else:
+                                    # 单图模式：文件名_序号
                                     base_name = output_filename if not output_filename.endswith('.jpg') else output_filename[:-4]
                                     filename = get_unique_filename(user_output_folder, f"{base_name}_{i+1}", '.jpg')
-                                else:
-                                    # 单张图片：直接使用文件名
-                                    filename = get_unique_filename(user_output_folder, output_filename, '.jpg')
                             else:
                                 # 如果未指定文件名，使用随机文件名
                                 random_name = generate_random_filename(8)
                                 if use_group_images:
-                                    filename = f"{random_name}_{img_idx+1}.jpg"
-                                elif num_images > 1:
-                                    filename = f"{random_name}_{i+1}.jpg"
+                                    filename = f"{random_name}_g{i+1}_{img_idx+1}.jpg"
                                 else:
-                                    filename = f"{random_name}.jpg"
+                                    filename = f"{random_name}_{i+1}.jpg"
                         
                         # 使用用户专属输出目录
                         output_path = os.path.join(user_output_folder, filename)
@@ -778,7 +993,11 @@ def generate():
                                 'file_size': len(img_data),
                                 'seed': per_seed
                             }
-                            img_index = img_idx + 1 if use_group_images else i + 1
+                            # 计算图片索引
+                            if use_group_images:
+                                img_index = i * 4 + img_idx + 1  # 组图：第i组第img_idx张
+                            else:
+                                img_index = i + 1  # 单图：第i张
                             log_operation('图片处理完成', f'用户ID={user_id}, 第{img_index}张 | {json.dumps(final_output, ensure_ascii=False)}')
                             print(f"[完成] 第 {img_index} 张图片处理完成:")
                             print(f"  文件名: {filename}")
@@ -787,16 +1006,11 @@ def generate():
                             print(f"  文件大小: {len(img_data)} bytes")
                             print(f"  种子值: {per_seed}")
                         
-                            generated_images.append({
-                                'filename': filename,
-                                'url': image_url,
-                                'seed': per_seed
-                            })
-                            
-                            # 保存记录到数据库
+                            # 保存记录到数据库（先保存，获取record_id）
+                            record_id = None
                             try:
                                 sample_images_list = [{'url': url, 'filename': os.path.basename(url)} for url in image_urls]
-                                database.save_generation_record({
+                                record_id = database.save_generation_record({
                                     'user_id': user_id,
                                     'prompt': prompt,
                                     'aspect_ratio': aspect_ratio,
@@ -814,6 +1028,14 @@ def generate():
                             except Exception as db_err:
                                 log_operation('保存记录失败', f'用户ID={user_id}, 文件={filename}, 错误={str(db_err)}', 'WARNING')
                                 print(f"[警告] 保存记录失败: {db_err}")
+                            
+                            # 添加到生成图片列表（在保存记录之后，确保record_id已获取）
+                            generated_images.append({
+                                'filename': filename,
+                                'url': image_url,
+                                'seed': per_seed,
+                                'record_id': record_id  # 添加记录ID，用于删除
+                            })
                         else:
                             log_operation('下载图片失败', f'用户ID={user_id}, URL={img_url}, 状态码={img_response.status_code}', 'WARNING')
                             print(f"[警告] 下载图片失败: HTTP {img_response.status_code}")
@@ -891,9 +1113,18 @@ def get_sample_images():
         user_id = session.get('user_id')
         category = request.args.get('category')
         log_request('GET', '/api/sample-images', user_id, f'类别: {category or "全部"}')
+        print(f"[API] /api/sample-images 请求 - 用户ID: {user_id}, 类别: {category}")
         
         # 先从 OSS 列表中读取（如果配置了 OSS）
-        sample_images = list_sample_images_from_oss(user_id)
+        try:
+            sample_images = list_sample_images_from_oss(user_id)
+            log_operation('OSS示例图加载', f'用户ID: {user_id}, 从OSS加载到 {len(sample_images)} 张图片')
+            print(f"[API] OSS加载完成，找到 {len(sample_images)} 张图片")
+        except Exception as oss_err:
+            print(f"[API] OSS加载失败: {oss_err}")
+            import traceback
+            traceback.print_exc()
+            sample_images = []  # OSS失败时返回空列表，继续从数据库加载
 
         # 再从数据库读取人物/场景库中的条目（包含本地保存的备份路径）
         # 为避免同一文件既存在于 OSS 又存在于数据库中导致重复显示，按 URL 去重
@@ -940,11 +1171,15 @@ def get_sample_images():
             sample_images = [s for s in sample_images if s.get('category') == category]
 
         log_operation('获取示例图', f'用户ID: {user_id}, 类别: {category or "全部"}, 数量: {len(sample_images)}')
+        print(f"[API] 准备返回响应 - 用户ID: {user_id}, 类别: {category or "全部"}, 图片数量: {len(sample_images)}")
         
-        return jsonify({
+        response_data = {
             'success': True,
             'images': sample_images
-        })
+        }
+        print(f"[API] 响应数据: success={response_data['success']}, images_count={len(response_data['images'])}")
+        
+        return jsonify(response_data)
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('获取示例图失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
@@ -1061,7 +1296,7 @@ def batch_generate():
         
         # 获取参数
         prompt = data.get('prompt', '').strip()
-        aspect_ratio = data.get('aspect_ratio', '1:1')
+        aspect_ratio = data.get('aspect_ratio', '9:16')
         resolution = data.get('resolution', '2k')
         sample_images_data = data.get('sample_images', [])
         num_images = int(data.get('num_images', 1))
@@ -1737,6 +1972,94 @@ def sync_task_to_database(api_task, user_id):
             thread = threading.Thread(target=download_and_upload_video)
             thread.daemon = True
             thread.start()
+    
+    # 如果视频状态为succeeded且有尾帧图片URL，自动下载并保存到图片库
+    if server_status == 'succeeded' and server_last_frame_url:
+        log_operation('检测到视频生成成功且有尾帧图片', f'用户ID: {user_id}, 任务ID: {task_id_str}, 尾帧URL: {server_last_frame_url}')
+        # 检查图片库中是否已存在该尾帧图片（通过URL判断）
+        existing_person = database.get_person_assets(user_id)
+        existing_scene = database.get_scene_assets(user_id)
+        all_existing_urls = set()
+        for asset in existing_person + existing_scene:
+            if asset.get('url'):
+                all_existing_urls.add(asset.get('url'))
+        
+        if server_last_frame_url not in all_existing_urls:
+            log_operation('图片库中不存在该尾帧图片，开始下载并保存', f'用户ID: {user_id}, 任务ID: {task_id_str}')
+            # 异步下载并上传尾帧图片到OSS，保存到场景库
+            import threading
+            def download_and_save_last_frame():
+                try:
+                    import requests
+                    import tempfile
+                    import os
+                    
+                    # 下载尾帧图片
+                    log_operation('开始下载尾帧图片', f'用户ID: {user_id}, 任务ID: {task_id_str}, URL: {server_last_frame_url}')
+                    response = requests.get(server_last_frame_url, timeout=60, stream=True)
+                    if response.status_code == 200:
+                        # 创建临时文件
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+                            tmp_path = tmp_file.name
+                            for chunk in response.iter_content(chunk_size=8192):
+                                tmp_file.write(chunk)
+                        
+                        # 上传到OSS（如果配置了OSS）
+                        oss_enabled = os.environ.get('OSS_ENDPOINT') and os.environ.get('OSS_ACCESS_KEY_ID')
+                        filename = f"last_frame_{task_id_str}.jpg"
+                        public_url = None
+                        
+                        if oss_enabled:
+                            # 上传到OSS的场景库目录
+                            bucket, endpoint_full = get_oss_bucket()
+                            if bucket:
+                                target_key = f'sample/scene/user_{user_id}/{filename}'
+                                try:
+                                    with open(tmp_path, 'rb') as fh:
+                                        bucket.put_object(target_key, fh.read())
+                                    public_url = f'https://{endpoint_full}/{target_key}'
+                                    log_operation('尾帧图片已上传到OSS', f'用户ID: {user_id}, 任务ID: {task_id_str}, OSS URL: {public_url}')
+                                except Exception as oss_err:
+                                    log_operation('尾帧图片上传到OSS失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(oss_err)}', 'WARNING')
+                                    # 如果OSS上传失败，使用原始URL
+                                    public_url = server_last_frame_url
+                            else:
+                                public_url = server_last_frame_url
+                        else:
+                            # 如果没有配置OSS，使用原始URL
+                            public_url = server_last_frame_url
+                        
+                        # 保存到场景库
+                        try:
+                            meta = {
+                                'task_id': task_id_str,
+                                'source': 'video_last_frame',
+                                'original_url': server_last_frame_url
+                            }
+                            database.save_scene_asset(user_id, filename, public_url, meta=meta)
+                            log_operation('尾帧图片已保存到场景库', f'用户ID: {user_id}, 任务ID: {task_id_str}, 文件名: {filename}, URL: {public_url}')
+                            print(f"[尾帧保存] 成功: 任务ID={task_id_str}, 文件名={filename}, URL={public_url}")
+                        except Exception as db_err:
+                            log_operation('保存尾帧图片到场景库失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(db_err)}', 'WARNING')
+                        
+                        # 删除临时文件
+                        try:
+                            os.unlink(tmp_path)
+                        except Exception:
+                            pass
+                    else:
+                        log_operation('下载尾帧图片失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP状态码: {response.status_code}', 'WARNING')
+                except Exception as e:
+                    log_operation('下载并保存尾帧图片失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
+                    import traceback
+                    traceback.print_exc()
+            
+            # 在后台线程中执行下载和保存
+            thread = threading.Thread(target=download_and_save_last_frame)
+            thread.daemon = True
+            thread.start()
+        else:
+            log_operation('尾帧图片已存在于图片库中，跳过保存', f'用户ID: {user_id}, 任务ID: {task_id_str}')
 
 def convert_api_task_to_unified_format(api_task, user_id):
     """将API任务转换为统一格式，包含所有生成参数和服务器信息"""
@@ -2152,7 +2475,7 @@ def api_video_generate():
         # 获取公共参数
         prompt = data.get('prompt', '').strip()
         resolution = data.get('resolution', '720p')  # 480p, 720p, 1080p
-        ratio = data.get('ratio', '16:9')  # 16:9, 4:3, 1:1, 3:4, 9:16, 21:9
+        ratio = data.get('ratio', '9:16')  # 16:9, 4:3, 1:1, 3:4, 9:16, 21:9
         duration = int(data.get('duration', 5))  # 2-12秒
         seed = data.get('seed', '-1')
         seed = int(seed) if seed and seed != '-1' and seed.isdigit() else None
@@ -2621,58 +2944,93 @@ def upload_sample_image():
         if 'file' not in request.files:
             log_operation('上传样本图失败', f'用户ID: {user_id}, 错误: 没有上传文件', 'WARNING')
             return jsonify({'success': False, 'error': '没有上传文件'}), 400
-        
-        file = request.files['file']
-        if file.filename == '':
+
+        # 支持多文件：同一字段名 file 可重复提交（FormData.append('file', f) 多次）
+        files = request.files.getlist('file')
+        files = [f for f in files if f and getattr(f, 'filename', '')]
+        if not files:
             log_operation('上传样本图失败', f'用户ID: {user_id}, 错误: 文件名为空', 'WARNING')
             return jsonify({'success': False, 'error': '文件名为空'}), 400
-        
+
         # 验证文件类型
         allowed_extensions = {'jpg', 'jpeg', 'png', 'webp'}
-        file_ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
-        if file_ext not in allowed_extensions:
-            log_operation('上传样本图失败', f'用户ID: {user_id}, 错误: 不支持的文件格式 {file_ext}', 'WARNING')
-            return jsonify({'success': False, 'error': f'不支持的文件格式，仅支持: {", ".join(allowed_extensions)}'}), 400
-        
+
         # 获取 OSS 配置
         bucket, endpoint_full = get_oss_bucket()
         if not bucket:
             log_operation('上传样本图失败', f'用户ID: {user_id}, 错误: OSS配置不完整', 'ERROR')
             return jsonify({'success': False, 'error': 'OSS 配置不完整'}), 500
-        
-        # 生成对象键 - 按用户与类别保存到 sample/{category}/user_{user_id}/ 目录
-        filename = secure_filename(file.filename)
+
         category = request.form.get('category', 'person')
         if category not in ('person', 'scene'):
             category = 'person'
-        object_key = f"sample/{category}/user_{user_id}/{filename}"
-        
+
+        uploaded = []
+        failed = []
+
         # 上传文件到 OSS
-        import oss2
-        file.seek(0)
-        file_content = file.read()
-        bucket.put_object(object_key, file_content)
-        
-        # 生成公网访问 URL
-        url = f"https://{endpoint_full}/{object_key}"
-        
-        # 保存到数据库
-        try:
-            if category == 'person':
-                database.save_person_asset(user_id, filename, url)
-            elif category == 'scene':
-                database.save_scene_asset(user_id, filename, url)
-        except Exception as db_err:
-            log_operation('保存到数据库失败', f'用户ID: {user_id}, 文件: {filename}, 错误: {str(db_err)}', 'WARNING')
-        
-        log_operation('上传样本图', f'用户ID: {user_id}, 文件: {filename}, 类别: {category}, 大小: {len(file_content)} bytes')
-        
-        return jsonify({
+        import oss2  # noqa: F401
+
+        for file in files:
+            try:
+                original_name = file.filename or ''
+                file_ext = original_name.rsplit('.', 1)[1].lower() if '.' in original_name else ''
+                if file_ext not in allowed_extensions:
+                    failed.append({'filename': original_name, 'error': f'不支持的文件格式 {file_ext}'})
+                    continue
+
+                filename = secure_filename(original_name)
+                if not filename:
+                    failed.append({'filename': original_name, 'error': '文件名非法或为空'})
+                    continue
+
+                # 生成对象键 - 按用户与类别保存到 sample/{category}/user_{user_id}/ 目录
+                object_key = f"sample/{category}/user_{user_id}/{filename}"
+
+                file.seek(0)
+                file_content = file.read()
+                bucket.put_object(object_key, file_content)
+
+                # 生成公网访问 URL
+                url = f"https://{endpoint_full}/{object_key}"
+
+                # 保存到数据库
+                try:
+                    if category == 'person':
+                        database.save_person_asset(user_id, filename, url)
+                    else:
+                        database.save_scene_asset(user_id, filename, url)
+                except Exception as db_err:
+                    log_operation('保存到数据库失败', f'用户ID: {user_id}, 文件: {filename}, 错误: {str(db_err)}', 'WARNING')
+
+                log_operation('上传样本图', f'用户ID: {user_id}, 文件: {filename}, 类别: {category}, 大小: {len(file_content)} bytes')
+                uploaded.append({'url': url, 'filename': filename, 'key': object_key})
+
+            except Exception as per_file_err:
+                failed.append({'filename': getattr(file, 'filename', '') or '', 'error': str(per_file_err)})
+
+        if not uploaded:
+            # 全部失败：返回 400，并带上失败明细
+            return jsonify({
+                'success': False,
+                'error': '上传失败（没有任何文件上传成功）',
+                'uploaded': [],
+                'failed': failed
+            }), 400
+
+        # 兼容旧前端：单文件时保留 url/filename/key 字段
+        first = uploaded[0]
+        resp = {
             'success': True,
-            'url': url,
-            'filename': filename,
-            'key': object_key
-        })
+            'uploaded_count': len(uploaded),
+            'failed_count': len(failed),
+            'uploaded': uploaded,
+            'failed': failed,
+            'url': first.get('url'),
+            'filename': first.get('filename'),
+            'key': first.get('key')
+        }
+        return jsonify(resp)
     
     except Exception as e:
         user_id = session.get('user_id')
@@ -3054,7 +3412,7 @@ def process_single_batch_task(task, batch_id, user_id):
     """处理单个批量任务"""
     try:
         prompt = task.get('prompt', '').strip()
-        aspect_ratio = task.get('aspect_ratio', '1:1')
+        aspect_ratio = task.get('aspect_ratio', '9:16')
         image_style = task.get('image_style', '').strip()
         resolution = task.get('resolution', '2k')
         sample_images_data = task.get('sample_images', [])
