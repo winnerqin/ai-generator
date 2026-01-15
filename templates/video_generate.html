@@ -464,8 +464,8 @@
                         <label for="resolution">分辨率</label>
                         <select id="resolution" name="resolution">
                             <option value="480p">480p</option>
-                            <option value="720p" selected>720p</option>
-                            <option value="1080p" id="resolution1080p">1080p</option>
+                            <option value="720p">720p</option>
+                            <option value="1080p" id="resolution1080p" selected>1080p</option>
                         </select>
                     </div>
                     
@@ -531,6 +531,9 @@
                     </div>
                 </div>
                 
+                <div style="margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-secondary" onclick="clearVideoCache()">清除缓存</button>
+                </div>
                 <button type="submit" class="btn btn-primary" id="submitBtn" style="width: 100%; margin-top: 20px;">
                     🚀 开始生成视频
                 </button>
@@ -569,11 +572,203 @@
     </div>
     
     <script>
+        const VIDEO_FORM_STORAGE_KEY = 'videoGenerateFormData';
+        let suppressVideoSave = false;
+
+        function applyGenerateTypeUI(generateType) {
+            document.getElementById('generateType').value = generateType;
+
+            document.querySelectorAll('.generate-type-option').forEach(opt => {
+                opt.classList.toggle('active', opt.dataset.type === generateType);
+            });
+
+            document.getElementById('firstLastFrameSection').style.display = 
+                (generateType === 'first_last_frame') ? 'flex' : 'none';
+            document.getElementById('firstFrameOnlySection').style.display = 
+                (generateType === 'first_frame') ? 'block' : 'none';
+            document.getElementById('referenceImageSection').style.display = 
+                (generateType === 'reference_image') ? 'block' : 'none';
+
+            // 参考图模式下禁用1080p分辨率和固定摄像机
+            const resolutionSelect = document.getElementById('resolution');
+            const resolution1080p = document.getElementById('resolution1080p');
+            const cameraFixedGroup = document.getElementById('cameraFixedGroup');
+            
+            if (generateType === 'reference_image') {
+                if (resolutionSelect.value === '1080p') {
+                    resolutionSelect.value = '720p';
+                }
+                resolution1080p.disabled = true;
+                resolution1080p.style.display = 'none';
+                cameraFixedGroup.style.display = 'none';
+                document.getElementById('camera_fixed').value = 'false';
+            } else {
+                resolution1080p.disabled = false;
+                resolution1080p.style.display = 'block';
+                cameraFixedGroup.style.display = 'block';
+            }
+        }
+
+        function getPreviewImageSrc(previewId) {
+            const preview = document.getElementById(previewId);
+            const img = preview ? preview.querySelector('img') : null;
+            return img ? img.src : '';
+        }
+
+        function getPreviewDataUrl(previewId) {
+            const src = getPreviewImageSrc(previewId);
+            return src && src.startsWith('data:') ? src : '';
+        }
+
+        function dataUrlToFile(dataUrl, filename) {
+            const parts = dataUrl.split(',');
+            const mimeMatch = parts[0].match(/data:(.*?);base64/);
+            const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+            const binary = atob(parts[1] || '');
+            const length = binary.length;
+            const array = new Uint8Array(length);
+            for (let i = 0; i < length; i++) {
+                array[i] = binary.charCodeAt(i);
+            }
+            return new File([array], filename || 'upload.png', { type: mime });
+        }
+
+        function saveVideoFormData() {
+            try {
+                if (suppressVideoSave) {
+                    return;
+                }
+                const data = {
+                    prompt: document.getElementById('prompt').value,
+                    generate_type: document.getElementById('generateType').value,
+                    resolution: document.getElementById('resolution').value,
+                    ratio: document.getElementById('ratio').value,
+                    duration: document.getElementById('duration').value,
+                    seed: document.getElementById('seed').value,
+                    camera_fixed: document.getElementById('camera_fixed').value,
+                    watermark: document.getElementById('watermark').value,
+                    generate_audio: document.getElementById('generate_audio').value,
+                    return_last_frame: document.getElementById('return_last_frame').value,
+                    first_frame_url: document.getElementById('firstFrameUrl').value || getPreviewImageSrc('firstFramePreview'),
+                    first_frame_in_pair_url: document.getElementById('firstFrameInPairUrl').value || getPreviewImageSrc('firstFrameInPairPreview'),
+                    last_frame_url: document.getElementById('lastFrameUrl').value || getPreviewImageSrc('lastFramePreview'),
+                    reference_images: referenceImageList.map(img => ({
+                        url: img.url,
+                        filename: img.filename,
+                        source: img.source
+                    }))
+                };
+                localStorage.setItem(VIDEO_FORM_STORAGE_KEY, JSON.stringify(data));
+            } catch (e) {
+                console.error('保存视频表单失败:', e);
+            }
+        }
+
+        function restorePreview(type, url) {
+            if (!url) return;
+            const preview = document.getElementById(type + 'Preview');
+            const urlInput = document.getElementById(type + 'Url');
+            if (urlInput) {
+                urlInput.value = url.startsWith('data:') ? '' : url;
+            }
+            preview.style.display = 'block';
+            preview.style.position = 'relative';
+            preview.innerHTML = `<img src="${url}" alt="预览" style="max-width: 100%; max-height: 200px; border-radius: 8px; display: block;">`;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.onclick = () => clearImage(type);
+            btn.style.cssText = 'position: absolute; top: 5px; right: 5px; background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.8em;';
+            btn.textContent = '✕ 删除';
+            btn.id = type + 'ClearBtn';
+            preview.appendChild(btn);
+        }
+
+        function loadVideoFormData() {
+            try {
+                const saved = localStorage.getItem(VIDEO_FORM_STORAGE_KEY);
+                if (!saved) return false;
+                const data = JSON.parse(saved);
+                document.getElementById('prompt').value = data.prompt || '';
+                document.getElementById('resolution').value = data.resolution || '1080p';
+                document.getElementById('ratio').value = data.ratio || '9:16';
+                document.getElementById('duration').value = data.duration || '5';
+                document.getElementById('seed').value = data.seed || '-1';
+                document.getElementById('camera_fixed').value = data.camera_fixed || 'false';
+                document.getElementById('watermark').value = data.watermark || 'false';
+                document.getElementById('generate_audio').value = data.generate_audio || 'false';
+                document.getElementById('return_last_frame').value = data.return_last_frame || 'false';
+                
+                applyGenerateTypeUI(data.generate_type || 'text');
+                
+                if (data.first_frame_url) {
+                    restorePreview('firstFrame', data.first_frame_url);
+                }
+                if (data.first_frame_in_pair_url) {
+                    restorePreview('firstFrameInPair', data.first_frame_in_pair_url);
+                }
+                if (data.last_frame_url) {
+                    restorePreview('lastFrame', data.last_frame_url);
+                }
+
+                if (Array.isArray(data.reference_images)) {
+                    referenceImageList = data.reference_images.map(img => ({
+                        url: img.url,
+                        filename: img.filename,
+                        source: img.source || 'library'
+                    }));
+                    updateReferenceImageList();
+                }
+                return true;
+            } catch (e) {
+                console.error('恢复视频表单失败:', e);
+                return false;
+            }
+        }
+
+        function setupVideoAutoSave() {
+            const inputs = ['prompt', 'resolution', 'ratio', 'duration', 'seed', 'camera_fixed', 'watermark', 'generate_audio', 'return_last_frame'];
+            inputs.forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.addEventListener('input', saveVideoFormData);
+                    element.addEventListener('change', saveVideoFormData);
+                }
+            });
+        }
+
+        function clearVideoCache() {
+            suppressVideoSave = true;
+            localStorage.removeItem(VIDEO_FORM_STORAGE_KEY);
+            document.getElementById('prompt').value = '';
+            document.getElementById('resolution').value = '1080p';
+            document.getElementById('ratio').value = '9:16';
+            document.getElementById('duration').value = '5';
+            document.getElementById('seed').value = '-1';
+            document.getElementById('camera_fixed').value = 'false';
+            document.getElementById('watermark').value = 'false';
+            document.getElementById('generate_audio').value = 'false';
+            document.getElementById('return_last_frame').value = 'false';
+            applyGenerateTypeUI('text');
+            
+            clearImage('firstFrame');
+            clearImage('firstFrameInPair');
+            clearImage('lastFrame');
+            referenceImageList = [];
+            updateReferenceImageList();
+            const refInput = document.getElementById('referenceImageUpload');
+            if (refInput) {
+                refInput.value = '';
+            }
+            suppressVideoSave = false;
+            localStorage.removeItem(VIDEO_FORM_STORAGE_KEY);
+        }
+
         // 页面加载时，检查URL参数并填充表单
         document.addEventListener('DOMContentLoaded', function() {
             const urlParams = new URLSearchParams(window.location.search);
+            const hasUrlParams = Array.from(urlParams.keys()).length > 0;
             
-            if (urlParams.has('prompt')) {
+            if (hasUrlParams && urlParams.has('prompt')) {
                 // 填充提示词
                 document.getElementById('prompt').value = urlParams.get('prompt');
                 
@@ -605,48 +800,7 @@
                 
                 // 设置生成方式
                 const generateType = urlParams.get('generate_type') || 'text';
-                document.getElementById('generateType').value = generateType;
-                
-                // 更新UI显示
-                document.querySelectorAll('.generate-type-option').forEach(opt => {
-                    opt.classList.remove('active');
-                    if (opt.dataset.type === generateType) {
-                        opt.classList.add('active');
-                    }
-                });
-                
-                // 显示/隐藏相应的上传区域
-                document.getElementById('firstLastFrameSection').style.display = 
-                    (generateType === 'first_last_frame') ? 'flex' : 'none';
-                document.getElementById('firstFrameOnlySection').style.display = 
-                    (generateType === 'first_frame') ? 'block' : 'none';
-                document.getElementById('referenceImageSection').style.display = 
-                    (generateType === 'reference_image') ? 'block' : 'none';
-                
-                // 参考图模式下禁用1080p分辨率和固定摄像机
-                const resolutionSelect = document.getElementById('resolution');
-                const resolution1080p = document.getElementById('resolution1080p');
-                const cameraFixedGroup = document.getElementById('cameraFixedGroup');
-                
-                if (generateType === 'reference_image') {
-                    // 禁用1080p选项
-                    if (resolutionSelect.value === '1080p') {
-                        resolutionSelect.value = '720p';
-                    }
-                    resolution1080p.disabled = true;
-                    resolution1080p.style.display = 'none';
-                    
-                    // 隐藏固定摄像机选项
-                    cameraFixedGroup.style.display = 'none';
-                    document.getElementById('camera_fixed').value = 'false';
-                } else {
-                    // 恢复1080p选项
-                    resolution1080p.disabled = false;
-                    resolution1080p.style.display = 'block';
-                    
-                    // 显示固定摄像机选项
-                    cameraFixedGroup.style.display = 'block';
-                }
+                applyGenerateTypeUI(generateType);
                 
                 // 填充首帧图片（根据当前生成类型选择正确的预览区域）
                 if (urlParams.has('first_frame_url')) {
@@ -720,24 +874,20 @@
                 const successMsg = document.getElementById('successMessage');
                 successMsg.textContent = '已加载任务参数，可以修改后重新生成';
                 successMsg.style.display = 'block';
+                saveVideoFormData();
+            } else {
+                loadVideoFormData();
             }
+
+            setupVideoAutoSave();
         });
         
         // 生成方式选择
         document.querySelectorAll('.generate-type-option').forEach(option => {
             option.addEventListener('click', function() {
-                document.querySelectorAll('.generate-type-option').forEach(opt => opt.classList.remove('active'));
-                this.classList.add('active');
-                document.getElementById('generateType').value = this.dataset.type;
-                
-                // 显示/隐藏相应的上传区域
                 const type = this.dataset.type;
-                document.getElementById('firstLastFrameSection').style.display = 
-                    (type === 'first_last_frame') ? 'flex' : 'none';
-                document.getElementById('firstFrameOnlySection').style.display = 
-                    (type === 'first_frame') ? 'block' : 'none';
-                document.getElementById('referenceImageSection').style.display = 
-                    (type === 'reference_image') ? 'block' : 'none';
+                applyGenerateTypeUI(type);
+                saveVideoFormData();
             });
         });
         
@@ -889,6 +1039,7 @@
             if (clearBtn) {
                 clearBtn.remove();
             }
+            saveVideoFormData();
         }
         
         // 从库中添加参考图
@@ -912,6 +1063,7 @@
             
             updateReferenceImageList();
             updateImageSelectorTitle();
+            saveVideoFormData();
             // 不关闭选择器，允许继续选择
         }
         
@@ -940,6 +1092,7 @@
                         file: file
                     });
                     updateReferenceImageList();
+                    saveVideoFormData();
                 };
                 reader.readAsDataURL(file);
             });
@@ -957,6 +1110,7 @@
             
             if (referenceImageList.length === 0) {
                 listContainer.innerHTML = '';
+                saveVideoFormData();
                 return;
             }
             
@@ -972,6 +1126,7 @@
                     </div>
                 `;
             }).join('');
+            saveVideoFormData();
         }
         
         // 移除参考图
@@ -979,6 +1134,7 @@
             referenceImageList.splice(index, 1);
             updateReferenceImageList();
             updateImageSelectorTitle();
+            saveVideoFormData();
         }
         
         // 图片上传处理
@@ -1014,6 +1170,7 @@
                 if (urlInput) {
                     urlInput.value = '';
                 }
+                saveVideoFormData();
             };
             reader.readAsDataURL(file);
         }
@@ -1047,7 +1204,8 @@
             if (generateType === 'first_frame') {
                 const firstFrameFile = document.getElementById('firstFrameOnlyUpload').files[0];
                 const firstFrameUrl = document.getElementById('firstFrameUrl').value.trim();
-                if (!firstFrameFile && !firstFrameUrl) {
+                const firstFrameDataUrl = getPreviewDataUrl('firstFramePreview');
+                if (!firstFrameFile && !firstFrameUrl && !firstFrameDataUrl) {
                     errorMsg.textContent = '请选择或上传首帧图片';
                     errorMsg.style.display = 'block';
                     return;
@@ -1055,7 +1213,8 @@
             } else if (generateType === 'first_last_frame') {
                 const firstFrameFile = document.getElementById('firstFrameInPairUpload').files[0];
                 const firstFrameUrl = document.getElementById('firstFrameInPairUrl').value.trim();
-                if (!firstFrameFile && !firstFrameUrl) {
+                const firstFrameDataUrl = getPreviewDataUrl('firstFrameInPairPreview');
+                if (!firstFrameFile && !firstFrameUrl && !firstFrameDataUrl) {
                     errorMsg.textContent = '请选择或上传首帧图片';
                     errorMsg.style.display = 'block';
                     return;
@@ -1065,7 +1224,8 @@
             if (generateType === 'first_last_frame') {
                 const lastFrameFile = document.getElementById('lastFrameUpload').files[0];
                 const lastFrameUrl = document.getElementById('lastFrameUrl').value.trim();
-                if (!lastFrameFile && !lastFrameUrl) {
+                const lastFrameDataUrl = getPreviewDataUrl('lastFramePreview');
+                if (!lastFrameFile && !lastFrameUrl && !lastFrameDataUrl) {
                     errorMsg.textContent = '请选择或上传尾帧图片';
                     errorMsg.style.display = 'block';
                     return;
@@ -1107,28 +1267,37 @@
                 if (generateType === 'first_frame') {
                     const firstFrameFile = document.getElementById('firstFrameOnlyUpload').files[0];
                     const firstFrameUrl = document.getElementById('firstFrameUrl').value.trim();
+                    const firstFrameDataUrl = getPreviewDataUrl('firstFramePreview');
                     if (firstFrameFile) {
                         formData.append('first_frame', firstFrameFile);
                     } else if (firstFrameUrl) {
                         formData.append('first_frame_url', firstFrameUrl);
+                    } else if (firstFrameDataUrl) {
+                        formData.append('first_frame', dataUrlToFile(firstFrameDataUrl, 'first_frame.png'));
                     }
                 } else if (generateType === 'first_last_frame') {
                     const firstFrameFile = document.getElementById('firstFrameInPairUpload').files[0];
                     const firstFrameUrl = document.getElementById('firstFrameInPairUrl').value.trim();
+                    const firstFrameDataUrl = getPreviewDataUrl('firstFrameInPairPreview');
                     if (firstFrameFile) {
                         formData.append('first_frame', firstFrameFile);
                     } else if (firstFrameUrl) {
                         formData.append('first_frame_url', firstFrameUrl);
+                    } else if (firstFrameDataUrl) {
+                        formData.append('first_frame', dataUrlToFile(firstFrameDataUrl, 'first_frame.png'));
                     }
                 }
                 
                 if (generateType === 'first_last_frame') {
                     const lastFrameFile = document.getElementById('lastFrameUpload').files[0];
                     const lastFrameUrl = document.getElementById('lastFrameUrl').value.trim();
+                    const lastFrameDataUrl = getPreviewDataUrl('lastFramePreview');
                     if (lastFrameFile) {
                         formData.append('last_frame', lastFrameFile);
                     } else if (lastFrameUrl) {
                         formData.append('last_frame_url', lastFrameUrl);
+                    } else if (lastFrameDataUrl) {
+                        formData.append('last_frame', dataUrlToFile(lastFrameDataUrl, 'last_frame.png'));
                     }
                 }
                 
@@ -1137,6 +1306,8 @@
                     referenceImageList.forEach((img, index) => {
                         if (img.source === 'upload' && img.file) {
                             formData.append(`reference_image_${index}`, img.file);
+                        } else if (img.source === 'upload' && img.url && img.url.startsWith('data:')) {
+                            formData.append(`reference_image_${index}`, dataUrlToFile(img.url, img.filename || `reference_${index}.png`));
                         } else if (img.url) {
                             formData.append(`reference_image_url_${index}`, img.url);
                         }

@@ -76,6 +76,22 @@
             resize: vertical;
             font-family: inherit;
         }
+
+        .prompt-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .prompt-row .form-group {
+            flex: 1;
+        }
+
+        .prompt-actions {
+            display: flex;
+            align-items: center;
+            height: 100%;
+        }
         
         /* 提示词输入框拉宽 */
         #prompt {
@@ -707,9 +723,16 @@
                 <div class="error-message" id="errorMessage"></div>
                 
                 <form id="generateForm">
-                    <div class="form-group">
-                        <label for="prompt">提示词 *</label>
-                        <textarea id="prompt" name="prompt" placeholder="描述你想要生成的图片..." required></textarea>
+                    <div class="prompt-row">
+                        <div class="form-group">
+                            <label for="prompt">提示词 *</label>
+                            <textarea id="prompt" name="prompt" placeholder="描述你想要生成的图片..." required></textarea>
+                        </div>
+                        <div class="prompt-actions">
+                            <button type="submit" class="generate-btn" id="generateBtn" style="margin-top: 0;">
+                                🚀 开始生成
+                            </button>
+                        </div>
                     </div>
                     
                     <!-- 生成的图片显示区域 -->
@@ -823,9 +846,6 @@
                         </div>
                     </div>
                     
-                    <button type="submit" class="generate-btn" id="generateBtn">
-                        🚀 开始生成
-                    </button>
                     <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap: wrap;">
                         <button type="button" id="clearCacheBtn" class="btn btn-secondary" onclick="clearIndexCache()">清除本地缓存</button>
                         <button type="button" id="clearGenerationStateBtn" class="btn btn-secondary" onclick="clearGenerationState()" style="display:none;">清除生成状态</button>
@@ -898,6 +918,7 @@
                     prompt: document.getElementById('prompt').value,
                     aspect_ratio: document.getElementById('aspect_ratio').value,
                     resolution: document.getElementById('resolution').value,
+                    generate_mode: document.getElementById('generate_mode').value,
                     num_images: document.getElementById('num_images').value,
                     image_style: document.getElementById('image_style').value,
                     seed: document.getElementById('seed').value,
@@ -918,7 +939,8 @@
                     document.getElementById('prompt').value = formData.prompt || '';
                     document.getElementById('aspect_ratio').value = formData.aspect_ratio || '9:16';
                     document.getElementById('resolution').value = formData.resolution || '2k';
-                    document.getElementById('num_images').value = formData.num_images || 1;
+                    document.getElementById('generate_mode').value = formData.generate_mode || 'single';
+                    document.getElementById('num_images').value = formData.num_images || 4;
                     document.getElementById('image_style').value = formData.image_style || '';
                     document.getElementById('seed').value = formData.seed || 0;
                     document.getElementById('output_filename').value = formData.output_filename || '';
@@ -930,7 +952,7 @@
         
         // 监听表单输入变化
         function setupAutoSave() {
-            const inputs = ['prompt', 'aspect_ratio', 'resolution', 'num_images', 'image_style', 'seed', 'output_filename'];
+            const inputs = ['prompt', 'aspect_ratio', 'resolution', 'generate_mode', 'num_images', 'image_style', 'seed', 'output_filename'];
             inputs.forEach(id => {
                 const element = document.getElementById(id);
                 if (element) {
@@ -995,6 +1017,7 @@
         let keepAliveController = null;
         let currentGenerationState = null;
         let generateAbortController = null;
+        let resumeStreamController = null;
         
         // 页面加载时恢复生成状态
         window.addEventListener('load', function() {
@@ -1002,6 +1025,7 @@
             if (savedState) {
                 try {
                     const state = JSON.parse(savedState);
+                    currentGenerationState = state;
                     const elapsed = Date.now() - state.startTime;
                     
                     // 如果是进行中的任务，不清除状态，让生成继续
@@ -1010,6 +1034,8 @@
                         console.log('检测到进行中的生成任务，任务将在后台继续执行。');
                         // 不清除状态，保持generating状态
                         // 用户可以在生图任务页面查看结果
+                        restoreGeneratingUI(state);
+                        resumeStreamIfNeeded(state);
                     }
                     // 如果是已完成的任务，恢复显示结果（但只保留5分钟内的结果）
                     else if (state.status === 'completed' && state.result) {
@@ -1055,6 +1081,156 @@
             // 隐藏清除状态按钮
             if (clearStateBtn) {
                 clearStateBtn.style.display = 'none';
+            }
+        }
+
+        function restoreGeneratingUI(state) {
+            const loading = document.getElementById('loading');
+            const generateBtn = document.getElementById('generateBtn');
+            const resultImages = document.getElementById('resultImages');
+            const resultSection = document.getElementById('resultSection');
+            const totalImages = state && state.totalImages ? state.totalImages : 0;
+            
+            if (resultImages && !resultImages.hasChildNodes() && totalImages > 0) {
+                for (let i = 0; i < totalImages; i++) {
+                    const placeholder = document.createElement('div');
+                    placeholder.className = 'result-image placeholder';
+                    placeholder.dataset.imageIndex = i;
+                    placeholder.innerHTML = `
+                        <div class="image-placeholder">
+                            <div class="spinner"></div>
+                            <p>生成中...</p>
+                        </div>
+                    `;
+                    resultImages.appendChild(placeholder);
+                }
+            }
+            
+            if (resultSection) resultSection.style.display = 'block';
+            if (loading) loading.classList.add('active');
+            generateBtn.disabled = true;
+            generateBtn.textContent = '生成中...';
+            checkAndShowClearButton();
+        }
+
+        function persistGenerationState() {
+            if (currentGenerationState) {
+                localStorage.setItem('singleGenerationState', JSON.stringify(currentGenerationState));
+            }
+        }
+
+        function collectGeneratedImages() {
+            if (!allGeneratedImages || allGeneratedImages.length === 0) {
+                return [];
+            }
+            return allGeneratedImages
+                .filter(Boolean)
+                .map(img => ({
+                    url: img.url,
+                    filename: img.filename,
+                    record_id: img.recordId || img.record_id || ''
+                }));
+        }
+
+        async function handleStreamResponse(response) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            
+                            if (currentGenerationState) {
+                                if (data.generation_id && !currentGenerationState.generationId) {
+                                    currentGenerationState.generationId = data.generation_id;
+                                }
+                                if (typeof data.event_index === 'number') {
+                                    currentGenerationState.lastEventIndex = data.event_index;
+                                }
+                            }
+                            
+                            if (data.type === 'start') {
+                                console.log('流式生成开始，总共:', data.total);
+                            } else if (data.type === 'image') {
+                                updateImagePlaceholder(data.index, {
+                                    url: data.url,
+                                    filename: data.filename,
+                                    seed: data.seed,
+                                    record_id: data.record_id
+                                });
+                                if (currentGenerationState) {
+                                    currentGenerationState.generatedCount = (currentGenerationState.generatedCount || 0) + 1;
+                                }
+                            } else if (data.type === 'complete') {
+                                if (currentGenerationState) {
+                                    currentGenerationState = {
+                                        ...currentGenerationState,
+                                        status: 'completed',
+                                        result: { images: collectGeneratedImages() },
+                                        startTime: currentGenerationState.startTime
+                                    };
+                                }
+                                console.log('流式生成完成，总共:', data.total);
+                            } else if (data.type === 'error') {
+                                const errorMessage = document.getElementById('errorMessage');
+                                if (errorMessage) {
+                                    errorMessage.textContent = '生成失败: ' + (data.error || '未知错误');
+                                    errorMessage.classList.add('active');
+                                }
+                                if (currentGenerationState) {
+                                    currentGenerationState = {
+                                        ...currentGenerationState,
+                                        status: 'failed',
+                                        error: data.error,
+                                        startTime: currentGenerationState.startTime
+                                    };
+                                }
+                            }
+                            
+                            persistGenerationState();
+                        } catch (e) {
+                            console.error('解析流式数据失败:', e, line);
+                        }
+                    }
+                }
+            }
+        }
+
+        async function resumeStreamIfNeeded(state) {
+            if (!state || state.status !== 'generating' || !state.generationId) {
+                return;
+            }
+            if (resumeStreamController) {
+                return;
+            }
+            const fromIndex = typeof state.lastEventIndex === 'number' ? state.lastEventIndex + 1 : 0;
+            resumeStreamController = new AbortController();
+            try {
+                const response = await fetch(`/generate/stream?generation_id=${encodeURIComponent(state.generationId)}&from=${fromIndex}`, {
+                    method: 'GET',
+                    keepalive: true,
+                    signal: resumeStreamController.signal
+                });
+                if (!response.ok) {
+                    throw new Error('恢复流式连接失败');
+                }
+                await handleStreamResponse(response);
+            } catch (error) {
+                if (error.name !== 'AbortError') {
+                    console.warn('恢复流式连接失败:', error.message);
+                }
+            } finally {
+                resumeStreamController = null;
             }
         }
         
@@ -1131,6 +1307,10 @@
             if (generateAbortController) {
                 generateAbortController.abort();
             }
+            if (resumeStreamController) {
+                resumeStreamController.abort();
+                resumeStreamController = null;
+            }
             
             // 创建新的 AbortController（仅用于取消当前请求，不用于页面切换）
             generateAbortController = new AbortController();
@@ -1171,9 +1351,11 @@
                 status: 'generating',
                 startTime: Date.now(),
                 totalImages: totalImages,
-                generatedCount: 0
+                generatedCount: 0,
+                generationId: null,
+                lastEventIndex: -1
             };
-            localStorage.setItem('singleGenerationState', JSON.stringify(currentGenerationState));
+            persistGenerationState();
             // 显示清除状态按钮
             checkAndShowClearButton();
             
@@ -1199,6 +1381,12 @@
                     body: formData,
                     keepalive: true
                 });
+
+                const headerGenerationId = response.headers.get('x-generation-id');
+                if (headerGenerationId && currentGenerationState) {
+                    currentGenerationState.generationId = headerGenerationId;
+                    persistGenerationState();
+                }
                 
                 if (!response.ok) {
                     const errorData = await response.json();
@@ -1208,66 +1396,7 @@
                 // 检查是否是流式响应
                 const contentType = response.headers.get('content-type');
                 if (contentType && contentType.includes('text/event-stream')) {
-                    // 流式响应处理
-                    const reader = response.body.getReader();
-                    const decoder = new TextDecoder();
-                    let buffer = '';
-                    const allImages = [];
-                    
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-                        
-                        buffer += decoder.decode(value, { stream: true });
-                        const lines = buffer.split('\n');
-                        buffer = lines.pop() || ''; // 保留最后一个不完整的行
-                        
-                        for (const line of lines) {
-                            if (line.startsWith('data: ')) {
-                                try {
-                                    const data = JSON.parse(line.slice(6));
-                                    
-                                    if (data.type === 'start') {
-                                        console.log('流式生成开始，总共:', data.total);
-                                    } else if (data.type === 'image') {
-                                        // 立即更新占位符
-                                        updateImagePlaceholder(data.index, {
-                                            url: data.url,
-                                            filename: data.filename,
-                                            seed: data.seed,
-                                            record_id: data.record_id
-                                        });
-                                        allImages.push({
-                                            url: data.url,
-                                            filename: data.filename,
-                                            seed: data.seed,
-                                            record_id: data.record_id
-                                        });
-                                    } else if (data.type === 'complete') {
-                                        // 保存完成状态
-                                        currentGenerationState = {
-                                            status: 'completed',
-                                            result: { images: allImages },
-                                            startTime: currentGenerationState.startTime
-                                        };
-                                        localStorage.setItem('singleGenerationState', JSON.stringify(currentGenerationState));
-                                        console.log('流式生成完成，总共:', data.total);
-                                    } else if (data.type === 'error') {
-                                        errorMessage.textContent = '生成失败: ' + (data.error || '未知错误');
-                                        errorMessage.classList.add('active');
-                                        currentGenerationState = {
-                                            status: 'failed',
-                                            error: data.error,
-                                            startTime: currentGenerationState.startTime
-                                        };
-                                        localStorage.setItem('singleGenerationState', JSON.stringify(currentGenerationState));
-                                    }
-                                } catch (e) {
-                                    console.error('解析流式数据失败:', e, line);
-                                }
-                            }
-                        }
-                    }
+                    await handleStreamResponse(response);
                 } else {
                     // 非流式响应（兼容旧版本）
                     const data = await response.json();
@@ -1280,7 +1409,7 @@
                             error: data.error,
                             startTime: currentGenerationState.startTime
                         };
-                        localStorage.setItem('singleGenerationState', JSON.stringify(currentGenerationState));
+                        persistGenerationState();
                     } else if (data.success) {
                         // 逐张显示图片（带延迟效果，模拟实时生成）
                         if (data.images && data.images.length > 0) {
@@ -1295,7 +1424,7 @@
                             result: data,
                             startTime: currentGenerationState.startTime
                         };
-                        localStorage.setItem('singleGenerationState', JSON.stringify(currentGenerationState));
+                        persistGenerationState();
                     }
                 }
             } catch (error) {
@@ -1318,7 +1447,7 @@
                     error: errorMsg,
                     startTime: currentGenerationState ? currentGenerationState.startTime : Date.now()
                 };
-                localStorage.setItem('singleGenerationState', JSON.stringify(currentGenerationState));
+                persistGenerationState();
             } finally {
                 // 只有在页面仍然可见时才更新UI
                 // 如果页面已切换，UI更新可能会失败，但不影响后台任务
@@ -1345,6 +1474,7 @@
                 if (savedState) {
                     try {
                         const state = JSON.parse(savedState);
+                        currentGenerationState = state;
                         // 如果已完成，显示结果（但只保留5分钟内的结果）
                         if (state.status === 'completed' && state.result) {
                             const elapsed = Date.now() - state.startTime;
@@ -1367,6 +1497,10 @@
                         }
                         // 如果是generating状态，保持状态，不清除
                         // 生成任务会在后台继续执行
+                        else if (state.status === 'generating') {
+                            restoreGeneratingUI(state);
+                            resumeStreamIfNeeded(state);
+                        }
                     } catch (e) {
                         console.error('恢复生成状态失败:', e);
                         localStorage.removeItem('singleGenerationState');
@@ -2187,8 +2321,9 @@
                 console.error('初始化加载示例图失败:', error);
             }
             
-            // 不调用 loadFormData()，让表单保持默认状态
-            // 也不调用 setupAutoSave()，不在刷新时保存表单数据
+            // 恢复表单缓存并启用自动保存，便于页面切换后保留内容
+            loadFormData();
+            setupAutoSave();
         });
         
         // 侧边栏收缩功能

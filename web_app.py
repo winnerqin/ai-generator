@@ -4,6 +4,7 @@ import base64
 import random
 import uuid
 import threading
+import queue
 import logging
 import string
 from datetime import datetime
@@ -108,6 +109,10 @@ def log_response(endpoint, status, message=None):
 # 全局变量：存储批量任务进度
 batch_progress = {}
 batch_progress_lock = threading.Lock()
+
+# 全局变量：单图流式生成通道
+single_generation_channels = {}
+single_generation_lock = threading.Lock()
 
 # 全局变量：存储正在上传的视频任务，防止重复上传
 video_uploading = {}
@@ -529,8 +534,8 @@ def index():
     return render_template('index.html', user=get_current_user())
 
 def generate_images_stream(client, user_id, prompt, aspect_ratio, resolution, generate_mode,
-                           num_images, image_style, seed, output_filename, image_urls, width, height, oss_enabled):
-    """流式生成图片的生成器函数"""
+                          num_images, image_style, seed, output_filename, image_urls, width, height, oss_enabled):
+    """流式生成图片的生成器函数（返回事件字典）"""
     try:
         # 根据生成模式确定逻辑
         use_group_images = generate_mode == 'group'
@@ -543,7 +548,7 @@ def generate_images_stream(client, user_id, prompt, aspect_ratio, resolution, ge
         total_expected = total_needed * 4 if use_group_images else total_needed
         
         # 发送初始信息
-        yield f"data: {json.dumps({'type': 'start', 'total': total_expected, 'mode': generate_mode})}\n\n"
+        yield {'type': 'start', 'total': total_expected, 'mode': generate_mode}
         
         for i in range(total_needed):
             # 计算种子
@@ -588,7 +593,7 @@ def generate_images_stream(client, user_id, prompt, aspect_ratio, resolution, ge
                         extra_body_params["image"] = image_urls[0]
                 
                 # 发送生成开始事件
-                yield f"data: {json.dumps({'type': 'generating', 'index': i + 1, 'total': total_needed})}\n\n"
+                yield {'type': 'generating', 'index': i + 1, 'total': total_needed}
                 
                 response = client.images.generate(
                     model="doubao-seedream-4-5-251128",
@@ -664,31 +669,107 @@ def generate_images_stream(client, user_id, prompt, aspect_ratio, resolution, ge
                             generated_count += 1
                             
                             # 立即发送图片数据
-                            yield f"data: {json.dumps({
+                            yield {
                                 'type': 'image',
                                 'index': img_index,
                                 'filename': filename,
                                 'url': image_url,
                                 'seed': per_seed,
                                 'record_id': record_id
-                            })}\n\n"
+                            }
                         else:
                             # 下载失败，发送错误
-                            yield f"data: {json.dumps({'type': 'error', 'index': i * 4 + img_idx if use_group_images else i, 'error': f'下载图片失败: HTTP {img_response.status_code}'})}\n\n"
+                            yield {'type': 'error', 'index': i * 4 + img_idx if use_group_images else i, 'error': f'下载图片失败: HTTP {img_response.status_code}'}
                 else:
                     # API返回空数据
-                    yield f"data: {json.dumps({'type': 'error', 'index': i + 1, 'error': 'API返回数据为空'})}\n\n"
+                    yield {'type': 'error', 'index': i + 1, 'error': 'API返回数据为空'}
                     
             except Exception as e:
                 # 发送错误事件
-                yield f"data: {json.dumps({'type': 'error', 'index': i + 1, 'error': str(e)})}\n\n"
+                yield {'type': 'error', 'index': i + 1, 'error': str(e)}
                 continue
         
         # 发送完成事件
-        yield f"data: {json.dumps({'type': 'complete', 'total': generated_count})}\n\n"
+        yield {'type': 'complete', 'total': generated_count}
         
     except Exception as e:
-        yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+        yield {'type': 'error', 'error': str(e)}
+
+
+def stream_from_queue(event_queue):
+    """从队列中读取并输出流式内容，直到遇到 None 结束。"""
+    while True:
+        item = event_queue.get()
+        if item is None:
+            break
+        yield item
+
+
+def format_sse_event(payload):
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def cleanup_single_generation_channels(max_age_seconds=3600):
+    now = time.time()
+    to_delete = []
+    with single_generation_lock:
+        for gen_id, channel in single_generation_channels.items():
+            if channel.get('done') and now - channel.get('created_at', now) > max_age_seconds:
+                to_delete.append(gen_id)
+        for gen_id in to_delete:
+            single_generation_channels.pop(gen_id, None)
+
+
+def create_generation_channel(user_id):
+    cleanup_single_generation_channels()
+    generation_id = uuid.uuid4().hex
+    channel = {
+        'id': generation_id,
+        'user_id': user_id,
+        'history': [],
+        'subscribers': set(),
+        'done': False,
+        'created_at': time.time()
+    }
+    with single_generation_lock:
+        single_generation_channels[generation_id] = channel
+    return channel
+
+
+def stream_from_channel(channel, start_index=0):
+    local_queue = queue.Queue(maxsize=200)
+    with single_generation_lock:
+        history = list(channel['history'])
+        done = channel['done']
+        if not done:
+            channel['subscribers'].add(local_queue)
+    
+    for item in history[start_index:]:
+        yield item
+    
+    if done:
+        return
+    
+    try:
+        while True:
+            item = local_queue.get()
+            if item is None:
+                break
+            yield item
+    finally:
+        with single_generation_lock:
+            channel['subscribers'].discard(local_queue)
+
+
+def finalize_generation_channel(channel):
+    with single_generation_lock:
+        channel['done'] = True
+        subscribers = list(channel['subscribers'])
+    for q in subscribers:
+        try:
+            q.put(None, timeout=1)
+        except queue.Full:
+            pass
 
 
 @app.route('/generate', methods=['POST'])
@@ -778,15 +859,44 @@ def generate():
         
         # 如果启用流式输出，使用流式响应
         if stream:
+            channel = create_generation_channel(user_id)
+            generation_id = channel['id']
+
+            def enqueue_event(payload, event_index):
+                payload = dict(payload)
+                payload.setdefault('generation_id', generation_id)
+                payload['event_index'] = event_index
+                sse_data = format_sse_event(payload)
+                with single_generation_lock:
+                    channel['history'].append(sse_data)
+                    subscribers = list(channel['subscribers'])
+                for q in subscribers:
+                    try:
+                        q.put(sse_data, timeout=1)
+                    except queue.Full:
+                        continue
+
+            def worker():
+                event_index = 0
+                try:
+                    for payload in generate_images_stream(
+                        client, user_id, prompt, aspect_ratio, resolution, generate_mode,
+                        num_images, image_style, seed, output_filename, image_urls, width, height, oss_enabled
+                    ):
+                        enqueue_event(payload, event_index)
+                        event_index += 1
+                finally:
+                    finalize_generation_channel(channel)
+
+            threading.Thread(target=worker, daemon=True).start()
+
             return Response(
-                stream_with_context(generate_images_stream(
-                    client, user_id, prompt, aspect_ratio, resolution, generate_mode,
-                    num_images, image_style, seed, output_filename, image_urls, width, height, oss_enabled
-                )),
+                stream_with_context(stream_from_channel(channel, 0)),
                 mimetype='text/event-stream',
                 headers={
                     'Cache-Control': 'no-cache',
-                    'X-Accel-Buffering': 'no'
+                    'X-Accel-Buffering': 'no',
+                    'X-Generation-Id': generation_id
                 }
             )
         
@@ -1104,6 +1214,39 @@ def generate():
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'服务器错误: {str(e)}'}), 500
+
+
+@app.route('/generate/stream', methods=['GET'])
+@login_required
+def generate_stream_resume():
+    """恢复单图流式生成（用于页面切换后继续接收）"""
+    user_id = session.get('user_id')
+    generation_id = request.args.get('generation_id', '').strip()
+    from_index = request.args.get('from', '0')
+    try:
+        from_index = int(from_index)
+        if from_index < 0:
+            from_index = 0
+    except Exception:
+        from_index = 0
+    
+    if not generation_id:
+        return jsonify({'error': 'generation_id 缺失'}), 400
+    
+    with single_generation_lock:
+        channel = single_generation_channels.get(generation_id)
+    
+    if not channel or channel.get('user_id') != user_id:
+        return jsonify({'error': '生成任务不存在或已过期'}), 404
+    
+    return Response(
+        stream_with_context(stream_from_channel(channel, from_index)),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'
+        }
+    )
 
 @app.route('/api/sample-images')
 @login_required
@@ -2474,7 +2617,7 @@ def api_video_generate():
         
         # 获取公共参数
         prompt = data.get('prompt', '').strip()
-        resolution = data.get('resolution', '720p')  # 480p, 720p, 1080p
+        resolution = data.get('resolution', '1080p')  # 480p, 720p, 1080p
         ratio = data.get('ratio', '9:16')  # 16:9, 4:3, 1:1, 3:4, 9:16, 21:9
         duration = int(data.get('duration', 5))  # 2-12秒
         seed = data.get('seed', '-1')
