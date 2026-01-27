@@ -757,7 +757,8 @@
             filteredAssets.forEach((asset, index) => {
                 const card = document.createElement('div');
                 card.className = 'asset-card';
-                const assetId = asset.id || asset.key || `asset_${index}`;
+                // 人物库/场景库须用 key（db_person_xxx/db_scene_xxx）供删除接口识别
+                const assetId = asset.key || asset.id || `asset_${index}`;
                 
                 if (selectedAssets.has(assetId)) {
                     card.classList.add('selected');
@@ -1092,7 +1093,7 @@
             let downloadCount = 0;
             
             selectedList.forEach(assetId => {
-                const asset = allAssets.find(a => (a.id || a.key) === assetId);
+                const asset = allAssets.find(a => a.key === assetId || (a.id || a.key) === assetId);
                 if (asset && asset.url) {
                     // 延迟下载，避免浏览器阻止多个下载
                     setTimeout(() => {
@@ -1124,7 +1125,7 @@
             let failCount = 0;
             
             for (const assetId of selectedList) {
-                const asset = allAssets.find(a => (a.id || a.key) === assetId);
+                const asset = allAssets.find(a => a.key === assetId || (a.id || a.key) === assetId);
                 if (!asset || !asset.url) {
                     failCount++;
                     continue;
@@ -1226,8 +1227,7 @@
             
             for (const assetId of selectedAssets) {
                 try {
-                    // 这里需要根据assetId找到对应的资源信息
-                    const asset = allAssets.find(a => (a.id || a.key) === assetId);
+                    const asset = allAssets.find(a => a.key === assetId || (a.id || a.key) === assetId);
                     if (asset) {
                         await deleteAsset(assetId, asset.filename);
                         successCount++;

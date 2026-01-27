@@ -516,14 +516,14 @@
                     <button type="button" id="batchRecentBtn" class="btn btn-sm">最近生成</button>
                 </div>
             </div>
-            <p style="color: #666; margin-top: 10px;">点击图片选择（最多4张）</p>
-            <div class="sample-grid" id="modalSampleGrid">
-                <!-- 动态加载示例图 -->
-            </div>
-            <div style="margin-top: 20px; text-align: center;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px;">
+                <p style="color: #666; margin: 0;">点击图片选择（最多4张）</p>
                 <button class="btn btn-primary" onclick="confirmSampleSelection()">
                     ✓ 确认选择
                 </button>
+            </div>
+            <div class="sample-grid" id="modalSampleGrid">
+                <!-- 动态加载示例图 -->
             </div>
         </div>
     </div>

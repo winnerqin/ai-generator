@@ -398,6 +398,12 @@
                                 📁 上传
                             </button>
                         </div>
+                        <div class="frame-drop-zone" data-type="firstFrameInPair" style="border: 2px dashed #28a745; border-radius: 8px; padding: 15px; text-align: center; cursor: pointer; background: #f0f9f4; transition: background 0.3s; margin-top: 5px;" 
+                             ondrop="handleSingleFrameDrop(event)" ondragover="handleSingleFrameDragOver(event)" ondragleave="handleSingleFrameDragLeave(event)"
+                             onclick="document.getElementById('firstFrameInPairUpload').click()">
+                            <div style="font-size: 1.5em;">📁</div>
+                            <p style="margin: 3px 0; font-size: 0.9em; color: #333;">拖拽图片到这里或点击上传</p>
+                        </div>
                         <input type="file" id="firstFrameInPairUpload" accept="image/*" onchange="handleImageUpload(event, 'firstFrameInPair')" style="display: none;">
                         <input type="hidden" id="firstFrameInPairUrl" name="first_frame_url">
                         <div class="image-preview" id="firstFrameInPairPreview" style="margin-top: 5px; position: relative;">
@@ -415,6 +421,12 @@
                             <button type="button" class="btn" onclick="document.getElementById('lastFrameUpload').click()" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
                                 📁 上传
                             </button>
+                        </div>
+                        <div class="frame-drop-zone" data-type="lastFrame" style="border: 2px dashed #28a745; border-radius: 8px; padding: 15px; text-align: center; cursor: pointer; background: #f0f9f4; transition: background 0.3s; margin-top: 5px;" 
+                             ondrop="handleSingleFrameDrop(event)" ondragover="handleSingleFrameDragOver(event)" ondragleave="handleSingleFrameDragLeave(event)"
+                             onclick="document.getElementById('lastFrameUpload').click()">
+                            <div style="font-size: 1.5em;">📁</div>
+                            <p style="margin: 3px 0; font-size: 0.9em; color: #333;">拖拽图片到这里或点击上传</p>
                         </div>
                         <input type="file" id="lastFrameUpload" accept="image/*" onchange="handleImageUpload(event, 'lastFrame')" style="display: none;">
                         <input type="hidden" id="lastFrameUrl" name="last_frame_url">
@@ -435,6 +447,12 @@
                             📁 上传
                         </button>
                     </div>
+                    <div class="frame-drop-zone" data-type="firstFrame" style="border: 2px dashed #28a745; border-radius: 8px; padding: 15px; text-align: center; cursor: pointer; background: #f0f9f4; transition: background 0.3s; margin-top: 5px;" 
+                         ondrop="handleSingleFrameDrop(event)" ondragover="handleSingleFrameDragOver(event)" ondragleave="handleSingleFrameDragLeave(event)"
+                         onclick="document.getElementById('firstFrameOnlyUpload').click()">
+                        <div style="font-size: 1.5em;">📁</div>
+                        <p style="margin: 3px 0; font-size: 0.9em; color: #333;">拖拽图片到这里或点击上传</p>
+                    </div>
                     <input type="file" id="firstFrameOnlyUpload" accept="image/*" onchange="handleImageUpload(event, 'firstFrame')" style="display: none;">
                     <input type="hidden" id="firstFrameUrl" name="first_frame_url">
                     <div class="image-preview" id="firstFramePreview" style="margin-top: 5px; position: relative;">
@@ -452,6 +470,15 @@
                         <button type="button" class="btn" onclick="document.getElementById('referenceImageUpload').click()" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
                             📁 上传
                         </button>
+                    </div>
+                    <div id="referenceImageDropZone" style="border: 2px dashed #28a745; border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; background: #f0f9f4; transition: background 0.3s; margin-top: 10px;" 
+                         ondrop="handleDrop(event)" 
+                         ondragover="handleDragOver(event)" 
+                         ondragleave="handleDragLeave(event)"
+                         onclick="document.getElementById('referenceImageUpload').click()">
+                        <div style="font-size: 2em; margin-bottom: 5px;">📁</div>
+                        <p style="margin: 5px 0; color: #333;">拖拽图片到这里或点击上传</p>
+                        <p style="font-size: 0.85em; color: #666; margin-top: 5px;">支持 JPG, PNG 格式，可一次选择多张图片</p>
                     </div>
                     <input type="file" id="referenceImageUpload" accept="image/*" multiple onchange="handleMultipleImageUpload(event, 'referenceImage')" style="display: none;">
                     <div id="referenceImageList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 10px;"></div>
@@ -574,6 +601,8 @@
     <script>
         const VIDEO_FORM_STORAGE_KEY = 'videoGenerateFormData';
         let suppressVideoSave = false;
+        // 存储拖拽或上传的首帧/尾帧文件，供提交时使用
+        window.pendingFrameFiles = { firstFrame: null, firstFrameInPair: null, lastFrame: null };
 
         function applyGenerateTypeUI(generateType) {
             document.getElementById('generateType').value = generateType;
@@ -1009,12 +1038,15 @@
                 urlInput.value = asset.url;
             }
             
-            // 清空文件输入
-            const fileInput = document.getElementById(currentImageSelectorType + 'Upload');
-            if (fileInput) {
-                fileInput.value = '';
+            // 清空拖拽/上传的文件及文件输入（从库选择时以 URL 为准）
+            if (window.pendingFrameFiles && ['firstFrame','firstFrameInPair','lastFrame'].includes(currentImageSelectorType)) {
+                window.pendingFrameFiles[currentImageSelectorType] = null;
             }
+            const fileInputId = currentImageSelectorType === 'firstFrame' ? 'firstFrameOnlyUpload' : (currentImageSelectorType + 'Upload');
+            const fileInput = document.getElementById(fileInputId);
+            if (fileInput) fileInput.value = '';
             
+            saveVideoFormData();
             closeImageSelector();
         }
         
@@ -1022,23 +1054,21 @@
         function clearImage(type) {
             const preview = document.getElementById(type + 'Preview');
             const urlInput = document.getElementById(type + 'Url');
-            const fileInput = document.getElementById(type + 'Upload');
+            const fileInputId = type === 'firstFrame' ? 'firstFrameOnlyUpload' : (type + 'Upload');
+            const fileInput = document.getElementById(fileInputId);
             const clearBtn = document.getElementById(type + 'ClearBtn');
             
-            preview.style.display = 'none';
-            preview.innerHTML = '';
-            
-            if (urlInput) {
-                urlInput.value = '';
+            if (window.pendingFrameFiles && (type === 'firstFrame' || type === 'firstFrameInPair' || type === 'lastFrame')) {
+                window.pendingFrameFiles[type] = null;
             }
             
-            if (fileInput) {
-                fileInput.value = '';
+            if (preview) {
+                preview.style.display = 'none';
+                preview.innerHTML = '';
             }
-            
-            if (clearBtn) {
-                clearBtn.remove();
-            }
+            if (urlInput) urlInput.value = '';
+            if (fileInput) fileInput.value = '';
+            if (clearBtn) clearBtn.remove();
             saveVideoFormData();
         }
         
@@ -1067,21 +1097,70 @@
             // 不关闭选择器，允许继续选择
         }
         
+        // 处理拖拽上传
+        function handleDragOver(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            const dropZone = document.getElementById('referenceImageDropZone');
+            if (dropZone) {
+                dropZone.style.background = '#e8f5ed';
+                dropZone.style.borderColor = '#218838';
+            }
+        }
+        
+        function handleDragLeave(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            const dropZone = document.getElementById('referenceImageDropZone');
+            if (dropZone) {
+                dropZone.style.background = '#f0f9f4';
+                dropZone.style.borderColor = '#28a745';
+            }
+        }
+        
+        function handleDrop(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            
+            const dropZone = document.getElementById('referenceImageDropZone');
+            if (dropZone) {
+                dropZone.style.background = '#f0f9f4';
+                dropZone.style.borderColor = '#28a745';
+            }
+            
+            const files = Array.from(event.dataTransfer.files).filter(file => file.type.startsWith('image/'));
+            if (files.length === 0) {
+                alert('请拖拽图片文件');
+                return;
+            }
+            
+            // 使用相同的处理函数
+            handleMultipleImageUpload({ target: { files: files } }, 'referenceImage');
+        }
+        
         // 处理多张图片上传
-        function handleMultipleImageUpload(event, type) {
+        async function handleMultipleImageUpload(event, type) {
             if (type !== 'referenceImage') return;
             
             const files = Array.from(event.target.files);
             if (files.length === 0) return;
             
             // 检查总数
-            if (referenceImageList.length + files.length > 4) {
-                alert(`最多只能选择4张参考图，当前已选${referenceImageList.length}张，本次只能选择${4 - referenceImageList.length}张`);
-                files.splice(4 - referenceImageList.length);
+            const remainingSlots = 4 - referenceImageList.length;
+            if (remainingSlots <= 0) {
+                alert('最多只能选择4张参考图，请先删除已选择的图片');
+                if (event.target) event.target.value = '';
+                return;
             }
             
-            files.forEach(file => {
-                if (referenceImageList.length >= 4) return;
+            const filesToAdd = files.length > remainingSlots ? files.slice(0, remainingSlots) : files;
+            if (files.length > remainingSlots) {
+                alert(`最多只能选择4张参考图，当前已选${referenceImageList.length}张，本次只能选择${remainingSlots}张`);
+            }
+            
+            // 处理每个文件
+            for (const file of filesToAdd) {
+                if (referenceImageList.length >= 4) break;
                 
                 const reader = new FileReader();
                 reader.onload = function(e) {
@@ -1095,10 +1174,38 @@
                     saveVideoFormData();
                 };
                 reader.readAsDataURL(file);
-            });
+                
+                // 自动上传到图片库（场景库）
+                try {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('category', 'scene'); // 默认添加到场景库
+                    
+                    const response = await fetch('/api/upload-sample-image', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const result = await response.json();
+                    if (result.success) {
+                        console.log('图片已自动添加到图片库:', result.filename);
+                        // 更新参考图列表中的URL为OSS URL（如果上传成功）
+                        const imgIndex = referenceImageList.findIndex(img => img.filename === file.name && img.source === 'upload');
+                        if (imgIndex >= 0) {
+                            referenceImageList[imgIndex].ossUrl = result.url;
+                            referenceImageList[imgIndex].ossFilename = result.filename;
+                        }
+                    } else {
+                        console.warn('图片添加到图片库失败:', result.error);
+                    }
+                } catch (error) {
+                    console.error('上传图片到图片库时出错:', error);
+                    // 不影响正常使用，只记录错误
+                }
+            }
             
             // 清空文件输入，允许重复选择同一文件
-            event.target.value = '';
+            if (event.target) event.target.value = '';
         }
         
         // 更新参考图列表显示
@@ -1137,22 +1244,59 @@
             saveVideoFormData();
         }
         
-        // 图片上传处理
-        function handleImageUpload(event, type) {
-            const file = event.target.files[0];
-            if (!file) return;
-            
+        // 首帧/尾帧单图拖拽
+        function handleSingleFrameDragOver(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.currentTarget && event.currentTarget.classList) {
+                event.currentTarget.style.background = '#e8f5ed';
+                event.currentTarget.style.borderColor = '#218838';
+            }
+        }
+        function handleSingleFrameDragLeave(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.currentTarget && event.currentTarget.classList) {
+                event.currentTarget.style.background = '#f0f9f4';
+                event.currentTarget.style.borderColor = '#28a745';
+            }
+        }
+        function handleSingleFrameDrop(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.currentTarget) {
+                event.currentTarget.style.background = '#f0f9f4';
+                event.currentTarget.style.borderColor = '#28a745';
+            }
+            const type = event.currentTarget && event.currentTarget.getAttribute('data-type');
+            if (!type || !['firstFrame', 'firstFrameInPair', 'lastFrame'].includes(type)) return;
+            const files = Array.from(event.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+            if (files.length === 0) {
+                alert('请拖拽图片文件');
+                return;
+            }
+            applySingleFrameImage(type, files[0]);
+        }
+
+        // 应用单张图片到首帧/尾帧并自动保存到图片库
+        async function applySingleFrameImage(type, file) {
+            if (!file || !file.type.startsWith('image/')) return;
+            const preview = document.getElementById(type + 'Preview');
+            const urlInput = document.getElementById(type + 'Url');
+            const clearBtn = document.getElementById(type + 'ClearBtn');
+            if (!preview) return;
+
+            // 存储文件供提交使用
+            if (window.pendingFrameFiles) {
+                window.pendingFrameFiles[type] = file;
+            }
+            if (urlInput) urlInput.value = '';
+
             const reader = new FileReader();
             reader.onload = function(e) {
-                const preview = document.getElementById(type + 'Preview');
-                const urlInput = document.getElementById(type + 'Url');
-                const clearBtn = document.getElementById(type + 'ClearBtn');
-                
                 preview.style.display = 'block';
                 preview.style.position = 'relative';
                 preview.innerHTML = `<img src="${e.target.result}" alt="预览" style="max-width: 100%; max-height: 200px; border-radius: 8px; display: block;">`;
-                
-                // 添加删除按钮
                 if (clearBtn) {
                     clearBtn.style.display = 'block';
                     preview.appendChild(clearBtn);
@@ -1165,14 +1309,33 @@
                     btn.id = type + 'ClearBtn';
                     preview.appendChild(btn);
                 }
-                
-                // 清空URL输入（使用上传的文件）
-                if (urlInput) {
-                    urlInput.value = '';
-                }
                 saveVideoFormData();
             };
             reader.readAsDataURL(file);
+
+            // 自动上传到图片库（场景库）
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('category', 'scene');
+                const response = await fetch('/api/upload-sample-image', { method: 'POST', body: formData });
+                const result = await response.json();
+                if (result.success) {
+                    console.log('图片已自动添加到图片库:', result.filename);
+                    if (urlInput) urlInput.value = result.url;
+                } else {
+                    console.warn('图片添加到图片库失败:', result.error);
+                }
+            } catch (err) {
+                console.error('上传图片到图片库时出错:', err);
+            }
+        }
+
+        // 图片上传处理（首帧/尾帧：自动保存到图片库）
+        function handleImageUpload(event, type) {
+            const file = event.target && event.target.files ? event.target.files[0] : null;
+            if (!file) return;
+            applySingleFrameImage(type, file);
         }
         
         // 表单提交
@@ -1200,9 +1363,10 @@
                 return;
             }
             
-            // 验证首帧图片（可以是上传的文件或从库中选择的URL）
+            // 验证首帧图片（可以是上传/拖拽的文件或从库中选择的URL）
+            const pf = window.pendingFrameFiles || {};
             if (generateType === 'first_frame') {
-                const firstFrameFile = document.getElementById('firstFrameOnlyUpload').files[0];
+                const firstFrameFile = pf.firstFrame || (document.getElementById('firstFrameOnlyUpload').files && document.getElementById('firstFrameOnlyUpload').files[0]);
                 const firstFrameUrl = document.getElementById('firstFrameUrl').value.trim();
                 const firstFrameDataUrl = getPreviewDataUrl('firstFramePreview');
                 if (!firstFrameFile && !firstFrameUrl && !firstFrameDataUrl) {
@@ -1211,7 +1375,7 @@
                     return;
                 }
             } else if (generateType === 'first_last_frame') {
-                const firstFrameFile = document.getElementById('firstFrameInPairUpload').files[0];
+                const firstFrameFile = pf.firstFrameInPair || (document.getElementById('firstFrameInPairUpload').files && document.getElementById('firstFrameInPairUpload').files[0]);
                 const firstFrameUrl = document.getElementById('firstFrameInPairUrl').value.trim();
                 const firstFrameDataUrl = getPreviewDataUrl('firstFrameInPairPreview');
                 if (!firstFrameFile && !firstFrameUrl && !firstFrameDataUrl) {
@@ -1222,7 +1386,7 @@
             }
             
             if (generateType === 'first_last_frame') {
-                const lastFrameFile = document.getElementById('lastFrameUpload').files[0];
+                const lastFrameFile = pf.lastFrame || (document.getElementById('lastFrameUpload').files && document.getElementById('lastFrameUpload').files[0]);
                 const lastFrameUrl = document.getElementById('lastFrameUrl').value.trim();
                 const lastFrameDataUrl = getPreviewDataUrl('lastFramePreview');
                 if (!lastFrameFile && !lastFrameUrl && !lastFrameDataUrl) {
@@ -1263,9 +1427,10 @@
                 formData.append('generate_audio', document.getElementById('generate_audio').value);
                 formData.append('return_last_frame', document.getElementById('return_last_frame').value);
                 
-                // 添加首帧图片（优先使用上传的文件，如果没有则使用URL）
+                // 添加首帧图片（优先使用拖拽/上传的文件，如果没有则使用URL）
+                const pf = window.pendingFrameFiles || {};
                 if (generateType === 'first_frame') {
-                    const firstFrameFile = document.getElementById('firstFrameOnlyUpload').files[0];
+                    const firstFrameFile = pf.firstFrame || (document.getElementById('firstFrameOnlyUpload').files && document.getElementById('firstFrameOnlyUpload').files[0]);
                     const firstFrameUrl = document.getElementById('firstFrameUrl').value.trim();
                     const firstFrameDataUrl = getPreviewDataUrl('firstFramePreview');
                     if (firstFrameFile) {
@@ -1276,7 +1441,7 @@
                         formData.append('first_frame', dataUrlToFile(firstFrameDataUrl, 'first_frame.png'));
                     }
                 } else if (generateType === 'first_last_frame') {
-                    const firstFrameFile = document.getElementById('firstFrameInPairUpload').files[0];
+                    const firstFrameFile = pf.firstFrameInPair || (document.getElementById('firstFrameInPairUpload').files && document.getElementById('firstFrameInPairUpload').files[0]);
                     const firstFrameUrl = document.getElementById('firstFrameInPairUrl').value.trim();
                     const firstFrameDataUrl = getPreviewDataUrl('firstFrameInPairPreview');
                     if (firstFrameFile) {
@@ -1289,7 +1454,7 @@
                 }
                 
                 if (generateType === 'first_last_frame') {
-                    const lastFrameFile = document.getElementById('lastFrameUpload').files[0];
+                    const lastFrameFile = pf.lastFrame || (document.getElementById('lastFrameUpload').files && document.getElementById('lastFrameUpload').files[0]);
                     const lastFrameUrl = document.getElementById('lastFrameUrl').value.trim();
                     const lastFrameDataUrl = getPreviewDataUrl('lastFramePreview');
                     if (lastFrameFile) {
@@ -1304,7 +1469,10 @@
                 if (generateType === 'reference_image') {
                     // 添加多张参考图
                     referenceImageList.forEach((img, index) => {
-                        if (img.source === 'upload' && img.file) {
+                        // 优先使用OSS URL（如果已上传到图片库）
+                        if (img.ossUrl) {
+                            formData.append(`reference_image_url_${index}`, img.ossUrl);
+                        } else if (img.source === 'upload' && img.file) {
                             formData.append(`reference_image_${index}`, img.file);
                         } else if (img.source === 'upload' && img.url && img.url.startsWith('data:')) {
                             formData.append(`reference_image_${index}`, dataUrlToFile(img.url, img.filename || `reference_${index}.png`));

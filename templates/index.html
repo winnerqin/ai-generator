@@ -933,6 +933,69 @@
         // 恢复表单数据
         function loadFormData() {
             try {
+                // 优先检查是否有重新生成数据
+                const regenerateData = localStorage.getItem('regenerateData');
+                if (regenerateData) {
+                    try {
+                        const data = JSON.parse(regenerateData);
+                        // 检查数据是否过期（5分钟内有效）
+                        if (data.timestamp && Date.now() - data.timestamp < 5 * 60 * 1000) {
+                            console.log('检测到重新生成数据，正在填充表单...');
+                            
+                            // 填充基本表单字段
+                            if (data.prompt) {
+                                document.getElementById('prompt').value = data.prompt;
+                            }
+                            if (data.aspect_ratio) {
+                                document.getElementById('aspect_ratio').value = data.aspect_ratio;
+                            }
+                            if (data.resolution) {
+                                // 统一处理分辨率格式：转换为小写
+                                let resolution = data.resolution.toLowerCase();
+                                if (resolution === '2k' || resolution === '4k') {
+                                    document.getElementById('resolution').value = resolution;
+                                } else {
+                                    // 如果格式不匹配，尝试推断
+                                    if (resolution.includes('4')) {
+                                        document.getElementById('resolution').value = '4k';
+                                    } else {
+                                        document.getElementById('resolution').value = '2k';
+                                    }
+                                }
+                                console.log('设置分辨率:', document.getElementById('resolution').value);
+                            }
+                            
+                            // 处理参考图
+                            if (data.sample_image_urls && data.sample_image_urls.length > 0) {
+                                // 保存参考图URL，等待示例图加载完成后自动选择
+                                window.pendingRegenerateSampleUrls = data.sample_image_urls;
+                                console.log('待选择的参考图URL:', window.pendingRegenerateSampleUrls);
+                            }
+                            
+                            // 清除重新生成数据，避免重复使用
+                            localStorage.removeItem('regenerateData');
+                            
+                            // 显示提示
+                            setTimeout(() => {
+                                const promptInput = document.getElementById('prompt');
+                                if (promptInput) {
+                                    promptInput.focus();
+                                    promptInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }
+                            }, 500);
+                            
+                            return; // 使用重新生成数据，不再加载普通缓存
+                        } else {
+                            // 数据过期，清除
+                            localStorage.removeItem('regenerateData');
+                        }
+                    } catch (e) {
+                        console.error('解析重新生成数据失败:', e);
+                        localStorage.removeItem('regenerateData');
+                    }
+                }
+                
+                // 如果没有重新生成数据，加载普通缓存
                 const saved = localStorage.getItem('indexFormData');
                 if (saved) {
                     const formData = JSON.parse(saved);
@@ -950,6 +1013,185 @@
             }
         }
         
+        // 自动选择重新生成的参考图
+        function autoSelectRegenerateSamples() {
+            if (!window.pendingRegenerateSampleUrls || window.pendingRegenerateSampleUrls.length === 0) {
+                return;
+            }
+            
+            const urlsToSelect = window.pendingRegenerateSampleUrls;
+            console.log('开始自动选择参考图，URL数量:', urlsToSelect.length);
+            console.log('待选择的URL列表:', urlsToSelect);
+            console.log('当前示例图数量:', sampleImages.length);
+            
+            // 清空当前选择
+            selectedSampleImages = [];
+            
+            // 在已加载的示例图中查找匹配的URL
+            let foundCount = 0;
+            urlsToSelect.forEach((targetUrl, idx) => {
+                if (!targetUrl) {
+                    console.warn(`第 ${idx + 1} 个URL为空，跳过`);
+                    return;
+                }
+                
+                // 标准化URL（移除查询参数、协议等）
+                const normalizeUrl = (url) => {
+                    if (!url) return '';
+                    try {
+                        // 移除查询参数和锚点
+                        let cleanUrl = url.split('?')[0].split('#')[0];
+                        
+                        // 如果是完整URL，提取路径部分（保留域名后的路径）
+                        if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')) {
+                            try {
+                                const urlObj = new URL(cleanUrl);
+                                // 返回路径部分，但保留重要的路径信息
+                                return urlObj.pathname;
+                            } catch (e) {
+                                // 如果URL解析失败，尝试手动提取路径
+                                const match = cleanUrl.match(/https?:\/\/[^\/]+(\/.*)/);
+                                if (match) {
+                                    return match[1];
+                                }
+                                return cleanUrl;
+                            }
+                        }
+                        // 如果是相对路径，直接返回
+                        return cleanUrl;
+                    } catch (e) {
+                        return url.split('?')[0].split('#')[0];
+                    }
+                };
+                
+                const normalizedTarget = normalizeUrl(targetUrl);
+                console.log(`查找参考图 ${idx + 1}: 原始URL=${targetUrl}, 标准化后=${normalizedTarget}`);
+                
+                const index = sampleImages.findIndex(img => {
+                    const imgUrl = img.url || '';
+                    const normalizedImg = normalizeUrl(imgUrl);
+                    
+                    // 多种匹配方式
+                    const exactMatch = imgUrl === targetUrl;
+                    const normalizedMatch = normalizedImg === normalizedTarget;
+                    const containsMatch = imgUrl.includes(normalizedTarget) || normalizedTarget.includes(normalizedImg);
+                    const endsWithMatch = imgUrl.endsWith(normalizedTarget) || normalizedTarget.endsWith(normalizedImg);
+                    
+                    // 提取文件名进行匹配（作为备用方案）
+                    const getFilename = (url) => {
+                        try {
+                            const parts = url.split('/');
+                            return parts[parts.length - 1].split('?')[0];
+                        } catch (e) {
+                            return '';
+                        }
+                    };
+                    const filenameMatch = getFilename(imgUrl) === getFilename(targetUrl) && getFilename(imgUrl) !== '';
+                    
+                    const matched = exactMatch || normalizedMatch || containsMatch || endsWithMatch || filenameMatch;
+                    
+                    if (matched) {
+                        console.log(`找到匹配: ${imgUrl} <-> ${targetUrl}`);
+                    }
+                    
+                    return matched;
+                });
+                
+                if (index >= 0 && selectedSampleImages.length < 4) {
+                    // 检查是否已选择
+                    const existingIndex = selectedSampleImages.findIndex(s => s.url === sampleImages[index].url);
+                    if (existingIndex < 0) {
+                        selectedSampleImages.push(sampleImages[index]);
+                        foundCount++;
+                        console.log(`✓ 成功选择参考图 ${foundCount}:`, sampleImages[index].url);
+                    } else {
+                        console.log('参考图已选择，跳过:', sampleImages[index].url);
+                    }
+                } else if (index < 0) {
+                    console.warn(`✗ 未找到匹配的参考图: ${targetUrl}`);
+                }
+            });
+            
+            // 更新UI
+            updateSampleImagesUI();
+            
+            // 清除待选择列表
+            window.pendingRegenerateSampleUrls = null;
+            
+            if (foundCount > 0) {
+                console.log(`✅ 成功自动选择了 ${foundCount}/${urlsToSelect.length} 张参考图`);
+                // 显示提示
+                if (foundCount < urlsToSelect.length) {
+                    console.warn(`⚠️ 部分参考图未找到匹配项 (${foundCount}/${urlsToSelect.length})`);
+                }
+            } else {
+                console.log('❌ 未找到匹配的参考图');
+                // 如果示例图列表为空或很少，可能是还没加载完成，稍后重试一次
+                if (sampleImages.length < 10) {
+                    console.log('示例图数量较少，2秒后重试...');
+                    setTimeout(() => {
+                        if (window.pendingRegenerateSampleUrls && sampleImages.length > 0) {
+                            console.log('重试自动选择参考图...');
+                            autoSelectRegenerateSamples();
+                        } else {
+                            console.warn('重试失败：示例图仍未加载完成或待选择列表已清空');
+                            // 如果仍然失败，尝试从其他类别加载
+                            if (window.pendingRegenerateSampleUrls && window.pendingRegenerateSampleUrls.length > 0) {
+                                console.log('尝试从其他类别加载示例图以查找参考图...');
+                                tryLoadSamplesFromOtherCategories();
+                            }
+                        }
+                    }, 2000);
+                } else {
+                    console.warn('示例图已加载但未找到匹配项，尝试从其他类别加载...');
+                    // 尝试从其他类别加载
+                    if (window.pendingRegenerateSampleUrls && window.pendingRegenerateSampleUrls.length > 0) {
+                        tryLoadSamplesFromOtherCategories();
+                    }
+                }
+            }
+        }
+        
+        // 尝试从其他类别加载示例图以查找参考图
+        async function tryLoadSamplesFromOtherCategories() {
+            if (!window.pendingRegenerateSampleUrls || window.pendingRegenerateSampleUrls.length === 0) {
+                return;
+            }
+            
+            const currentCategory = sampleCategory;
+            const categoriesToTry = currentCategory === 'recent' ? ['person', 'scene'] : 
+                                   currentCategory === 'person' ? ['recent', 'scene'] : 
+                                   ['recent', 'person'];
+            
+            console.log(`当前类别: ${currentCategory}, 尝试其他类别:`, categoriesToTry);
+            
+            for (const category of categoriesToTry) {
+                try {
+                    console.log(`尝试从 ${category} 类别加载示例图...`);
+                    await loadSampleImages(category);
+                    
+                    // 等待UI更新
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    // 尝试选择参考图
+                    if (window.pendingRegenerateSampleUrls) {
+                        const beforeCount = selectedSampleImages.length;
+                        autoSelectRegenerateSamples();
+                        const afterCount = selectedSampleImages.length;
+                        
+                        if (afterCount > beforeCount) {
+                            console.log(`✅ 在 ${category} 类别中找到并选择了参考图`);
+                            return; // 找到了，停止尝试
+                        }
+                    }
+                } catch (error) {
+                    console.error(`从 ${category} 类别加载示例图失败:`, error);
+                }
+            }
+            
+            console.warn('⚠️ 在所有类别中都未找到匹配的参考图');
+        }
+        
         // 监听表单输入变化
         function setupAutoSave() {
             const inputs = ['prompt', 'aspect_ratio', 'resolution', 'generate_mode', 'num_images', 'image_style', 'seed', 'output_filename'];
@@ -962,7 +1204,7 @@
             });
         }
         
-        function handleFileSelect(event) {
+        async function handleFileSelect(event) {
             const files = Array.from(event.target.files);
             
             if (files.length === 0) return;
@@ -976,11 +1218,55 @@
             }
             
             // 如果选择的文件超过剩余槽位，只取前N个并提示
+            const filesToAdd = files.length > remainingSlots ? files.slice(0, remainingSlots) : files;
             if (files.length > remainingSlots) {
                 alert(`最多只能上传 4 张图片，当前已选 ${selectedFiles.length} 张，本次将只添加前 ${remainingSlots} 张`);
-                selectedFiles = selectedFiles.concat(files.slice(0, remainingSlots));
-            } else {
-                selectedFiles = selectedFiles.concat(files);
+            }
+            
+            // 添加到选中列表
+            selectedFiles = selectedFiles.concat(filesToAdd);
+            
+            // 自动上传到图片库（场景库）
+            try {
+                const uploadPromises = filesToAdd.map(async (file) => {
+                    try {
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        formData.append('category', 'scene'); // 默认添加到场景库
+                        
+                        const response = await fetch('/api/upload-sample-image', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        const result = await response.json();
+                        if (result.success) {
+                            console.log('图片已自动添加到图片库:', result.filename);
+                            return { success: true, file: file, url: result.url, filename: result.filename };
+                        } else {
+                            console.warn('图片添加到图片库失败:', result.error);
+                            return { success: false, file: file, error: result.error };
+                        }
+                    } catch (error) {
+                        console.error('上传图片到图片库时出错:', error);
+                        return { success: false, file: file, error: error.message };
+                    }
+                });
+                
+                // 等待所有上传完成（不阻塞UI）
+                Promise.all(uploadPromises).then(results => {
+                    const successCount = results.filter(r => r.success).length;
+                    const failCount = results.filter(r => !r.success).length;
+                    if (successCount > 0) {
+                        console.log(`✅ ${successCount} 张图片已自动添加到图片库`);
+                    }
+                    if (failCount > 0) {
+                        console.warn(`⚠️ ${failCount} 张图片添加到图片库失败`);
+                    }
+                });
+            } catch (error) {
+                console.error('自动上传到图片库失败:', error);
+                // 不影响正常使用，只记录错误
             }
             
             updatePreview();
@@ -1887,6 +2173,15 @@
                     });
                     // 加载完成后更新UI状态
                     updateSampleImagesUI();
+                    console.log('最近生成图片加载完成，共', sampleImages.length, '张');
+                    
+                    // 如果有待选择的重新生成参考图，自动选择（延迟稍长以确保UI已更新）
+                    if (window.pendingRegenerateSampleUrls) {
+                        console.log('检测到待选择的参考图，准备自动选择...');
+                        setTimeout(() => {
+                            autoSelectRegenerateSamples();
+                        }, 500);
+                    }
                 } else {
                     grid.innerHTML = '<div class="sample-images-loading">💭 暂无最近生成的图片（仅显示OSS URL的图片）</div>';
                 }
@@ -1968,7 +2263,15 @@
                     });
                     // 加载完成后更新UI状态
                     updateSampleImagesUI();
-                    console.log('示例图加载完成');
+                    console.log('示例图加载完成，共', sampleImages.length, '张');
+                    
+                    // 如果有待选择的重新生成参考图，自动选择（延迟稍长以确保UI已更新）
+                    if (window.pendingRegenerateSampleUrls) {
+                        console.log('检测到待选择的参考图，准备自动选择...');
+                        setTimeout(() => {
+                            autoSelectRegenerateSamples();
+                        }, 500);
+                    }
                 } else {
                     console.log('没有找到示例图片');
                     grid.innerHTML = '<div class="sample-images-loading">💭 暂无示例图片<br><small style="color:#999;">提示：请检查OSS配置或上传示例图片</small></div>';
@@ -2314,9 +2617,35 @@
             // 加载风格列表
             loadImageStyles();
             
+            // 检查是否有重新生成数据
+            const regenerateData = localStorage.getItem('regenerateData');
+            let hasRegenerateData = false;
+            if (regenerateData) {
+                try {
+                    const data = JSON.parse(regenerateData);
+                    if (data.timestamp && Date.now() - data.timestamp < 5 * 60 * 1000) {
+                        hasRegenerateData = true;
+                        console.log('检测到重新生成数据，将尝试从多个类别加载示例图');
+                    }
+                } catch (e) {
+                    console.error('解析重新生成数据失败:', e);
+                }
+            }
+            
             // 默认加载（使用 await 确保异步操作完成）
             try {
-                await loadSampleImages(sampleCategory);
+                // 如果有重新生成数据，优先加载 'recent' 类别（因为参考图很可能是最近生成的）
+                if (hasRegenerateData) {
+                    console.log('优先加载最近生成的图片以匹配参考图');
+                    await loadSampleImages('recent');
+                    // 如果 recent 类别没有图片或数量很少，再加载默认类别
+                    if (sampleImages.length < 5) {
+                        console.log('最近生成图片较少，继续加载默认类别');
+                        await loadSampleImages(sampleCategory);
+                    }
+                } else {
+                    await loadSampleImages(sampleCategory);
+                }
             } catch (error) {
                 console.error('初始化加载示例图失败:', error);
             }

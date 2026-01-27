@@ -368,6 +368,117 @@
             margin-bottom: 20px;
             opacity: 0.3;
         }
+        
+        .regenerate-btn {
+            padding: 6px 12px;
+            background: #17a2b8;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            margin-left: 5px;
+        }
+        
+        .regenerate-btn:hover {
+            background: #138496;
+        }
+        
+        /* 批量查看图片模态框 */
+        .batch-view-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.95);
+            z-index: 10000;
+            overflow-y: auto;
+        }
+        
+        .batch-view-modal.active {
+            display: block;
+        }
+        
+        .batch-view-header {
+            position: sticky;
+            top: 0;
+            background: rgba(0,0,0,0.9);
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10001;
+            border-bottom: 2px solid #333;
+        }
+        
+        .batch-view-title {
+            color: white;
+            font-size: 1.5em;
+            font-weight: 600;
+        }
+        
+        .batch-view-close {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+        }
+        
+        .batch-view-close:hover {
+            background: #c82333;
+        }
+        
+        .batch-view-content {
+            padding: 30px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 30px;
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+        
+        .batch-view-item {
+            background: rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .batch-view-item-image {
+            width: 100%;
+            max-height: 500px;
+            object-fit: contain;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.05);
+            cursor: pointer;
+            transition: transform 0.3s;
+        }
+        
+        .batch-view-item-image:hover {
+            transform: scale(1.05);
+        }
+        
+        .batch-view-item-info {
+            color: white;
+            font-size: 0.9em;
+        }
+        
+        .batch-view-item-info p {
+            margin: 5px 0;
+            word-break: break-word;
+        }
+        
+        .batch-view-item-info strong {
+            color: #17a2b8;
+        }
     </style>
 </head>
 <body>
@@ -435,6 +546,9 @@
                 <button onclick="batchDownload()" id="batchDownloadBtn" style="background: #28a745; display: none;">
                     📦 批量下载 (<span id="selectedCount">0</span>)
                 </button>
+                <button onclick="batchViewImages()" id="batchViewBtn" style="background: #007bff; display: none; margin-left: 10px;">
+                    👁️ 批量查看 (<span id="selectedCountView">0</span>)
+                </button>
                 <button onclick="deleteBatchRecords()" id="batchDeleteBtn" style="background: #dc3545; display: none; margin-left: 10px;">
                     🗑️ 批量删除 (<span id="selectedCountDelete">0</span>)
                 </button>
@@ -498,6 +612,17 @@
                 </div>
                 <button class="lightbox-info-btn" id="lightboxInfoBtn" onclick="toggleLightboxInfo(event)">📋 查看信息</button>
             </div>
+        </div>
+    </div>
+    
+    <!-- 批量查看图片模态框 -->
+    <div class="batch-view-modal" id="batchViewModal">
+        <div class="batch-view-header">
+            <div class="batch-view-title">批量查看图片 (<span id="batchViewCount">0</span> 张)</div>
+            <button class="batch-view-close" onclick="closeBatchView()">关闭</button>
+        </div>
+        <div class="batch-view-content" id="batchViewContent">
+            <!-- 动态加载图片 -->
         </div>
     </div>
     </div>
@@ -652,6 +777,9 @@
                     <td>
                         <button class="download-btn" onclick="downloadRecordImage('${record.image_path}', '${record.filename}')">
                             ⬇️ 下载
+                        </button>
+                        <button class="regenerate-btn" onclick="regenerateImage(${index})" style="background: #17a2b8; color: white; padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-left: 5px;">
+                            🔄 重新生成
                         </button>
                         <button class="delete-btn" onclick="deleteRecord(${record.id})">
                             🗑️ 删除
@@ -875,17 +1003,22 @@
             updateBatchDownloadButton();
         }
         
-        // 更新批量下载按钮和批量删除按钮
+        // 更新批量下载按钮、批量查看按钮和批量删除按钮
         function updateBatchDownloadButton() {
             const count = selectedRecords.size;
             const downloadBtn = document.getElementById('batchDownloadBtn');
+            const viewBtn = document.getElementById('batchViewBtn');
             const deleteBtn = document.getElementById('batchDeleteBtn');
             const downloadCountSpan = document.getElementById('selectedCount');
+            const viewCountSpan = document.getElementById('selectedCountView');
             const deleteCountSpan = document.getElementById('selectedCountDelete');
             
             // 安全地更新计数，检查元素是否存在
             if (downloadCountSpan) {
                 downloadCountSpan.textContent = count;
+            }
+            if (viewCountSpan) {
+                viewCountSpan.textContent = count;
             }
             if (deleteCountSpan) {
                 deleteCountSpan.textContent = count;
@@ -894,6 +1027,9 @@
             // 安全地显示/隐藏按钮，检查元素是否存在
             if (downloadBtn) {
                 downloadBtn.style.display = count > 0 ? 'inline-block' : 'none';
+            }
+            if (viewBtn) {
+                viewBtn.style.display = count > 0 ? 'inline-block' : 'none';
             }
             if (deleteBtn) {
                 deleteBtn.style.display = count > 0 ? 'inline-block' : 'none';
@@ -1075,6 +1211,170 @@
                 }
             }
         }
+        
+        // 重新生成图片
+        function regenerateImage(index) {
+            const record = records[index];
+            if (!record) {
+                alert('记录不存在');
+                return;
+            }
+            
+            // 处理分辨率：统一转换为小写（2k/4k）
+            let resolution = record.resolution || '2k';
+            if (typeof resolution === 'string') {
+                resolution = resolution.toLowerCase();
+                // 处理可能的格式：2K -> 2k, 4K -> 4k, 2k -> 2k
+                if (resolution === '2k' || resolution === '4k') {
+                    // 已经是正确格式
+                } else if (resolution.includes('2') || resolution.includes('k')) {
+                    // 尝试提取 2k 或 4k
+                    if (resolution.includes('4')) {
+                        resolution = '4k';
+                    } else {
+                        resolution = '2k';
+                    }
+                }
+            }
+            
+            // 处理参考图URL
+            let sample_image_urls = [];
+            if (record.sample_images && Array.isArray(record.sample_images)) {
+                sample_image_urls = record.sample_images.map(img => {
+                    // 处理不同的数据格式
+                    if (typeof img === 'string') {
+                        return img;
+                    } else if (img && img.url) {
+                        return img.url;
+                    } else if (img && typeof img === 'object') {
+                        // 尝试其他可能的字段
+                        return img.url || img.path || img.src || '';
+                    }
+                    return '';
+                }).filter(url => url); // 过滤空值
+            }
+            
+            // 构建参数对象
+            const params = {
+                prompt: record.prompt || '',
+                aspect_ratio: record.aspect_ratio || '9:16',
+                resolution: resolution,
+                sample_images: sample_image_urls
+            };
+            
+            console.log('重新生成参数:', params);
+            
+            // 将参数存储到 localStorage
+            try {
+                const regenerateData = {
+                    prompt: params.prompt,
+                    aspect_ratio: params.aspect_ratio,
+                    resolution: params.resolution,
+                    sample_image_urls: params.sample_images,
+                    regenerate: true,
+                    timestamp: Date.now()
+                };
+                localStorage.setItem('regenerateData', JSON.stringify(regenerateData));
+                
+                console.log('已保存重新生成数据到 localStorage:', regenerateData);
+                
+                // 跳转到图片生成页面
+                window.location.href = '/';
+            } catch (error) {
+                console.error('保存重新生成参数失败:', error);
+                alert('准备重新生成失败，请重试');
+            }
+        }
+        
+        // 批量查看图片
+        function batchViewImages() {
+            if (selectedRecords.size === 0) {
+                alert('请先选择要查看的记录');
+                return;
+            }
+            
+            // 获取选中的记录
+            const selectedItems = records.filter(r => selectedRecords.has(r.id));
+            
+            if (selectedItems.length === 0) {
+                alert('未找到选中的记录');
+                return;
+            }
+            
+            // 更新计数
+            const countSpan = document.getElementById('batchViewCount');
+            if (countSpan) {
+                countSpan.textContent = selectedItems.length;
+            }
+            
+            // 渲染图片
+            const content = document.getElementById('batchViewContent');
+            content.innerHTML = '';
+            
+            selectedItems.forEach((record, index) => {
+                const item = document.createElement('div');
+                item.className = 'batch-view-item';
+                
+                // 格式化时间
+                const date = new Date(record.created_at);
+                const dateStr = date.toLocaleString('zh-CN');
+                
+                // 处理示例图
+                let sampleImagesHTML = '';
+                if (record.sample_images && record.sample_images.length > 0) {
+                    sampleImagesHTML = record.sample_images.map(img => 
+                        `<img src="${img.url}" style="width: 30px; height: 30px; object-fit: cover; border-radius: 4px; margin-right: 5px;" title="${img.filename || ''}">`
+                    ).join('');
+                } else {
+                    sampleImagesHTML = '<span style="color: #999;">无</span>';
+                }
+                
+                item.innerHTML = `
+                    <img src="${record.image_path}" 
+                         class="batch-view-item-image" 
+                         onclick="openLightboxWithRecord(${records.findIndex(r => r.id === record.id)})"
+                         onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%2250%22 font-size=%2220%22%3E加载失败%3C/text%3E%3C/svg%3E'"
+                         alt="图片 ${index + 1}">
+                    <div class="batch-view-item-info">
+                        <p><strong>ID:</strong> ${record.id}</p>
+                        <p><strong>提示词:</strong> ${record.prompt || '-'}</p>
+                        <p><strong>比例:</strong> ${record.aspect_ratio || '-'}</p>
+                        <p><strong>分辨率:</strong> ${record.resolution || '-'} (${record.width}×${record.height})</p>
+                        <p><strong>参考图:</strong> ${sampleImagesHTML}</p>
+                        <p><strong>文件名:</strong> ${record.filename || '-'}</p>
+                        <p><strong>生成时间:</strong> ${dateStr}</p>
+                    </div>
+                `;
+                
+                content.appendChild(item);
+            });
+            
+            // 显示模态框
+            const modal = document.getElementById('batchViewModal');
+            if (modal) {
+                modal.classList.add('active');
+                document.body.style.overflow = 'hidden';
+            }
+        }
+        
+        // 关闭批量查看
+        function closeBatchView() {
+            const modal = document.getElementById('batchViewModal');
+            if (modal) {
+                modal.classList.remove('active');
+                document.body.style.overflow = '';
+            }
+        }
+        
+        // 按 ESC 键关闭批量查看
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                const modal = document.getElementById('batchViewModal');
+                if (modal && modal.classList.contains('active')) {
+                    closeBatchView();
+                }
+            }
+        });
 
     </script>
     <script src="/static/sidebar-nav.js"></script>
