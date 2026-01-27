@@ -166,6 +166,79 @@
             font-size: 16px;
             line-height: 1;
         }
+
+        .reference-row {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+            margin: 12px 0 4px;
+        }
+
+        .reference-selected {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .reference-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .reference-images {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+            gap: 10px;
+            min-height: 80px;
+            padding: 10px;
+            border: 1px dashed #e1e4e8;
+            border-radius: 8px;
+            background: #fafbfc;
+        }
+
+        .reference-image {
+            position: relative;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid #eee;
+            background: #fff;
+        }
+
+        .reference-image img {
+            width: 100%;
+            height: 70px;
+            object-fit: cover;
+            display: block;
+        }
+
+        .reference-image .remove-btn {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 20px;
+            height: 20px;
+            line-height: 18px;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.55);
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .reference-empty {
+            color: #888;
+            font-size: 0.9em;
+        }
+
+        .reference-upload {
+            width: 240px;
+        }
+
+        .reference-upload .upload-area {
+            min-height: 120px;
+            padding: 14px;
+        }
         
         .form-row {
             display: grid;
@@ -734,6 +807,24 @@
                             </button>
                         </div>
                     </div>
+
+                    <div class="reference-row">
+                        <div class="reference-selected">
+                            <div class="reference-title">已选参考图</div>
+                            <div class="reference-images" id="referenceImages">
+                                <div class="reference-empty">暂无参考图，请从下方选择或右侧上传</div>
+                            </div>
+                        </div>
+                        <div class="reference-upload">
+                            <label>手动上传参考图片</label>
+                            <div class="upload-area" onclick="document.getElementById('imageUpload').click()">
+                                <div class="upload-icon">📁</div>
+                                <p>点击上传或拖拽</p>
+                                <p style="font-size: 0.85em; color: #666; margin-top: 5px;">最多 4 张</p>
+                                <input type="file" id="imageUpload" name="images" multiple accept="image/*" onchange="handleFileSelect(event)">
+                            </div>
+                        </div>
+                    </div>
                     
                     <!-- 生成的图片显示区域 -->
                     <div class="result-section" id="resultSection" style="display: none;">
@@ -769,17 +860,6 @@
                         <p class="sample-images-hint">
                             💡 点击选择1-4张示例图作为参考图，可与手动上传的图片一起使用
                         </p>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label>手动上传参考图片（最多 4 张）</label>
-                        <div class="upload-area" onclick="document.getElementById('imageUpload').click()">
-                            <div class="upload-icon">📁</div>
-                            <p>点击上传或拖拽图片到这里</p>
-                            <p style="font-size: 0.9em; color: #666; margin-top: 5px;">支持 JPG, PNG 格式，可一次选择多张图片</p>
-                            <input type="file" id="imageUpload" name="images" multiple accept="image/*" onchange="handleFileSelect(event)">
-                        </div>
-                        <div class="preview-images" id="previewImages"></div>
                     </div>
                     
                     <div class="form-row">
@@ -967,8 +1047,16 @@
                             
                             // 处理参考图
                             if (data.sample_image_urls && data.sample_image_urls.length > 0) {
-                                // 保存参考图URL，等待示例图加载完成后自动选择
-                                window.pendingRegenerateSampleUrls = data.sample_image_urls;
+                                // 直接填充参考图（避免仅依赖示例图库匹配）
+                                const urls = data.sample_image_urls.slice(0, 4);
+                                selectedSampleImages = urls.map(url => ({
+                                    url: url,
+                                    filename: '参考图'
+                                }));
+                                renderReferenceImages();
+                                
+                                // 保存参考图URL，等待示例图加载完成后自动选择高亮
+                                window.pendingRegenerateSampleUrls = urls;
                                 console.log('待选择的参考图URL:', window.pendingRegenerateSampleUrls);
                             }
                             
@@ -1024,8 +1112,7 @@
             console.log('待选择的URL列表:', urlsToSelect);
             console.log('当前示例图数量:', sampleImages.length);
             
-            // 清空当前选择
-            selectedSampleImages = [];
+            const existingUrls = new Set(selectedSampleImages.map(img => img.url));
             
             // 在已加载的示例图中查找匹配的URL
             let foundCount = 0;
@@ -1100,7 +1187,7 @@
                 if (index >= 0 && selectedSampleImages.length < 4) {
                     // 检查是否已选择
                     const existingIndex = selectedSampleImages.findIndex(s => s.url === sampleImages[index].url);
-                    if (existingIndex < 0) {
+                    if (existingIndex < 0 && !existingUrls.has(sampleImages[index].url)) {
                         selectedSampleImages.push(sampleImages[index]);
                         foundCount++;
                         console.log(`✓ 成功选择参考图 ${foundCount}:`, sampleImages[index].url);
@@ -1274,29 +1361,79 @@
             event.target.value = '';
         }
         
-        function updatePreview() {
-            const previewContainer = document.getElementById('previewImages');
-            previewContainer.innerHTML = '';
+        function renderReferenceImages() {
+            const container = document.getElementById('referenceImages');
+            if (!container) return;
+            
+            container.innerHTML = '';
+            let hasAny = false;
+            
+            selectedSampleImages.forEach((img, index) => {
+                hasAny = true;
+                const div = document.createElement('div');
+                div.className = 'reference-image';
+                const imgEl = document.createElement('img');
+                imgEl.src = img.url;
+                imgEl.alt = img.filename || '参考图';
+                imgEl.style.cursor = 'pointer';
+                imgEl.onclick = () => openImageModal(img.url, img.filename || '参考图', null, 'sample');
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'remove-btn';
+                removeBtn.textContent = '×';
+                removeBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    removeSampleImage(index);
+                };
+                div.appendChild(imgEl);
+                div.appendChild(removeBtn);
+                container.appendChild(div);
+            });
             
             selectedFiles.forEach((file, index) => {
+                hasAny = true;
+                const div = document.createElement('div');
+                div.className = 'reference-image';
+                container.appendChild(div);
+                
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    const div = document.createElement('div');
-                    div.className = 'preview-image';
-                    const imageUrl = e.target.result;
-                    div.innerHTML = `
-                        <img src="${imageUrl}" alt="预览" style="cursor: pointer;" onclick="openImageModal('${imageUrl}', null)">
-                        <button class="remove-btn" onclick="removeFile(${index}); event.stopPropagation();">×</button>
-                    `;
-                    previewContainer.appendChild(div);
+                    const imgEl = document.createElement('img');
+                    imgEl.src = e.target.result;
+                    imgEl.alt = file.name || '上传参考图';
+                    imgEl.style.cursor = 'pointer';
+                    imgEl.onclick = () => openImageModal(e.target.result, file.name || '上传参考图', null, 'result');
+                    const removeBtn = document.createElement('button');
+                    removeBtn.className = 'remove-btn';
+                    removeBtn.textContent = '×';
+                    removeBtn.onclick = (evt) => {
+                        evt.stopPropagation();
+                        removeFile(index);
+                    };
+                    div.innerHTML = '';
+                    div.appendChild(imgEl);
+                    div.appendChild(removeBtn);
                 };
                 reader.readAsDataURL(file);
             });
+            
+            if (!hasAny) {
+                container.innerHTML = '<div class="reference-empty">暂无参考图，请从下方选择或右侧上传</div>';
+            }
+        }
+        
+        function updatePreview() {
+            renderReferenceImages();
         }
         
         function removeFile(index) {
             selectedFiles.splice(index, 1);
             updatePreview();
+        }
+
+        function removeSampleImage(index) {
+            selectedSampleImages.splice(index, 1);
+            updateSampleImagesUI();
+            renderReferenceImages();
         }
         
         // 保持连接活跃，防止页面切换时中断请求
@@ -2371,6 +2508,8 @@
                     }
                 }
             });
+            
+            renderReferenceImages();
         }
         
         // 当前模态框中显示的图片URL和索引
@@ -2637,10 +2776,23 @@
                 // 如果有重新生成数据，优先加载 'recent' 类别（因为参考图很可能是最近生成的）
                 if (hasRegenerateData) {
                     console.log('优先加载最近生成的图片以匹配参考图');
-                    await loadSampleImages('recent');
+                    sampleCategory = 'recent';
+                    // 同步按钮状态
+                    if (btnP && btnS && btnR) {
+                        btnP.classList.remove('btn-primary');
+                        btnS.classList.remove('btn-primary');
+                        btnR.classList.add('btn-primary');
+                    }
+                    await loadRecentImages();
                     // 如果 recent 类别没有图片或数量很少，再加载默认类别
                     if (sampleImages.length < 5) {
                         console.log('最近生成图片较少，继续加载默认类别');
+                        sampleCategory = 'person';
+                        if (btnP && btnS && btnR) {
+                            btnP.classList.add('btn-primary');
+                            btnS.classList.remove('btn-primary');
+                            btnR.classList.remove('btn-primary');
+                        }
                         await loadSampleImages(sampleCategory);
                     }
                 } else {

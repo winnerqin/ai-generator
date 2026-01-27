@@ -86,6 +86,33 @@
             grid-template-columns: 1fr 1fr;
             gap: 15px;
         }
+
+        .frame-select-row {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+            padding: 6px;
+            border: 1px solid #e2e6ef;
+            border-radius: 10px;
+            background: #f7f8fb;
+        }
+
+        .frame-select-btn {
+            flex: 0 0 120px;
+            min-height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            white-space: nowrap;
+            align-self: stretch;
+        }
+
+        .frame-select-row .frame-drop-zone {
+            min-height: 64px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
         
         #firstLastFrameSection {
             display: none;
@@ -390,19 +417,16 @@
                     <!-- 首帧图片选择 -->
                     <div class="form-group">
                         <label>首帧图片 *</label>
-                        <div style="display: flex; gap: 5px; margin-bottom: 5px;">
-                            <button type="button" class="btn" onclick="openImageSelector('firstFrameInPair')" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
+                        <div class="frame-select-row" style="margin-bottom: 5px;">
+                            <button type="button" class="btn frame-select-btn" onclick="openImageSelector('firstFrameInPair')" style="background: #28a745; color: white; padding: 10px 8px; font-size: 0.85em;">
                                 📚 从库选择
                             </button>
-                            <button type="button" class="btn" onclick="document.getElementById('firstFrameInPairUpload').click()" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
-                                📁 上传
-                            </button>
-                        </div>
-                        <div class="frame-drop-zone" data-type="firstFrameInPair" style="border: 2px dashed #28a745; border-radius: 8px; padding: 15px; text-align: center; cursor: pointer; background: #f0f9f4; transition: background 0.3s; margin-top: 5px;" 
-                             ondrop="handleSingleFrameDrop(event)" ondragover="handleSingleFrameDragOver(event)" ondragleave="handleSingleFrameDragLeave(event)"
-                             onclick="document.getElementById('firstFrameInPairUpload').click()">
-                            <div style="font-size: 1.5em;">📁</div>
-                            <p style="margin: 3px 0; font-size: 0.9em; color: #333;">拖拽图片到这里或点击上传</p>
+                            <div class="frame-drop-zone" data-type="firstFrameInPair" style="border: 2px dashed #28a745; border-radius: 8px; padding: 12px; text-align: center; cursor: pointer; background: #f0f9f4; transition: background 0.3s; flex: 1;"
+                                 ondrop="handleSingleFrameDrop(event)" ondragover="handleSingleFrameDragOver(event)" ondragleave="handleSingleFrameDragLeave(event)"
+                                 onclick="document.getElementById('firstFrameInPairUpload').click()">
+                                <div style="font-size: 1.4em;">📁</div>
+                                <p style="margin: 3px 0; font-size: 0.9em; color: #333;">拖拽图片到这里或点击上传</p>
+                            </div>
                         </div>
                         <input type="file" id="firstFrameInPairUpload" accept="image/*" onchange="handleImageUpload(event, 'firstFrameInPair')" style="display: none;">
                         <input type="hidden" id="firstFrameInPairUrl" name="first_frame_url">
@@ -414,19 +438,16 @@
                     <!-- 尾帧图片选择 -->
                     <div class="form-group" id="lastFrameSection">
                         <label>尾帧图片 *</label>
-                        <div style="display: flex; gap: 5px; margin-bottom: 5px;">
-                            <button type="button" class="btn" onclick="openImageSelector('lastFrame')" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
+                        <div class="frame-select-row" style="margin-bottom: 5px;">
+                            <button type="button" class="btn frame-select-btn" onclick="openImageSelector('lastFrame')" style="background: #28a745; color: white; padding: 10px 8px; font-size: 0.85em;">
                                 📚 从库选择
                             </button>
-                            <button type="button" class="btn" onclick="document.getElementById('lastFrameUpload').click()" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
-                                📁 上传
-                            </button>
-                        </div>
-                        <div class="frame-drop-zone" data-type="lastFrame" style="border: 2px dashed #28a745; border-radius: 8px; padding: 15px; text-align: center; cursor: pointer; background: #f0f9f4; transition: background 0.3s; margin-top: 5px;" 
-                             ondrop="handleSingleFrameDrop(event)" ondragover="handleSingleFrameDragOver(event)" ondragleave="handleSingleFrameDragLeave(event)"
-                             onclick="document.getElementById('lastFrameUpload').click()">
-                            <div style="font-size: 1.5em;">📁</div>
-                            <p style="margin: 3px 0; font-size: 0.9em; color: #333;">拖拽图片到这里或点击上传</p>
+                            <div class="frame-drop-zone" data-type="lastFrame" style="border: 2px dashed #28a745; border-radius: 8px; padding: 12px; text-align: center; cursor: pointer; background: #f0f9f4; transition: background 0.3s; flex: 1;"
+                                 ondrop="handleSingleFrameDrop(event)" ondragover="handleSingleFrameDragOver(event)" ondragleave="handleSingleFrameDragLeave(event)"
+                                 onclick="document.getElementById('lastFrameUpload').click()">
+                                <div style="font-size: 1.4em;">📁</div>
+                                <p style="margin: 3px 0; font-size: 0.9em; color: #333;">拖拽图片到这里或点击上传</p>
+                            </div>
                         </div>
                         <input type="file" id="lastFrameUpload" accept="image/*" onchange="handleImageUpload(event, 'lastFrame')" style="display: none;">
                         <input type="hidden" id="lastFrameUrl" name="last_frame_url">
@@ -439,19 +460,16 @@
                 <!-- 首帧图片选择（单独显示，用于first_frame模式） -->
                 <div class="form-group" id="firstFrameOnlySection" style="display: none;">
                     <label>首帧图片 *</label>
-                    <div style="display: flex; gap: 5px; margin-bottom: 5px;">
-                        <button type="button" class="btn" onclick="openImageSelector('firstFrame')" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
+                    <div class="frame-select-row" style="margin-bottom: 5px;">
+                        <button type="button" class="btn frame-select-btn" onclick="openImageSelector('firstFrame')" style="background: #28a745; color: white; padding: 10px 8px; font-size: 0.85em;">
                             📚 从库选择
                         </button>
-                        <button type="button" class="btn" onclick="document.getElementById('firstFrameOnlyUpload').click()" style="background: #28a745; color: white; flex: 1; padding: 6px 8px; font-size: 0.85em;">
-                            📁 上传
-                        </button>
-                    </div>
-                    <div class="frame-drop-zone" data-type="firstFrame" style="border: 2px dashed #28a745; border-radius: 8px; padding: 15px; text-align: center; cursor: pointer; background: #f0f9f4; transition: background 0.3s; margin-top: 5px;" 
-                         ondrop="handleSingleFrameDrop(event)" ondragover="handleSingleFrameDragOver(event)" ondragleave="handleSingleFrameDragLeave(event)"
-                         onclick="document.getElementById('firstFrameOnlyUpload').click()">
-                        <div style="font-size: 1.5em;">📁</div>
-                        <p style="margin: 3px 0; font-size: 0.9em; color: #333;">拖拽图片到这里或点击上传</p>
+                        <div class="frame-drop-zone" data-type="firstFrame" style="border: 2px dashed #28a745; border-radius: 8px; padding: 12px; text-align: center; cursor: pointer; background: #f0f9f4; transition: background 0.3s; flex: 1;"
+                             ondrop="handleSingleFrameDrop(event)" ondragover="handleSingleFrameDragOver(event)" ondragleave="handleSingleFrameDragLeave(event)"
+                             onclick="document.getElementById('firstFrameOnlyUpload').click()">
+                            <div style="font-size: 1.4em;">📁</div>
+                            <p style="margin: 3px 0; font-size: 0.9em; color: #333;">拖拽图片到这里或点击上传</p>
+                        </div>
                     </div>
                     <input type="file" id="firstFrameOnlyUpload" accept="image/*" onchange="handleImageUpload(event, 'firstFrame')" style="display: none;">
                     <input type="hidden" id="firstFrameUrl" name="first_frame_url">
