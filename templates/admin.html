@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统管理</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .admin-section {
+            background: #fff;
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+        }
+        .admin-section h2 {
+            margin: 0 0 12px;
+            font-size: 1.1em;
+        }
+        .admin-form {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        .admin-form input, .admin-form select, .admin-form button {
+            padding: 8px 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.9em;
+        }
+        .admin-form button {
+            background: #28a745;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+        }
+        .admin-list {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .admin-list th, .admin-list td {
+            border-bottom: 1px solid #eee;
+            padding: 8px;
+            text-align: left;
+            font-size: 0.9em;
+        }
+        .tag {
+            display: inline-block;
+            padding: 2px 6px;
+            margin-right: 6px;
+            border-radius: 4px;
+            background: #f0f4f8;
+            font-size: 0.85em;
+        }
+        .action-btn {
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            margin-right: 6px;
+        }
+        .btn-danger { background: #dc3545; color: #fff; }
+        .btn-secondary { background: #6c757d; color: #fff; }
+    </style>
+</head>
+<body>
+    <nav class="sidebar-nav" id="sidebarNav">
+        <div class="sidebar-nav-header">
+            <div class="sidebar-nav-title">Ai创作工具</div>
+            <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收缩/展开">
+                <span id="toggleIcon">‹</span>
+            </button>
+        </div>
+        <div class="sidebar-nav-menu">
+            <a href="/" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎨</span>
+                <span class="sidebar-nav-text">单图生成</span>
+            </a>
+            <a href="/batch" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📦</span>
+                <span class="sidebar-nav-text">批量生成</span>
+            </a>
+            <a href="/records" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📊</span>
+                <span class="sidebar-nav-text">生图任务</span>
+            </a>
+            <a href="/video-generate" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎬</span>
+                <span class="sidebar-nav-text">视频生成</span>
+            </a>
+            <a href="/video-tasks" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📹</span>
+                <span class="sidebar-nav-text">视频任务</span>
+            </a>
+            <a href="/script-analysis" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎬</span>
+                <span class="sidebar-nav-text">剧本分析</span>
+            </a>
+            <a href="/content-management" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📚</span>
+                <span class="sidebar-nav-text">内容管理</span>
+            </a>
+            <div class="sidebar-nav-divider"></div>
+            <a href="/admin" class="sidebar-nav-item active">
+                <span class="sidebar-nav-icon">🛠️</span>
+                <span class="sidebar-nav-text">系统管理</span>
+            </a>
+            <a href="/stats" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📈</span>
+                <span class="sidebar-nav-text">系统统计</span>
+            </a>
+        </div>
+        <div class="sidebar-nav-user">
+            <div class="sidebar-nav-user-info">
+                <div class="sidebar-nav-user-avatar">👤</div>
+                <div class="sidebar-nav-user-name">{{ user.username }}</div>
+            </div>
+            <div style="margin-top: 8px;">
+                <label style="font-size: 0.85em; color: #666;">当前项目</label>
+                <select id="projectSelect" style="width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option>加载中...</option>
+                </select>
+            </div>
+            <a href="/logout" class="sidebar-nav-logout">登出</a>
+        </div>
+    </nav>
+
+    <div class="main-content">
+        <div class="container">
+            <div class="content" style="padding-top: 20px;">
+                <div class="admin-section">
+                    <h2>用户管理</h2>
+                    <div class="admin-form">
+                        <input type="text" id="newUsername" placeholder="用户名">
+                        <input type="password" id="newPassword" placeholder="初始密码">
+                        <button onclick="createUser()">添加用户</button>
+                    </div>
+                    <table class="admin-list" id="usersTable">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>用户名</th>
+                                <th>创建时间</th>
+                                <th>最后登录</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <div class="admin-section">
+                    <h2>项目管理</h2>
+                    <div class="admin-form">
+                        <input type="text" id="newProjectName" placeholder="项目名称">
+                        <button onclick="createProject()">创建项目</button>
+                    </div>
+                    <table class="admin-list" id="projectsTable">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>项目名称</th>
+                                <th>成员</th>
+                                <th>授权</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allUsers = [];
+        let allProjects = [];
+
+        async function loadUsers() {
+            const resp = await fetch('/api/admin/users');
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.error || '加载用户失败');
+                return;
+            }
+            allUsers = data.users || [];
+            renderUsers();
+        }
+
+        function renderUsers() {
+            const tbody = document.querySelector('#usersTable tbody');
+            tbody.innerHTML = '';
+            allUsers.forEach(u => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${u.id}</td>
+                    <td>${u.username}</td>
+                    <td>${u.created_at || '-'}</td>
+                    <td>${u.last_login || '-'}</td>
+                    <td>
+                        <button class="action-btn btn-secondary" onclick="resetPassword(${u.id})">改密码</button>
+                        <button class="action-btn btn-danger" onclick="deleteUser(${u.id})">删除</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function createUser() {
+            const username = document.getElementById('newUsername').value.trim();
+            const password = document.getElementById('newPassword').value;
+            if (!username || !password) {
+                alert('请输入用户名和密码');
+                return;
+            }
+            const resp = await fetch('/api/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.error || '创建失败');
+                return;
+            }
+            document.getElementById('newUsername').value = '';
+            document.getElementById('newPassword').value = '';
+            loadUsers();
+        }
+
+        async function deleteUser(userId) {
+            if (!confirm('确定删除该用户吗？')) return;
+            const resp = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.error || '删除失败');
+                return;
+            }
+            loadUsers();
+        }
+
+        async function resetPassword(userId) {
+            const password = prompt('请输入新密码');
+            if (!password) return;
+            const resp = await fetch(`/api/admin/users/${userId}/password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            });
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.error || '修改失败');
+                return;
+            }
+            alert('密码已更新');
+        }
+
+        async function loadProjects() {
+            const resp = await fetch('/api/admin/projects');
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.error || '加载项目失败');
+                return;
+            }
+            allProjects = data.projects || [];
+            renderProjects();
+        }
+
+        function renderProjects() {
+            const tbody = document.querySelector('#projectsTable tbody');
+            tbody.innerHTML = '';
+            allProjects.forEach(p => {
+                const members = (p.users || []).map(u => `<span class="tag">${u.username}</span>`).join('');
+                const userOptions = allUsers.map(u => `<option value="${u.id}">${u.username}</option>`).join('');
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${p.id}</td>
+                    <td>${p.name}</td>
+                    <td>${members || '-'}</td>
+                    <td>
+                        <select id="assignUser_${p.id}">${userOptions}</select>
+                        <button class="action-btn btn-secondary" onclick="assignUser(${p.id})">授权</button>
+                        <button class="action-btn btn-danger" onclick="revokeUser(${p.id})">移除</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function createProject() {
+            const name = document.getElementById('newProjectName').value.trim();
+            if (!name) {
+                alert('请输入项目名称');
+                return;
+            }
+            const resp = await fetch('/api/admin/projects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.error || '创建失败');
+                return;
+            }
+            document.getElementById('newProjectName').value = '';
+            loadProjects();
+        }
+
+        async function assignUser(projectId) {
+            const userId = document.getElementById(`assignUser_${projectId}`).value;
+            const resp = await fetch(`/api/admin/projects/${projectId}/assign`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId })
+            });
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.error || '授权失败');
+                return;
+            }
+            loadProjects();
+        }
+
+        async function revokeUser(projectId) {
+            const userId = document.getElementById(`assignUser_${projectId}`).value;
+            const resp = await fetch(`/api/admin/projects/${projectId}/revoke`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId })
+            });
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.error || '移除失败');
+                return;
+            }
+            loadProjects();
+        }
+
+        async function loadProjectSwitcher() {
+            const select = document.getElementById('projectSelect');
+            if (!select) return;
+            try {
+                const resp = await fetch('/api/projects');
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || '加载失败');
+                select.innerHTML = '';
+                data.projects.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.id;
+                    opt.textContent = p.name;
+                    if (String(p.id) === String(data.current_project_id)) {
+                        opt.selected = true;
+                    }
+                    select.appendChild(opt);
+                });
+            } catch (e) {
+                select.innerHTML = '<option>项目加载失败</option>';
+            }
+        }
+
+        async function switchProject(projectId) {
+            const resp = await fetch('/api/projects/switch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project_id: projectId })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                location.reload();
+            } else {
+                alert(data.error || '切换失败');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadUsers().then(loadProjects);
+            const select = document.getElementById('projectSelect');
+            if (select) {
+                select.addEventListener('change', () => switchProject(select.value));
+                loadProjectSwitcher();
+            }
+        });
+    </script>
+    <script src="/static/sidebar-nav.js"></script>
+</body>
+</html>

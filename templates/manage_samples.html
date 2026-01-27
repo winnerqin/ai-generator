@@ -447,10 +447,14 @@
         <a href="/script-analysis">🎬 剧本分析</a>
         <a href="/manage-samples" class="active">🖼️ 素材管理</a>
         {% if user.username == 'system_admin' %}
+        <a href="/admin">🛠️ 系统管理</a>
         <a href="/stats">📈 系统统计</a>
         {% endif %}
         <div class="user-info">
             <span>👤 <span class="username">{{ user.username }}</span></span>
+            <select id="projectSelect" style="margin: 0 10px; padding: 4px 6px; border-radius: 6px; border: 1px solid #ddd;">
+                <option>加载中...</option>
+            </select>
             <a href="/logout" class="logout-btn">登出</a>
         </div>
     </div>
@@ -831,6 +835,49 @@
             const modal = document.getElementById('previewModal');
             if (modal.classList.contains('active') && e.key === 'Escape') {
                 closePreview({ target: modal });
+            }
+        });
+    </script>
+    <script>
+        async function loadProjects() {
+            const select = document.getElementById('projectSelect');
+            if (!select) return;
+            try {
+                const resp = await fetch('/api/projects');
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || '加载失败');
+                select.innerHTML = '';
+                data.projects.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.id;
+                    opt.textContent = p.name;
+                    if (String(p.id) === String(data.current_project_id)) {
+                        opt.selected = true;
+                    }
+                    select.appendChild(opt);
+                });
+            } catch (e) {
+                select.innerHTML = '<option>项目加载失败</option>';
+            }
+        }
+        async function switchProject(projectId) {
+            const resp = await fetch('/api/projects/switch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project_id: projectId })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                location.reload();
+            } else {
+                alert(data.error || '切换失败');
+            }
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            const select = document.getElementById('projectSelect');
+            if (select) {
+                select.addEventListener('change', () => switchProject(select.value));
+                loadProjects();
             }
         });
     </script>

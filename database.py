@@ -41,6 +41,7 @@ def init_database():
                 CREATE TABLE generation_records_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL DEFAULT 1,
+                    project_id INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     prompt TEXT NOT NULL,
                     negative_prompt TEXT,
@@ -63,9 +64,9 @@ def init_database():
             # 复制数据（所有旧记录分配给用户ID=1）
             cursor.execute('''
                 INSERT INTO generation_records_new 
-                (id, user_id, created_at, prompt, negative_prompt, aspect_ratio, resolution, 
+                (id, user_id, project_id, created_at, prompt, negative_prompt, aspect_ratio, resolution, 
                  width, height, num_images, seed, steps, sample_images, image_path, filename, batch_id, status)
-                SELECT id, 1, created_at, prompt, negative_prompt, aspect_ratio, resolution,
+                SELECT id, 1, NULL, created_at, prompt, negative_prompt, aspect_ratio, resolution,
                        width, height, num_images, seed, steps, sample_images, image_path, filename, batch_id, status
                 FROM generation_records
             ''')
@@ -80,6 +81,7 @@ def init_database():
             CREATE TABLE generation_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
+                project_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 prompt TEXT NOT NULL,
                 negative_prompt TEXT,
@@ -104,11 +106,30 @@ def init_database():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_created ON generation_records(user_id, created_at DESC)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_batch_id ON generation_records(batch_id)')
     
+    # 创建项目与授权表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            owner_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_projects (
+            user_id INTEGER NOT NULL,
+            project_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, project_id)
+        )
+    ''')
+    
     # 创建人物库和场景库表
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS person_library (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
+            project_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             filename TEXT NOT NULL,
             url TEXT NOT NULL,
@@ -120,6 +141,7 @@ def init_database():
         CREATE TABLE IF NOT EXISTS scene_library (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
+            project_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             filename TEXT NOT NULL,
             url TEXT NOT NULL,
@@ -133,6 +155,7 @@ def init_database():
         CREATE TABLE IF NOT EXISTS image_library (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
+            project_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             filename TEXT NOT NULL,
             url TEXT NOT NULL,
@@ -144,6 +167,7 @@ def init_database():
         CREATE TABLE IF NOT EXISTS video_library (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
+            project_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             filename TEXT NOT NULL,
             url TEXT NOT NULL,
@@ -158,6 +182,7 @@ def init_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             task_id TEXT UNIQUE NOT NULL,
+            project_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             status TEXT DEFAULT 'pending',
@@ -189,6 +214,64 @@ def init_database():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_task_id ON video_tasks(task_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_status ON video_tasks(status)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_created_at ON video_tasks(created_at)')
+    
+    # ===== 项目字段迁移与默认项目 =====
+    def ensure_column(table_name, column_name, column_def):
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        cols = [col[1] for col in cursor.fetchall()]
+        if column_name not in cols:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
+    
+    for table_name in [
+        'generation_records',
+        'person_library',
+        'scene_library',
+        'image_library',
+        'video_library',
+        'video_tasks'
+    ]:
+        ensure_column(table_name, 'project_id', 'INTEGER')
+    
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_records_user_project_created ON generation_records(user_id, project_id, created_at DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_person_user_project_created ON person_library(user_id, project_id, created_at DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scene_user_project_created ON scene_library(user_id, project_id, created_at DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_image_user_project_created ON image_library(user_id, project_id, created_at DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_user_project_created ON video_library(user_id, project_id, created_at DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_user_project_created ON video_tasks(user_id, project_id, created_at DESC)')
+    
+    # 为现有用户创建默认项目并回填 project_id
+    cursor.execute('SELECT id FROM users')
+    user_ids = [row[0] for row in cursor.fetchall()]
+    for user_id in user_ids:
+        cursor.execute('SELECT project_id FROM user_projects WHERE user_id = ? LIMIT 1', (user_id,))
+        row = cursor.fetchone()
+        project_id = row[0] if row else None
+        if not project_id:
+            cursor.execute('SELECT id FROM projects WHERE owner_id = ? ORDER BY id LIMIT 1', (user_id,))
+            row = cursor.fetchone()
+            project_id = row[0] if row else None
+        if not project_id:
+            cursor.execute('''
+                INSERT INTO projects (name, owner_id, created_at)
+                VALUES (?, ?, ?)
+            ''', ('默认项目', user_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+            project_id = cursor.lastrowid
+        cursor.execute('''
+            INSERT OR IGNORE INTO user_projects (user_id, project_id, created_at)
+            VALUES (?, ?, ?)
+        ''', (user_id, project_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        for table_name in [
+            'generation_records',
+            'person_library',
+            'scene_library',
+            'image_library',
+            'video_library',
+            'video_tasks'
+        ]:
+            cursor.execute(
+                f"UPDATE {table_name} SET project_id = ? WHERE user_id = ? AND (project_id IS NULL OR project_id = 0)",
+                (project_id, user_id)
+            )
     
     conn.commit()
     conn.close()
@@ -232,11 +315,12 @@ def save_generation_record(data):
 
     cursor.execute('''
         INSERT INTO generation_records 
-        (user_id, created_at, prompt, negative_prompt, aspect_ratio, resolution, width, height, 
+        (user_id, project_id, created_at, prompt, negative_prompt, aspect_ratio, resolution, width, height, 
          num_images, seed, steps, sample_images, image_path, filename, batch_id, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         data.get('user_id'),
+        data.get('project_id'),
         local_time,
         data.get('prompt'),
         data.get('negative_prompt', ''),
@@ -261,37 +345,40 @@ def save_generation_record(data):
     return record_id
 
 
-def save_person_asset(user_id, filename, url, meta=None):
+def save_person_asset(user_id, filename, url, meta=None, project_id=None):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO person_library (user_id, created_at, filename, url, meta)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (user_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), filename, url, json.dumps(meta or {})))
+        INSERT INTO person_library (user_id, project_id, created_at, filename, url, meta)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (user_id, project_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), filename, url, json.dumps(meta or {})))
     asset_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return asset_id
 
 
-def save_scene_asset(user_id, filename, url, meta=None):
+def save_scene_asset(user_id, filename, url, meta=None, project_id=None):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO scene_library (user_id, created_at, filename, url, meta)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (user_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), filename, url, json.dumps(meta or {})))
+        INSERT INTO scene_library (user_id, project_id, created_at, filename, url, meta)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (user_id, project_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), filename, url, json.dumps(meta or {})))
     asset_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return asset_id
 
 
-def get_person_assets(user_id, limit=500):
+def get_person_assets(user_id, project_id=None, limit=500):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM person_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, limit))
+    if project_id is None:
+        cursor.execute('SELECT * FROM person_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, limit))
+    else:
+        cursor.execute('SELECT * FROM person_library WHERE user_id = ? AND project_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, project_id, limit))
     rows = cursor.fetchall()
     assets = [dict(r) for r in rows]
     for a in assets:
@@ -303,11 +390,14 @@ def get_person_assets(user_id, limit=500):
     return assets
 
 
-def get_scene_assets(user_id, limit=500):
+def get_scene_assets(user_id, project_id=None, limit=500):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM scene_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, limit))
+    if project_id is None:
+        cursor.execute('SELECT * FROM scene_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, limit))
+    else:
+        cursor.execute('SELECT * FROM scene_library WHERE user_id = ? AND project_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, project_id, limit))
     rows = cursor.fetchall()
     assets = [dict(r) for r in rows]
     for a in assets:
@@ -334,38 +424,41 @@ def delete_scene_asset(asset_id):
     conn.commit()
     conn.close()
 
-def save_image_asset(user_id, filename, url, meta=None):
+def save_image_asset(user_id, filename, url, meta=None, project_id=None):
     """保存图片到图片库"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO image_library (user_id, created_at, filename, url, meta)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (user_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), filename, url, json.dumps(meta or {})))
+        INSERT INTO image_library (user_id, project_id, created_at, filename, url, meta)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (user_id, project_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), filename, url, json.dumps(meta or {})))
     asset_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return asset_id
 
-def save_video_asset(user_id, filename, url, meta=None):
+def save_video_asset(user_id, filename, url, meta=None, project_id=None):
     """保存视频到视频库"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO video_library (user_id, created_at, filename, url, meta)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (user_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), filename, url, json.dumps(meta or {})))
+        INSERT INTO video_library (user_id, project_id, created_at, filename, url, meta)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (user_id, project_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), filename, url, json.dumps(meta or {})))
     asset_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return asset_id
 
-def get_image_assets(user_id, limit=500):
+def get_image_assets(user_id, project_id=None, limit=500):
     """获取图片库资源"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM image_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, limit))
+    if project_id is None:
+        cursor.execute('SELECT * FROM image_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, limit))
+    else:
+        cursor.execute('SELECT * FROM image_library WHERE user_id = ? AND project_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, project_id, limit))
     rows = cursor.fetchall()
     assets = [dict(r) for r in rows]
     for a in assets:
@@ -376,12 +469,15 @@ def get_image_assets(user_id, limit=500):
     conn.close()
     return assets
 
-def get_video_assets(user_id, limit=500):
+def get_video_assets(user_id, project_id=None, limit=500):
     """获取视频库资源"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM video_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, limit))
+    if project_id is None:
+        cursor.execute('SELECT * FROM video_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, limit))
+    else:
+        cursor.execute('SELECT * FROM video_library WHERE user_id = ? AND project_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, project_id, limit))
     rows = cursor.fetchall()
     assets = [dict(r) for r in rows]
     for a in assets:
@@ -392,12 +488,15 @@ def get_video_assets(user_id, limit=500):
     conn.close()
     return assets
 
-def get_video_by_task_id(user_id, task_id):
+def get_video_by_task_id(user_id, task_id, project_id=None):
     """根据任务ID获取视频库中的视频"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM video_library WHERE user_id = ?', (user_id,))
+    if project_id is None:
+        cursor.execute('SELECT * FROM video_library WHERE user_id = ?', (user_id,))
+    else:
+        cursor.execute('SELECT * FROM video_library WHERE user_id = ? AND project_id = ?', (user_id, project_id))
     rows = cursor.fetchall()
     for row in rows:
         asset = dict(row)
@@ -431,6 +530,7 @@ def save_video_task(data):
                 status = ?,
                 video_url = ?,
                 last_frame_image_url = ?,
+                project_id = COALESCE(?, project_id),
                 token = ?,
                 usage = ?,
                 content = ?,
@@ -441,6 +541,7 @@ def save_video_task(data):
             data.get('status', 'pending'),
             data.get('video_url'),
             data.get('last_frame_image_url'),
+            data.get('project_id'),
             data.get('token'),
             json.dumps(data.get('usage', {})) if data.get('usage') else None,
             json.dumps(data.get('content', {})) if data.get('content') else None,
@@ -452,7 +553,7 @@ def save_video_task(data):
         # 插入新记录
         cursor.execute('''
             INSERT INTO video_tasks 
-            (user_id, task_id, created_at, updated_at, status, prompt, generate_type, resolution, ratio,
+            (user_id, task_id, project_id, created_at, updated_at, status, prompt, generate_type, resolution, ratio,
              duration, seed, camera_fixed, watermark, generate_audio, return_last_frame,
              first_frame_url, last_frame_url, reference_image_urls, video_url, last_frame_image_url,
              token, usage, content, error_message)
@@ -460,6 +561,7 @@ def save_video_task(data):
         ''', (
             data.get('user_id'),
             data.get('task_id'),
+            data.get('project_id'),
             local_time,
             local_time,
             data.get('status', 'pending'),
@@ -489,7 +591,41 @@ def save_video_task(data):
     conn.close()
     return task_id
 
-def get_video_tasks(user_id, status=None, start_date=None, end_date=None, limit=100, offset=0):
+
+def update_video_task_media(task_id, video_url=None, last_frame_image_url=None, first_frame_url=None, last_frame_url=None):
+    """仅更新视频任务的媒体链接字段"""
+    if not task_id:
+        return
+    updates = []
+    params = []
+    if video_url is not None:
+        updates.append("video_url = ?")
+        params.append(video_url)
+    if last_frame_image_url is not None:
+        updates.append("last_frame_image_url = ?")
+        params.append(last_frame_image_url)
+    if first_frame_url is not None:
+        updates.append("first_frame_url = ?")
+        params.append(first_frame_url)
+    if last_frame_url is not None:
+        updates.append("last_frame_url = ?")
+        params.append(last_frame_url)
+    if not updates:
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    updates.append("updated_at = ?")
+    params.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    params.append(task_id)
+    cursor.execute(
+        f"UPDATE video_tasks SET {', '.join(updates)} WHERE task_id = ?",
+        params
+    )
+    conn.commit()
+    conn.close()
+
+def get_video_tasks(user_id, project_id=None, status=None, start_date=None, end_date=None, limit=100, offset=0):
     """获取视频任务列表"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -497,6 +633,10 @@ def get_video_tasks(user_id, status=None, start_date=None, end_date=None, limit=
     
     query = 'SELECT * FROM video_tasks WHERE user_id = ?'
     params = [user_id]
+    
+    if project_id is not None:
+        query += ' AND project_id = ?'
+        params.append(project_id)
     
     if status:
         query += ' AND status = ?'
@@ -573,18 +713,25 @@ def delete_video_asset(asset_id):
     conn.commit()
     conn.close()
 
-def get_all_records(user_id, limit=100, offset=0):
+def get_all_records(user_id, project_id=None, limit=100, offset=0):
     """获取指定用户的所有记录"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    
-    cursor.execute('''
-        SELECT * FROM generation_records 
-        WHERE user_id = ?
-        ORDER BY created_at DESC 
-        LIMIT ? OFFSET ?
-    ''', (user_id, limit, offset))
+    if project_id is None:
+        cursor.execute('''
+            SELECT * FROM generation_records 
+            WHERE user_id = ?
+            ORDER BY created_at DESC 
+            LIMIT ? OFFSET ?
+        ''', (user_id, limit, offset))
+    else:
+        cursor.execute('''
+            SELECT * FROM generation_records 
+            WHERE user_id = ? AND project_id = ?
+            ORDER BY created_at DESC 
+            LIMIT ? OFFSET ?
+        ''', (user_id, project_id, limit, offset))
     
     rows = cursor.fetchall()
     records = []
@@ -599,17 +746,23 @@ def get_all_records(user_id, limit=100, offset=0):
     conn.close()
     return records
 
-def get_records_by_batch(batch_id):
+def get_records_by_batch(batch_id, project_id=None):
     """获取指定批次的记录"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    
-    cursor.execute('''
-        SELECT * FROM generation_records 
-        WHERE batch_id = ?
-        ORDER BY created_at DESC
-    ''', (batch_id,))
+    if project_id is None:
+        cursor.execute('''
+            SELECT * FROM generation_records 
+            WHERE batch_id = ?
+            ORDER BY created_at DESC
+        ''', (batch_id,))
+    else:
+        cursor.execute('''
+            SELECT * FROM generation_records 
+            WHERE batch_id = ? AND project_id = ?
+            ORDER BY created_at DESC
+        ''', (batch_id, project_id))
     
     rows = cursor.fetchall()
     records = []
@@ -650,11 +803,14 @@ def delete_record(record_id):
     conn.commit()
     conn.close()
 
-def get_total_count(user_id):
+def get_total_count(user_id, project_id=None):
     """获取指定用户的总记录数"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('SELECT COUNT(*) FROM generation_records WHERE user_id = ?', (user_id,))
+    if project_id is None:
+        cursor.execute('SELECT COUNT(*) FROM generation_records WHERE user_id = ?', (user_id,))
+    else:
+        cursor.execute('SELECT COUNT(*) FROM generation_records WHERE user_id = ? AND project_id = ?', (user_id, project_id))
     count = cursor.fetchone()[0]
     conn.close()
     return count
@@ -739,6 +895,119 @@ def get_all_users():
     rows = cursor.fetchall()
     
     users = [dict(row) for row in rows]
+    conn.close()
+    return users
+
+
+def delete_user(user_id):
+    """删除用户"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM user_projects WHERE user_id = ?', (user_id,))
+    cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def update_user_password(user_id, new_password):
+    """更新用户密码"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    password_hash = hash_password(new_password)
+    cursor.execute('UPDATE users SET password_hash = ? WHERE id = ?', (password_hash, user_id))
+    conn.commit()
+    conn.close()
+
+
+def create_project(name, owner_id=None):
+    """创建项目"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO projects (name, owner_id, created_at)
+        VALUES (?, ?, ?)
+    ''', (name, owner_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    project_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return project_id
+
+
+def get_all_projects():
+    """获取所有项目"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM projects ORDER BY id DESC')
+    rows = cursor.fetchall()
+    projects = [dict(r) for r in rows]
+    conn.close()
+    return projects
+
+
+def get_user_projects(user_id):
+    """获取用户可用项目"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT p.* FROM projects p
+        JOIN user_projects up ON up.project_id = p.id
+        WHERE up.user_id = ?
+        ORDER BY p.id DESC
+    ''', (user_id,))
+    rows = cursor.fetchall()
+    projects = [dict(r) for r in rows]
+    conn.close()
+    return projects
+
+
+def assign_user_to_project(user_id, project_id):
+    """授权用户到项目"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR IGNORE INTO user_projects (user_id, project_id, created_at)
+        VALUES (?, ?, ?)
+    ''', (user_id, project_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    conn.commit()
+    conn.close()
+
+
+def revoke_user_from_project(user_id, project_id):
+    """取消用户项目授权"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM user_projects WHERE user_id = ? AND project_id = ?', (user_id, project_id))
+    conn.commit()
+    conn.close()
+
+
+def get_project_by_id(project_id):
+    """获取项目"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM projects WHERE id = ?', (project_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_project_users(project_id):
+    """获取项目内用户"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT u.id, u.username, u.created_at, u.last_login
+        FROM users u
+        JOIN user_projects up ON up.user_id = u.id
+        WHERE up.project_id = ?
+        ORDER BY u.id
+    ''', (project_id,))
+    rows = cursor.fetchall()
+    users = [dict(r) for r in rows]
     conn.close()
     return users
 

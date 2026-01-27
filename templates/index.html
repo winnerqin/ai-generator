@@ -774,6 +774,10 @@
             </a>
             {% if user.username == 'system_admin' %}
             <div class="sidebar-nav-divider"></div>
+            <a href="/admin" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🛠️</span>
+                <span class="sidebar-nav-text">系统管理</span>
+            </a>
             <a href="/stats" class="sidebar-nav-item">
                 <span class="sidebar-nav-icon">📈</span>
                 <span class="sidebar-nav-text">系统统计</span>
@@ -784,6 +788,12 @@
             <div class="sidebar-nav-user-info">
                 <div class="sidebar-nav-user-avatar">👤</div>
                 <div class="sidebar-nav-user-name">{{ user.username }}</div>
+            </div>
+            <div style="margin-top: 8px;">
+                <label style="font-size: 0.85em; color: #666;">当前项目</label>
+                <select id="projectSelect" style="width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option>加载中...</option>
+                </select>
             </div>
             <a href="/logout" class="sidebar-nav-logout">登出</a>
         </div>
@@ -2835,6 +2845,49 @@
                     item.classList.add('active');
                 }
             });
+        });
+    </script>
+    <script>
+        async function loadProjects() {
+            const select = document.getElementById('projectSelect');
+            if (!select) return;
+            try {
+                const resp = await fetch('/api/projects');
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || '加载失败');
+                select.innerHTML = '';
+                data.projects.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.id;
+                    opt.textContent = p.name;
+                    if (String(p.id) === String(data.current_project_id)) {
+                        opt.selected = true;
+                    }
+                    select.appendChild(opt);
+                });
+            } catch (e) {
+                select.innerHTML = '<option>项目加载失败</option>';
+            }
+        }
+        async function switchProject(projectId) {
+            const resp = await fetch('/api/projects/switch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project_id: projectId })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                location.reload();
+            } else {
+                alert(data.error || '切换失败');
+            }
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            const select = document.getElementById('projectSelect');
+            if (select) {
+                select.addEventListener('change', () => switchProject(select.value));
+                loadProjects();
+            }
         });
     </script>
 </body>

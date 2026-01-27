@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>系统统计 - AI图片生成器</title>
     <script src="/static/state-manager.js"></script>
+    <link rel="stylesheet" href="/static/styles.css">
     <style>
         * {
             margin: 0;
@@ -14,9 +15,9 @@
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #f5f7fb;
             min-height: 100vh;
-            padding: 20px;
+            padding: 0;
         }
         
         .nav-bar {
@@ -200,23 +201,71 @@
     </style>
 </head>
 <body>
-    <div class="nav-bar">
-        <a href="/">🎨 单图生成</a>
-        <a href="/batch">📦 批量生成</a>
-        <a href="/records">📊 生成记录</a>
-        <a href="/video-generate">🎬 视频生成</a>
-        <a href="/video-tasks">📹 视频任务</a>
-        <a href="/script-analysis">🎬 剧本分析</a>
-        <a href="/content-management">📚 内容管理</a>
-        <a href="/stats" class="active">📈 系统统计</a>
-        <div class="user-info">
-            <span>👤 <span class="username">{{ user.username }}</span></span>
-            <a href="/logout" class="logout-btn">登出</a>
+    <nav class="sidebar-nav" id="sidebarNav">
+        <div class="sidebar-nav-header">
+            <div class="sidebar-nav-title">Ai创作工具</div>
+            <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收缩/展开">
+                <span id="toggleIcon">‹</span>
+            </button>
         </div>
-    </div>
+        <div class="sidebar-nav-menu">
+            <a href="/" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎨</span>
+                <span class="sidebar-nav-text">单图生成</span>
+            </a>
+            <a href="/batch" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📦</span>
+                <span class="sidebar-nav-text">批量生成</span>
+            </a>
+            <a href="/records" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📊</span>
+                <span class="sidebar-nav-text">生图任务</span>
+            </a>
+            <a href="/video-generate" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎬</span>
+                <span class="sidebar-nav-text">视频生成</span>
+            </a>
+            <a href="/video-tasks" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📹</span>
+                <span class="sidebar-nav-text">视频任务</span>
+            </a>
+            <a href="/script-analysis" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎬</span>
+                <span class="sidebar-nav-text">剧本分析</span>
+            </a>
+            <a href="/content-management" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📚</span>
+                <span class="sidebar-nav-text">内容管理</span>
+            </a>
+            <div class="sidebar-nav-divider"></div>
+            <a href="/admin" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🛠️</span>
+                <span class="sidebar-nav-text">系统管理</span>
+            </a>
+            <a href="/stats" class="sidebar-nav-item active">
+                <span class="sidebar-nav-icon">📈</span>
+                <span class="sidebar-nav-text">系统统计</span>
+            </a>
+        </div>
+        <div class="sidebar-nav-user">
+            <div class="sidebar-nav-user-info">
+                <div class="sidebar-nav-user-avatar">👤</div>
+                <div class="sidebar-nav-user-name">{{ user.username }}</div>
+            </div>
+            <div style="margin-top: 8px;">
+                <label style="font-size: 0.85em; color: #666;">当前项目</label>
+                <select id="projectSelect" style="width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option>加载中...</option>
+                </select>
+            </div>
+            <a href="/logout" class="sidebar-nav-logout">登出</a>
+        </div>
+    </nav>
     
-    <div class="container">
-        <div class="stats-grid" style="padding-top: 20px;">
+    <div class="main-content">
+        <div class="container">
+        <div class="content" style="padding-top: 20px;">
+            <div class="stats-grid">
             <div class="stat-card">
                 <h3>总用户数</h3>
                 <div class="value" id="totalUsers">-</div>
@@ -233,9 +282,8 @@
                 <h3>本周生成</h3>
                 <div class="value" id="weekImages">-</div>
             </div>
-        </div>
+            </div>
         
-        <div class="content">
             <div class="date-filter">
                 <label>筛选日期：</label>
                 <input type="date" id="startDate">
@@ -283,6 +331,7 @@
                     </tbody>
                 </table>
             </div>
+        </div>
         </div>
     </div>
     
@@ -381,5 +430,49 @@
             `).join('');
         }
     </script>
+    <script>
+        async function loadProjects() {
+            const select = document.getElementById('projectSelect');
+            if (!select) return;
+            try {
+                const resp = await fetch('/api/projects');
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || '加载失败');
+                select.innerHTML = '';
+                data.projects.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.id;
+                    opt.textContent = p.name;
+                    if (String(p.id) === String(data.current_project_id)) {
+                        opt.selected = true;
+                    }
+                    select.appendChild(opt);
+                });
+            } catch (e) {
+                select.innerHTML = '<option>项目加载失败</option>';
+            }
+        }
+        async function switchProject(projectId) {
+            const resp = await fetch('/api/projects/switch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project_id: projectId })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                location.reload();
+            } else {
+                alert(data.error || '切换失败');
+            }
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            const select = document.getElementById('projectSelect');
+            if (select) {
+                select.addEventListener('change', () => switchProject(select.value));
+                loadProjects();
+            }
+        });
+    </script>
+    <script src="/static/sidebar-nav.js"></script>
 </body>
 </html>

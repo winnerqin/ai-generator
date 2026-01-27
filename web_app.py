@@ -119,7 +119,7 @@ video_uploading = {}
 video_upload_lock = threading.Lock()
 
 # 阿里云 OSS 上传支持
-def upload_to_aliyun_oss(file_path, user_id=None, is_sample=False, is_video=False):
+def upload_to_aliyun_oss(file_path, user_id=None, is_sample=False, is_video=False, project_id=None):
     """
     上传文件到阿里云 OSS（对象存储服务）
     需要配置以下环境变量：
@@ -165,14 +165,25 @@ def upload_to_aliyun_oss(file_path, user_id=None, is_sample=False, is_video=Fals
         timestamp = datetime.now().strftime('%Y%m%d')
         
         if is_sample and user_id:
-            # 示例图按用户隔离：sample/user_{user_id}/filename
-            object_key = f"sample/user_{user_id}/{filename}"
+            # 示例图按用户/项目隔离
+            if project_id:
+                object_key = f"sample/user_{user_id}/project_{project_id}/{filename}"
+            else:
+                object_key = f"sample/user_{user_id}/{filename}"
         elif is_video and user_id:
-            # 视频按用户隔离：video_generator/user_{user_id}/filename
-            object_key = f"video_generator/user_{user_id}/{filename}"
+            # 视频按用户/项目隔离
+            if project_id:
+                object_key = f"video_generator/user_{user_id}/project_{project_id}/{filename}"
+            else:
+                object_key = f"video_generator/user_{user_id}/{filename}"
         else:
-            # 生成的图片
-            object_key = f"ai-images/{timestamp}/{filename}"
+            # 生成的图片按用户/项目隔离
+            if user_id and project_id:
+                object_key = f"ai-images/{timestamp}/user_{user_id}/project_{project_id}/{filename}"
+            elif user_id:
+                object_key = f"ai-images/{timestamp}/user_{user_id}/{filename}"
+            else:
+                object_key = f"ai-images/{timestamp}/{filename}"
         
         # 上传文件
         with open(file_path, 'rb') as f:
@@ -275,7 +286,7 @@ def safe_object_exists(bucket, object_key):
         log_operation('检查OSS对象存在性时出错', f'对象键: {object_key}, 错误: {error_str}', 'WARNING')
         return False
 
-def list_sample_images_from_oss(user_id=None):
+def list_sample_images_from_oss(user_id=None, project_id=None):
     """
     列出阿里云 OSS 中的示例图（按用户隔离）
     返回格式: [{'url': 'http://...', 'filename': 'xxx.jpg', 'size': 12345}, ...]
@@ -292,13 +303,19 @@ def list_sample_images_from_oss(user_id=None):
         
         # 列出多个可能的路径（向后兼容不同的上传方式）
         sample_images = []
-        # 1. 标准路径：sample/person/user_{user_id}/ 和 sample/scene/user_{user_id}/
-        prefixes = [
+        # 1. 标准路径：sample/person/user_{user_id}/project_{project_id}/
+        prefixes = []
+        if project_id:
+            prefixes.extend([
+                f'sample/person/user_{user_id}/project_{project_id}/',
+                f'sample/scene/user_{user_id}/project_{project_id}/',
+            ])
+        prefixes.extend([
             f'sample/person/user_{user_id}/',
             f'sample/scene/user_{user_id}/',
             f'sample/user_{user_id}/',  # 兼容旧的上传路径
             'ai-images/sample/',  # 兼容 upload_sample_images.py 脚本的路径
-        ]
+        ])
         
         seen_keys = set()  # 用于去重
         
@@ -420,6 +437,19 @@ def login_required(f):
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
             return redirect(url_for('login'))
+        # 确保已选择项目
+        if 'project_id' not in session:
+            ensure_session_project(session.get('user_id'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def admin_required(f):
+    """管理员验证装饰器"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        user = get_current_user()
+        if not user or user.get('username') != 'system_admin':
+            return jsonify({'success': False, 'error': '无权限'}), 403
         return f(*args, **kwargs)
     return decorated_function
 
@@ -429,15 +459,49 @@ def get_current_user():
         return database.get_user_by_id(session['user_id'])
     return None
 
-def get_user_upload_folder(user_id):
+def ensure_session_project(user_id):
+    """确保会话中有可用项目"""
+    if not user_id:
+        return
+    projects = database.get_user_projects(user_id)
+    if not projects:
+        project_id = database.create_project('默认项目', owner_id=user_id)
+        database.assign_user_to_project(user_id, project_id)
+        project = database.get_project_by_id(project_id)
+    else:
+        project = projects[0]
+    if project:
+        session['project_id'] = project.get('id')
+        session['project_name'] = project.get('name')
+
+def get_current_project_id():
+    """获取当前项目ID"""
+    return session.get('project_id')
+
+def get_current_project():
+    """获取当前项目信息"""
+    project_id = get_current_project_id()
+    if not project_id:
+        return None
+    return database.get_project_by_id(project_id)
+
+def get_user_upload_folder(user_id, project_id=None):
     """获取用户专属上传目录"""
-    folder = os.path.join(app.config['UPLOAD_FOLDER'], str(user_id))
+    project_id = project_id or get_current_project_id()
+    if project_id:
+        folder = os.path.join(app.config['UPLOAD_FOLDER'], str(user_id), f"project_{project_id}")
+    else:
+        folder = os.path.join(app.config['UPLOAD_FOLDER'], str(user_id))
     os.makedirs(folder, exist_ok=True)
     return folder
 
-def get_user_output_folder(user_id):
+def get_user_output_folder(user_id, project_id=None):
     """获取用户专属输出目录"""
-    folder = os.path.join(app.config['OUTPUT_FOLDER'], str(user_id))
+    project_id = project_id or get_current_project_id()
+    if project_id:
+        folder = os.path.join(app.config['OUTPUT_FOLDER'], str(user_id), f"project_{project_id}")
+    else:
+        folder = os.path.join(app.config['OUTPUT_FOLDER'], str(user_id))
     os.makedirs(folder, exist_ok=True)
     return folder
 
@@ -458,6 +522,7 @@ def login():
         if user:
             session['user_id'] = user['id']
             session['username'] = user['username']
+            ensure_session_project(user['id'])
             log_operation('用户登录成功', f'用户名: {username}, 用户ID: {user["id"]}')
             return redirect(url_for('index'))
         else:
@@ -480,6 +545,39 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
+@app.route('/api/projects', methods=['GET'])
+@login_required
+def api_projects():
+    """获取当前用户可访问的项目"""
+    user_id = session.get('user_id')
+    projects = database.get_user_projects(user_id)
+    return jsonify({
+        'success': True,
+        'projects': projects,
+        'current_project_id': session.get('project_id'),
+        'current_project_name': session.get('project_name')
+    })
+
+@app.route('/api/projects/switch', methods=['POST'])
+@login_required
+def api_switch_project():
+    """切换当前项目"""
+    user_id = session.get('user_id')
+    data = request.get_json() or {}
+    project_id = data.get('project_id')
+    try:
+        project_id = int(project_id)
+    except Exception:
+        return jsonify({'success': False, 'error': '项目ID无效'}), 400
+    if not user_has_project(user_id, project_id):
+        return jsonify({'success': False, 'error': '无权访问该项目'}), 403
+    project = database.get_project_by_id(project_id)
+    if not project:
+        return jsonify({'success': False, 'error': '项目不存在'}), 404
+    session['project_id'] = project.get('id')
+    session['project_name'] = project.get('name')
+    return jsonify({'success': True, 'project': project})
+
 # ==================== 统计页面路由（仅系统管理员） ====================
 @app.route('/stats')
 @login_required
@@ -490,6 +588,104 @@ def stats_page():
     if user['username'] != 'system_admin':
         return "访问被拒绝：此页面仅系统管理员可访问", 403
     return render_template('stats.html', user=user)
+
+@app.route('/admin')
+@login_required
+def admin_page():
+    """系统管理页面 - 仅系统管理员可访问"""
+    user = get_current_user()
+    if user['username'] != 'system_admin':
+        return "访问被拒绝：此页面仅系统管理员可访问", 403
+    return render_template('admin.html', user=user)
+
+@app.route('/api/admin/users', methods=['GET'])
+@login_required
+@admin_required
+def api_admin_users():
+    users = database.get_all_users()
+    return jsonify({'success': True, 'users': users})
+
+@app.route('/api/admin/users', methods=['POST'])
+@login_required
+@admin_required
+def api_admin_users_create():
+    data = request.get_json() or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+    if not username or not password:
+        return jsonify({'success': False, 'error': '用户名和密码不能为空'}), 400
+    user_id = database.create_user(username, password)
+    if not user_id:
+        return jsonify({'success': False, 'error': '用户名已存在'}), 400
+    project_id = database.create_project('默认项目', owner_id=user_id)
+    database.assign_user_to_project(user_id, project_id)
+    return jsonify({'success': True, 'user_id': user_id})
+
+@app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
+@login_required
+@admin_required
+def api_admin_users_delete(user_id):
+    if user_id == session.get('user_id'):
+        return jsonify({'success': False, 'error': '不能删除当前登录用户'}), 400
+    user = database.get_user_by_id(user_id)
+    if user and user.get('username') == 'system_admin':
+        return jsonify({'success': False, 'error': '不能删除系统管理员'}), 400
+    database.delete_user(user_id)
+    return jsonify({'success': True})
+
+@app.route('/api/admin/users/<int:user_id>/password', methods=['POST'])
+@login_required
+@admin_required
+def api_admin_users_password(user_id):
+    data = request.get_json() or {}
+    new_password = data.get('password') or ''
+    if not new_password:
+        return jsonify({'success': False, 'error': '密码不能为空'}), 400
+    database.update_user_password(user_id, new_password)
+    return jsonify({'success': True})
+
+@app.route('/api/admin/projects', methods=['GET'])
+@login_required
+@admin_required
+def api_admin_projects():
+    projects = database.get_all_projects()
+    for project in projects:
+        project['users'] = database.get_project_users(project.get('id'))
+    return jsonify({'success': True, 'projects': projects})
+
+@app.route('/api/admin/projects', methods=['POST'])
+@login_required
+@admin_required
+def api_admin_projects_create():
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': '项目名不能为空'}), 400
+    owner_id = data.get('owner_id')
+    project_id = database.create_project(name, owner_id=owner_id)
+    return jsonify({'success': True, 'project_id': project_id})
+
+@app.route('/api/admin/projects/<int:project_id>/assign', methods=['POST'])
+@login_required
+@admin_required
+def api_admin_projects_assign(project_id):
+    data = request.get_json() or {}
+    user_id = data.get('user_id')
+    if not user_id:
+        return jsonify({'success': False, 'error': '缺少用户ID'}), 400
+    database.assign_user_to_project(int(user_id), project_id)
+    return jsonify({'success': True})
+
+@app.route('/api/admin/projects/<int:project_id>/revoke', methods=['POST'])
+@login_required
+@admin_required
+def api_admin_projects_revoke(project_id):
+    data = request.get_json() or {}
+    user_id = data.get('user_id')
+    if not user_id:
+        return jsonify({'success': False, 'error': '缺少用户ID'}), 400
+    database.revoke_user_from_project(int(user_id), project_id)
+    return jsonify({'success': True})
 
 @app.route('/api/stats')
 @login_required
@@ -533,7 +729,7 @@ def api_stats():
 def index():
     return render_template('index.html', user=get_current_user())
 
-def generate_images_stream(client, user_id, prompt, aspect_ratio, resolution, generate_mode,
+def generate_images_stream(client, user_id, project_id, prompt, aspect_ratio, resolution, generate_mode,
                           num_images, image_style, seed, output_filename, image_urls, width, height, oss_enabled):
     """流式生成图片的生成器函数（返回事件字典）"""
     try:
@@ -612,7 +808,7 @@ def generate_images_stream(client, user_id, prompt, aspect_ratio, resolution, ge
                         img_response = requests.get(img_url)
                         if img_response.status_code == 200:
                             img_data = img_response.content
-                            user_output_folder = get_user_output_folder(user_id)
+                            user_output_folder = get_user_output_folder(user_id, project_id)
                             
                             if output_filename:
                                 if use_group_images:
@@ -632,9 +828,9 @@ def generate_images_stream(client, user_id, prompt, aspect_ratio, resolution, ge
                             with open(output_path, 'wb') as f:
                                 f.write(img_data)
                             
-                            image_url = f'/output/{user_id}/{filename}'
+                            image_url = f'/output/{user_id}/{project_id}/{filename}'
                             if oss_enabled:
-                                oss_url = upload_to_aliyun_oss(output_path, user_id=user_id)
+                                oss_url = upload_to_aliyun_oss(output_path, user_id=user_id, project_id=project_id)
                                 if oss_url:
                                     image_url = oss_url
                             
@@ -644,6 +840,7 @@ def generate_images_stream(client, user_id, prompt, aspect_ratio, resolution, ge
                                 sample_images_list = [{'url': url, 'filename': os.path.basename(url)} for url in image_urls]
                                 record_id = database.save_generation_record({
                                     'user_id': user_id,
+                                    'project_id': project_id,
                                     'prompt': prompt,
                                     'aspect_ratio': aspect_ratio,
                                     'resolution': resolution,
@@ -777,6 +974,31 @@ def finalize_generation_channel(channel):
 def generate():
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
+        project_id = get_current_project_id()
         # 获取表单数据
         prompt = request.form.get('prompt', '').strip()
         aspect_ratio = request.form.get('aspect_ratio', '9:16')
@@ -816,7 +1038,7 @@ def generate():
         oss_enabled = os.environ.get('OSS_ENABLED', 'false').lower() == 'true'
         
         # 使用用户专属上传目录
-        user_upload_folder = get_user_upload_folder(user_id)
+        user_upload_folder = get_user_upload_folder(user_id, project_id)
         
         for file in uploaded_files:
             if file and file.filename:
@@ -827,7 +1049,7 @@ def generate():
                 
                 if oss_enabled:
                     # 尝试上传到阿里云 OSS
-                    oss_url = upload_to_aliyun_oss(filepath)
+                    oss_url = upload_to_aliyun_oss(filepath, user_id=user_id, project_id=project_id)
                     if oss_url:
                         image_urls.append(oss_url)
                         print(f"成功上传图片到阿里云 OSS: {oss_url}")
@@ -880,7 +1102,7 @@ def generate():
                 event_index = 0
                 try:
                     for payload in generate_images_stream(
-                        client, user_id, prompt, aspect_ratio, resolution, generate_mode,
+                        client, user_id, project_id, prompt, aspect_ratio, resolution, generate_mode,
                         num_images, image_style, seed, output_filename, image_urls, width, height, oss_enabled
                     ):
                         enqueue_event(payload, event_index)
@@ -1058,7 +1280,7 @@ def generate():
                             img_data = img_response.content
                             
                             # 生成文件名
-                            user_output_folder = get_user_output_folder(user_id)
+                            user_output_folder = get_user_output_folder(user_id, project_id)
                             
                             if output_filename:
                                 # 如果指定了文件名
@@ -1084,9 +1306,9 @@ def generate():
                             f.write(img_data)
                         
                         # 如果配置了OSS，上传到OSS并获取公共URL（用于作为参考图）
-                        image_url = f'/output/{user_id}/{filename}'  # 默认使用本地URL
+                        image_url = f'/output/{user_id}/{project_id}/{filename}'  # 默认使用本地URL
                         if oss_enabled:
-                            oss_url = upload_to_aliyun_oss(output_path, user_id=user_id)
+                            oss_url = upload_to_aliyun_oss(output_path, user_id=user_id, project_id=project_id)
                             if oss_url:
                                 image_url = oss_url
                                 log_operation('OSS上传成功', f'用户ID={user_id}, 文件={filename}, OSS_URL={oss_url}')
@@ -1122,6 +1344,7 @@ def generate():
                                 sample_images_list = [{'url': url, 'filename': os.path.basename(url)} for url in image_urls]
                                 record_id = database.save_generation_record({
                                     'user_id': user_id,
+                                    'project_id': project_id,
                                     'prompt': prompt,
                                     'aspect_ratio': aspect_ratio,
                                     'resolution': resolution,
@@ -1254,13 +1477,14 @@ def get_sample_images():
     """获取 OSS 中的示例图列表（用户隔离）"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
         category = request.args.get('category')
         log_request('GET', '/api/sample-images', user_id, f'类别: {category or "全部"}')
         print(f"[API] /api/sample-images 请求 - 用户ID: {user_id}, 类别: {category}")
         
         # 先从 OSS 列表中读取（如果配置了 OSS）
         try:
-            sample_images = list_sample_images_from_oss(user_id)
+            sample_images = list_sample_images_from_oss(user_id, project_id)
             log_operation('OSS示例图加载', f'用户ID: {user_id}, 从OSS加载到 {len(sample_images)} 张图片')
             print(f"[API] OSS加载完成，找到 {len(sample_images)} 张图片")
         except Exception as oss_err:
@@ -1274,7 +1498,7 @@ def get_sample_images():
         try:
             existing_urls = set([s.get('url') for s in sample_images if s.get('url')])
 
-            person_assets = database.get_person_assets(user_id)
+            person_assets = database.get_person_assets(user_id, project_id)
             for a in person_assets:
                 a_url = a.get('url')
                 if a_url and a_url in existing_urls:
@@ -1294,7 +1518,7 @@ def get_sample_images():
             pass
 
         try:
-            scene_assets = database.get_scene_assets(user_id)
+            scene_assets = database.get_scene_assets(user_id, project_id)
             for a in scene_assets:
                 a_url = a.get('url')
                 if a_url and a_url in existing_urls:
@@ -1354,12 +1578,13 @@ def get_recent_images():
     """获取最近生成的图片列表（用作参考图）"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
         limit = int(request.args.get('limit', 50))  # 默认获取最近50张
         
         log_request('GET', '/api/recent-images', user_id, f'数量: {limit}')
         
         # 从数据库获取最近生成的图片记录
-        records = database.get_all_records(user_id, limit=limit, offset=0)
+        records = database.get_all_records(user_id, project_id, limit=limit, offset=0)
         
         # 提取图片信息，只返回OSS URL的图片（API可以访问的）
         recent_images = []
@@ -1434,6 +1659,7 @@ def batch_generate():
     """批量生成API"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
         data = request.json
         batch_id = str(uuid.uuid4())
         
@@ -1573,7 +1799,7 @@ def batch_generate():
                         img_data = img_response.content
                         
                         # 生成文件名
-                        user_output_folder = get_user_output_folder(user_id)
+                        user_output_folder = get_user_output_folder(user_id, project_id)
                         task_filename_base = data.get('filename', 'batch')
                         
                         if task_filename_base and task_filename_base.strip() and task_filename_base != 'batch':
@@ -1598,10 +1824,10 @@ def batch_generate():
                             f.write(img_data)
                         
                         # 如果配置了OSS，上传到OSS并获取公共URL（用于作为参考图）
-                        image_url = f'/output/{user_id}/{filename}'  # 默认使用本地URL
+                        image_url = f'/output/{user_id}/{project_id}/{filename}'  # 默认使用本地URL
                         oss_enabled = os.environ.get('OSS_ENABLED', 'false').lower() == 'true'
                         if oss_enabled:
-                            oss_url = upload_to_aliyun_oss(output_path, user_id=user_id)
+                            oss_url = upload_to_aliyun_oss(output_path, user_id=user_id, project_id=project_id)
                             if oss_url:
                                 image_url = oss_url
                                 log_operation('批量生成OSS上传成功', f'用户ID={user_id}, 批次={batch_id}, 文件={filename}, OSS_URL={oss_url}')
@@ -1628,6 +1854,7 @@ def batch_generate():
                         try:
                             database.save_generation_record({
                                 'user_id': user_id,
+                                'project_id': project_id,
                                 'prompt': prompt,
                                 'aspect_ratio': aspect_ratio,
                                 'resolution': resolution,
@@ -1637,7 +1864,7 @@ def batch_generate():
                                 'seed': per_seed,
                                 'image_style': image_style,
                                 'sample_images': sample_images_data,
-                                'image_path': f'/output/{user_id}/{filename}',
+                                'image_path': f'/output/{user_id}/{project_id}/{filename}',
                                 'filename': filename,
                                 'batch_id': batch_id,
                                 'status': 'success'
@@ -1669,6 +1896,7 @@ def api_video_tasks_list():
     """查询视频任务列表 - 从服务器获取最新信息"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
         page = int(request.args.get('page', 1))
         page_size = int(request.args.get('page_size', 10))
         task_id = request.args.get('task_id', '').strip()
@@ -1714,7 +1942,7 @@ def api_video_tasks_list():
                 resp_dict = convert_to_dict(resp)
                 if resp_dict:
                     # 同步到数据库（如果不存在则保存，存在则更新）
-                    sync_task_to_database(resp_dict, user_id)
+                    sync_task_to_database(resp_dict, user_id, project_id)
                     # 转换为统一格式返回
                     result_task = convert_api_task_to_unified_format(resp_dict, user_id)
                     return jsonify({
@@ -1729,7 +1957,7 @@ def api_video_tasks_list():
                 log_operation('查询单个任务失败', f'用户ID: {user_id}, 任务ID: {task_id}, 错误: {str(e)}', 'WARNING')
                 # 如果API查询失败，尝试从数据库查询
                 db_task = database.get_video_task_by_id(task_id)
-                if db_task and db_task.get('user_id') == user_id:
+                if db_task and db_task.get('user_id') == user_id and (project_id is None or db_task.get('project_id') == project_id):
                     result_task = convert_db_task_to_api_format(db_task)
                     return jsonify({
                         'success': True,
@@ -1805,6 +2033,7 @@ def api_video_tasks_list():
                     # 数据库无记录，保存到数据库
                     task_data = convert_api_task_to_db_format(api_task, user_id)
                     if task_data:
+                        task_data['project_id'] = project_id
                         try:
                             database.save_video_task(task_data)
                             saved_count += 1
@@ -1813,7 +2042,7 @@ def api_video_tasks_list():
                             log_operation('保存任务到数据库失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
                 else:
                     # 数据库已有记录，更新服务器最新信息
-                    sync_task_to_database(api_task, user_id)
+                    sync_task_to_database(api_task, user_id, project_id)
                     updated_count += 1
             
             print(f"[视频任务查询] 保存到数据库: {saved_count} 个, 更新: {updated_count} 个")
@@ -1824,7 +2053,9 @@ def api_video_tasks_list():
                 try:
                     unified_task = convert_api_task_to_unified_format(api_task, user_id)
                     if unified_task:
-                        tasks.append(unified_task)
+                        db_task = database.get_video_task_by_id(unified_task.get('task_id'))
+                        if project_id is None or (db_task and db_task.get('project_id') == project_id):
+                            tasks.append(unified_task)
                 except Exception as e:
                     log_operation('转换任务格式失败', f'用户ID: {user_id}, 任务ID: {api_task.get("task_id")}, 错误: {str(e)}', 'WARNING')
             
@@ -1870,7 +2101,7 @@ def api_video_tasks_list():
             traceback.print_exc()
             # 如果服务器查询失败，从数据库查询
             offset = (page - 1) * page_size
-            db_tasks = database.get_video_tasks(user_id, status=status, start_date=start_date, end_date=end_date, limit=page_size, offset=offset)
+            db_tasks = database.get_video_tasks(user_id, project_id, status=status, start_date=start_date, end_date=end_date, limit=page_size, offset=offset)
             tasks = []
             for t in db_tasks:
                 try:
@@ -1880,7 +2111,7 @@ def api_video_tasks_list():
                 except Exception as e:
                     log_operation('转换任务格式失败', f'用户ID: {user_id}, 任务ID: {t.get("task_id")}, 错误: {str(e)}', 'WARNING')
             
-            total_db_tasks = database.get_video_tasks(user_id, status=status, start_date=start_date, end_date=end_date, limit=10000, offset=0)
+            total_db_tasks = database.get_video_tasks(user_id, project_id, status=status, start_date=start_date, end_date=end_date, limit=10000, offset=0)
             total = len(total_db_tasks)
             
             return jsonify({
@@ -1906,7 +2137,7 @@ def api_video_tasks_list():
             'total': 0
         }), 500
 
-def sync_task_to_database(api_task, user_id):
+def sync_task_to_database(api_task, user_id, project_id=None):
     """同步服务器任务到数据库"""
     if not api_task:
         return
@@ -1926,6 +2157,75 @@ def sync_task_to_database(api_task, user_id):
     server_usage = api_task.get('usage', {})
     server_content = api_task.get('content', {})
     
+    def extract_frame_urls(content_obj):
+        first_url = None
+        last_url = None
+        items = []
+        if isinstance(content_obj, dict):
+            if isinstance(content_obj.get('content'), list):
+                items = content_obj.get('content', [])
+            elif isinstance(content_obj.get('items'), list):
+                items = content_obj.get('items', [])
+            elif isinstance(content_obj.get('data'), list):
+                items = content_obj.get('data', [])
+        elif isinstance(content_obj, list):
+            items = content_obj
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get('type') != 'image_url':
+                continue
+            image_url = item.get('image_url', {})
+            if isinstance(image_url, dict):
+                image_url = image_url.get('url')
+            role = item.get('role', '')
+            if role == 'first_frame':
+                first_url = image_url
+            elif role == 'last_frame':
+                last_url = image_url
+        return first_url, last_url
+    
+    first_frame_url_from_api, last_frame_url_from_api = extract_frame_urls(server_content)
+    bucket, oss_endpoint_full = get_oss_bucket()
+    oss_enabled = bool(bucket and oss_endpoint_full)
+    
+    def is_oss_url(url):
+        return bool(oss_endpoint_full) and isinstance(url, str) and url.startswith(f"https://{oss_endpoint_full}/")
+    
+    def upload_image_url_to_oss_async(source_url, field_name):
+        if not source_url or not isinstance(source_url, str):
+            return
+        if source_url.startswith('data:'):
+            return
+        if is_oss_url(source_url):
+            return
+        
+        def worker():
+            try:
+                import requests
+                import tempfile
+                import os
+                resp = requests.get(source_url, timeout=60, stream=True)
+                if resp.status_code != 200:
+                    return
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+                    tmp_path = tmp_file.name
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        tmp_file.write(chunk)
+                oss_url = upload_to_aliyun_oss(tmp_path, user_id=user_id, project_id=project_id)
+                if oss_url:
+                    database.update_video_task_media(task_id_str, **{field_name: oss_url})
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        
+        thread = threading.Thread(target=worker)
+        thread.daemon = True
+        thread.start()
+    
     if isinstance(server_content, dict):
         server_video_url = server_content.get('video_url')
         server_last_frame_url = server_content.get('last_frame_image_url') or server_content.get('last_frame_url')
@@ -1937,6 +2237,7 @@ def sync_task_to_database(api_task, user_id):
         # 数据库无记录，保存到数据库
         task_data = convert_api_task_to_db_format(api_task, user_id)
         if task_data:
+            task_data['project_id'] = project_id
             try:
                 database.save_video_task(task_data)
                 log_operation('从服务器保存任务到数据库', f'用户ID: {user_id}, 任务ID: {task_id_str}')
@@ -1946,7 +2247,7 @@ def sync_task_to_database(api_task, user_id):
         # 如果视频状态为succeeded且有video_url，自动下载并上传到OSS，保存到video_library
         if server_status == 'succeeded' and server_video_url:
             # 检查视频库中是否已存在该任务ID的视频
-            existing_video = database.get_video_by_task_id(user_id, task_id_str)
+            existing_video = database.get_video_by_task_id(user_id, task_id_str, project_id)
             if not existing_video:
                 # 异步下载并上传视频到OSS
                 import threading
@@ -1971,7 +2272,7 @@ def sync_task_to_database(api_task, user_id):
                             if oss_enabled:
                                 # 生成文件名
                                 filename = f"video_{task_id_str}.mp4"
-                                oss_url = upload_to_aliyun_oss(tmp_path, user_id=user_id, is_video=True)
+                                oss_url = upload_to_aliyun_oss(tmp_path, user_id=user_id, is_video=True, project_id=project_id)
                                 
                                 if oss_url:
                                     # 保存到视频库
@@ -1980,7 +2281,8 @@ def sync_task_to_database(api_task, user_id):
                                         'original_url': server_video_url,
                                         'oss_url': oss_url
                                     }
-                                    database.save_video_asset(user_id, filename, oss_url, meta)
+                                    database.save_video_asset(user_id, filename, oss_url, meta, project_id=project_id)
+                                    database.update_video_task_media(task_id_str, video_url=oss_url)
                                     log_operation('视频已同步到OSS和视频库', f'用户ID: {user_id}, 任务ID: {task_id_str}, OSS URL: {oss_url}')
                                 else:
                                     # 如果OSS上传失败，使用原始URL保存到视频库
@@ -1989,7 +2291,7 @@ def sync_task_to_database(api_task, user_id):
                                         'task_id': task_id_str,
                                         'original_url': server_video_url
                                     }
-                                    database.save_video_asset(user_id, filename, server_video_url, meta)
+                                    database.save_video_asset(user_id, filename, server_video_url, meta, project_id=project_id)
                                     log_operation('视频已保存到视频库（OSS上传失败）', f'用户ID: {user_id}, 任务ID: {task_id_str}')
                             else:
                                 # 如果没有配置OSS，直接使用原始URL保存到视频库
@@ -1998,7 +2300,7 @@ def sync_task_to_database(api_task, user_id):
                                     'task_id': task_id_str,
                                     'original_url': server_video_url
                                 }
-                                database.save_video_asset(user_id, filename, server_video_url, meta)
+                                database.save_video_asset(user_id, filename, server_video_url, meta, project_id=project_id)
                                 log_operation('视频已保存到视频库', f'用户ID: {user_id}, 任务ID: {task_id_str}')
                             
                             # 删除临时文件
@@ -2030,15 +2332,28 @@ def sync_task_to_database(api_task, user_id):
             'error_message': api_task.get('error_message')
         }
         try:
+            update_data['project_id'] = project_id
             database.save_video_task(update_data)
         except Exception as e:
             log_operation('更新任务到数据库失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
+    
+    if first_frame_url_from_api or last_frame_url_from_api:
+        database.update_video_task_media(
+            task_id_str,
+            first_frame_url=first_frame_url_from_api,
+            last_frame_url=last_frame_url_from_api
+        )
+        if oss_enabled:
+            if first_frame_url_from_api:
+                upload_image_url_to_oss_async(first_frame_url_from_api, 'first_frame_url')
+            if last_frame_url_from_api:
+                upload_image_url_to_oss_async(last_frame_url_from_api, 'last_frame_url')
     
     # 如果视频状态为succeeded且有video_url，自动下载并上传到OSS，保存到video_library
     if server_status == 'succeeded' and server_video_url:
         log_operation('检测到视频生成成功', f'用户ID: {user_id}, 任务ID: {task_id_str}, 视频URL: {server_video_url}')
         # 检查视频库中是否已存在该任务ID的视频
-        existing_video = database.get_video_by_task_id(user_id, task_id_str)
+        existing_video = database.get_video_by_task_id(user_id, task_id_str, project_id)
         if not existing_video:
             log_operation('视频库中不存在该视频，开始下载并上传', f'用户ID: {user_id}, 任务ID: {task_id_str}')
             # 异步下载并上传视频到OSS
@@ -2066,7 +2381,7 @@ def sync_task_to_database(api_task, user_id):
                             # 生成文件名
                             filename = f"video_{task_id_str}.mp4"
                             log_operation('开始上传视频到OSS', f'用户ID: {user_id}, 任务ID: {task_id_str}, 文件路径: {tmp_path}')
-                            oss_url = upload_to_aliyun_oss(tmp_path, user_id=user_id, is_video=True)
+                            oss_url = upload_to_aliyun_oss(tmp_path, user_id=user_id, is_video=True, project_id=project_id)
                             
                             if oss_url:
                                 # 保存到视频库
@@ -2075,7 +2390,9 @@ def sync_task_to_database(api_task, user_id):
                                     'original_url': server_video_url,
                                     'oss_url': oss_url
                                 }
-                                database.save_video_asset(user_id, filename, oss_url, meta)
+                                database.save_video_asset(user_id, filename, oss_url, meta, project_id=project_id)
+                                database.update_video_task_media(task_id_str, video_url=oss_url)
+                                database.update_video_task_media(task_id_str, video_url=oss_url)
                                 log_operation('视频已同步到OSS和视频库', f'用户ID: {user_id}, 任务ID: {task_id_str}, OSS URL: {oss_url}')
                                 print(f"[视频同步] 成功: 任务ID={task_id_str}, OSS URL={oss_url}")
                             else:
@@ -2085,7 +2402,7 @@ def sync_task_to_database(api_task, user_id):
                                     'task_id': task_id_str,
                                     'original_url': server_video_url
                                 }
-                                database.save_video_asset(user_id, filename, server_video_url, meta)
+                                database.save_video_asset(user_id, filename, server_video_url, meta, project_id=project_id)
                                 log_operation('视频已保存到视频库（OSS上传失败）', f'用户ID: {user_id}, 任务ID: {task_id_str}', 'WARNING')
                                 print(f"[视频同步] OSS上传失败: 任务ID={task_id_str}, 使用原始URL")
                         else:
@@ -2095,7 +2412,7 @@ def sync_task_to_database(api_task, user_id):
                                 'task_id': task_id_str,
                                 'original_url': server_video_url
                             }
-                            database.save_video_asset(user_id, filename, server_video_url, meta)
+                            database.save_video_asset(user_id, filename, server_video_url, meta, project_id=project_id)
                             log_operation('视频已保存到视频库（未配置OSS）', f'用户ID: {user_id}, 任务ID: {task_id_str}')
                             print(f"[视频同步] 未配置OSS: 任务ID={task_id_str}, 使用原始URL")
                         
@@ -2120,8 +2437,8 @@ def sync_task_to_database(api_task, user_id):
     if server_status == 'succeeded' and server_last_frame_url:
         log_operation('检测到视频生成成功且有尾帧图片', f'用户ID: {user_id}, 任务ID: {task_id_str}, 尾帧URL: {server_last_frame_url}')
         # 检查图片库中是否已存在该尾帧图片（通过URL判断）
-        existing_person = database.get_person_assets(user_id)
-        existing_scene = database.get_scene_assets(user_id)
+        existing_person = database.get_person_assets(user_id, project_id)
+        existing_scene = database.get_scene_assets(user_id, project_id)
         all_existing_urls = set()
         for asset in existing_person + existing_scene:
             if asset.get('url'):
@@ -2179,7 +2496,8 @@ def sync_task_to_database(api_task, user_id):
                                 'source': 'video_last_frame',
                                 'original_url': server_last_frame_url
                             }
-                            database.save_scene_asset(user_id, filename, public_url, meta=meta)
+                            database.save_scene_asset(user_id, filename, public_url, meta=meta, project_id=project_id)
+                            database.update_video_task_media(task_id_str, last_frame_image_url=public_url)
                             log_operation('尾帧图片已保存到场景库', f'用户ID: {user_id}, 任务ID: {task_id_str}, 文件名: {filename}, URL: {public_url}')
                             print(f"[尾帧保存] 成功: 任务ID={task_id_str}, 文件名={filename}, URL={public_url}")
                         except Exception as db_err:
@@ -2312,6 +2630,11 @@ def convert_api_task_to_unified_format(api_task, user_id):
         unified_task['first_frame_url'] = db_task.get('first_frame_url')
         unified_task['last_frame_url'] = db_task.get('last_frame_url')
         unified_task['reference_image_urls'] = db_task.get('reference_image_urls', [])
+        # 如果数据库中已有OSS或持久化链接，优先使用
+        if db_task.get('video_url'):
+            unified_task['video_url'] = db_task.get('video_url')
+        if db_task.get('last_frame_image_url'):
+            unified_task['last_frame_image_url'] = db_task.get('last_frame_image_url')
     else:
         # 从API任务中推断生成参数
         if isinstance(server_content, dict) and 'content' in server_content:
@@ -2348,10 +2671,10 @@ def convert_api_task_to_unified_format(api_task, user_id):
     
     # 设置content中的video_url（用于前端兼容）
     if isinstance(unified_task.get('content'), dict):
-        if video_url:
-            unified_task['content']['video_url'] = video_url
-        if last_frame_image_url:
-            unified_task['content']['last_frame_image_url'] = last_frame_image_url
+        if unified_task.get('video_url'):
+            unified_task['content']['video_url'] = unified_task.get('video_url')
+        if unified_task.get('last_frame_image_url'):
+            unified_task['content']['last_frame_image_url'] = unified_task.get('last_frame_image_url')
     
     return unified_task
 
@@ -2551,6 +2874,7 @@ def api_video_task_delete(task_id):
     """删除视频生成任务"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
         
         log_request('DELETE', f'/api/video-tasks/{task_id}', user_id)
         
@@ -2605,6 +2929,7 @@ def api_video_generate():
     """创建视频生成任务"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
         
         # 支持JSON和表单两种方式
         if request.is_json:
@@ -2669,11 +2994,11 @@ def api_video_generate():
                 if not oss_enabled:
                     return jsonify({'success': False, 'error': '首帧图片上传需要配置OSS'}), 400
                 # 保存临时文件并上传到OSS
-                user_upload_folder = get_user_upload_folder(user_id)
+                user_upload_folder = get_user_upload_folder(user_id, project_id)
                 filename = secure_filename(first_frame_file.filename)
                 filepath = os.path.join(user_upload_folder, filename)
                 first_frame_file.save(filepath)
-                first_frame_url = upload_to_aliyun_oss(filepath, user_id)
+                first_frame_url = upload_to_aliyun_oss(filepath, user_id=user_id, project_id=project_id)
                 if not first_frame_url:
                     return jsonify({'success': False, 'error': '首帧图片上传到OSS失败'}), 500
             else:
@@ -2689,11 +3014,11 @@ def api_video_generate():
                 if not oss_enabled:
                     return jsonify({'success': False, 'error': '尾帧图片上传需要配置OSS'}), 400
                 # 保存临时文件并上传到OSS
-                user_upload_folder = get_user_upload_folder(user_id)
+                user_upload_folder = get_user_upload_folder(user_id, project_id)
                 filename = secure_filename(last_frame_file.filename)
                 filepath = os.path.join(user_upload_folder, filename)
                 last_frame_file.save(filepath)
-                last_frame_url = upload_to_aliyun_oss(filepath, user_id)
+                last_frame_url = upload_to_aliyun_oss(filepath, user_id=user_id, project_id=project_id)
                 if not last_frame_url:
                     return jsonify({'success': False, 'error': '尾帧图片上传到OSS失败'}), 500
             else:
@@ -2719,11 +3044,11 @@ def api_video_generate():
                     if not oss_enabled:
                         return jsonify({'success': False, 'error': '参考图片上传需要配置OSS'}), 400
                     # 保存临时文件并上传到OSS
-                    user_upload_folder = get_user_upload_folder(user_id)
+                    user_upload_folder = get_user_upload_folder(user_id, project_id)
                     filename = secure_filename(reference_file.filename)
                     filepath = os.path.join(user_upload_folder, filename)
                     reference_file.save(filepath)
-                    reference_image_url = upload_to_aliyun_oss(filepath, user_id)
+                    reference_image_url = upload_to_aliyun_oss(filepath, user_id=user_id, project_id=project_id)
                     if not reference_image_url:
                         return jsonify({'success': False, 'error': f'参考图片{i+1}上传到OSS失败'}), 500
                     reference_image_urls.append(reference_image_url)
@@ -2822,6 +3147,7 @@ def api_video_generate():
             try:
                 task_data = {
                     'user_id': user_id,
+                    'project_id': project_id,
                     'task_id': task_id,
                     'status': resp_dict.get('status', 'pending'),
                     'prompt': prompt,
@@ -2880,26 +3206,27 @@ def api_content_library():
     """获取内容库资源（人物库、场景库、图片库、视频库）"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
         library_type = request.args.get('type', 'person')  # person, scene, image, video
         
         log_request('GET', '/api/content-library', user_id, f'类型: {library_type}')
         
         assets = []
         if library_type == 'person':
-            assets = database.get_person_assets(user_id)
+            assets = database.get_person_assets(user_id, project_id)
             # 添加key字段用于标识
             for asset in assets:
                 asset['key'] = f"db_person_{asset.get('id')}"
         elif library_type == 'scene':
-            assets = database.get_scene_assets(user_id)
+            assets = database.get_scene_assets(user_id, project_id)
             # 添加key字段用于标识
             for asset in assets:
                 asset['key'] = f"db_scene_{asset.get('id')}"
         elif library_type == 'image':
             # 从图片库获取
-            assets = database.get_image_assets(user_id)
+            assets = database.get_image_assets(user_id, project_id)
             # 同时从生成记录中获取已上传到OSS的图片
-            records = database.get_all_records(user_id, limit=1000)
+            records = database.get_all_records(user_id, project_id, limit=1000)
             oss_endpoint = os.environ.get('OSS_ENDPOINT', '')
             existing_urls = set(a.get('url') for a in assets)
             for record in records:
@@ -2918,7 +3245,7 @@ def api_content_library():
                         })
                         existing_urls.add(image_path)
         elif library_type == 'video':
-            assets = database.get_video_assets(user_id)
+            assets = database.get_video_assets(user_id, project_id)
             # 添加key字段用于标识
             for asset in assets:
                 asset['key'] = f"video_{asset.get('id')}"
@@ -2994,19 +3321,20 @@ def get_records():
     """获取生成记录"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
         limit = int(request.args.get('limit', 20))
         offset = int(request.args.get('offset', 0))
         search = request.args.get('search', '')
         
         log_request('GET', '/api/records', user_id, f'limit={limit}, offset={offset}, search={search[:20]}' if search else f'limit={limit}, offset={offset}')
         
-        records = database.get_all_records(user_id, limit, offset)
+        records = database.get_all_records(user_id, project_id, limit, offset)
         
         # 如果有搜索条件，过滤结果
         if search:
             records = [r for r in records if search.lower() in r['prompt'].lower()]
         
-        total = database.get_total_count(user_id)
+        total = database.get_total_count(user_id, project_id)
         
         log_operation('获取记录', f'用户ID: {user_id}, 记录数: {len(records)}/{total}')
         
@@ -3082,6 +3410,7 @@ def upload_sample_image():
     """上传示例图到 OSS（用户隔离）"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
         log_request('POST', '/api/upload-sample-image', user_id)
         
         if 'file' not in request.files:
@@ -3127,8 +3456,11 @@ def upload_sample_image():
                     failed.append({'filename': original_name, 'error': '文件名非法或为空'})
                     continue
 
-                # 生成对象键 - 按用户与类别保存到 sample/{category}/user_{user_id}/ 目录
-                object_key = f"sample/{category}/user_{user_id}/{filename}"
+                # 生成对象键 - 按用户/项目与类别保存
+                if project_id:
+                    object_key = f"sample/{category}/user_{user_id}/project_{project_id}/{filename}"
+                else:
+                    object_key = f"sample/{category}/user_{user_id}/{filename}"
 
                 file.seek(0)
                 file_content = file.read()
@@ -3140,9 +3472,9 @@ def upload_sample_image():
                 # 保存到数据库
                 try:
                     if category == 'person':
-                        database.save_person_asset(user_id, filename, url)
+                        database.save_person_asset(user_id, filename, url, project_id=project_id)
                     else:
-                        database.save_scene_asset(user_id, filename, url)
+                        database.save_scene_asset(user_id, filename, url, project_id=project_id)
                 except Exception as db_err:
                     log_operation('保存到数据库失败', f'用户ID: {user_id}, 文件: {filename}, 错误: {str(db_err)}', 'WARNING')
 
@@ -3243,7 +3575,14 @@ def delete_sample_image():
             return jsonify({'success': False, 'error': '缺少文件 key'}), 400
         
         # 验证 key 是否属于当前用户（支持 person/scene 两类）
-        allowed_prefixes = [f'sample/person/user_{user_id}/', f'sample/scene/user_{user_id}/']
+        project_id = get_current_project_id()
+        allowed_prefixes = []
+        if project_id:
+            allowed_prefixes.extend([
+                f'sample/person/user_{user_id}/project_{project_id}/',
+                f'sample/scene/user_{user_id}/project_{project_id}/'
+            ])
+        allowed_prefixes.extend([f'sample/person/user_{user_id}/', f'sample/scene/user_{user_id}/'])
         if not any(key.startswith(p) for p in allowed_prefixes):
             log_operation('删除样本图失败', f'用户ID: {user_id}, 错误: 无权删除此文件 {key}', 'WARNING')
             return jsonify({'success': False, 'error': '无权删除此文件'}), 403
@@ -3276,6 +3615,7 @@ def delete_library_asset():
         data = request.get_json() or {}
         key = data.get('key')
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
         log_request('POST', '/api/delete-library-asset', user_id, f'key: {key}')
 
         if not key:
@@ -3287,7 +3627,7 @@ def delete_library_asset():
             # 删除数据库记录
             try:
                 # 若存在本地文件路径，尝试删除
-                conn_asset = database.get_person_assets(user_id)
+                conn_asset = database.get_person_assets(user_id, project_id)
             except Exception:
                 conn_asset = []
 
@@ -3297,7 +3637,7 @@ def delete_library_asset():
         elif key.startswith('db_scene_'):
             aid = int(key.split('_')[-1])
             try:
-                conn_asset = database.get_scene_assets(user_id)
+                conn_asset = database.get_scene_assets(user_id, project_id)
             except Exception:
                 conn_asset = []
             database.delete_scene_asset(aid)
@@ -3320,6 +3660,7 @@ def add_to_person_library():
     """将指定图片保存到人物库（OSS 或本地备份）并写入数据库"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
         data = request.get_json() or {}
         url = data.get('url')
         filename = secure_filename(data.get('filename') or os.path.basename(url or ''))
@@ -3331,7 +3672,10 @@ def add_to_person_library():
 
         # 尝试将文件上传到 OSS（如果配置了 OSS）
         bucket, endpoint_full = get_oss_bucket()
-        target_key = f'sample/person/user_{user_id}/{filename}'
+        if project_id:
+            target_key = f'sample/person/user_{user_id}/project_{project_id}/{filename}'
+        else:
+            target_key = f'sample/person/user_{user_id}/{filename}'
         public_url = None
 
         # 如果是本地输出路径（/output/...），直接读取并上传
@@ -3343,7 +3687,10 @@ def add_to_person_library():
                 public_url = f'https://{endpoint_full}/{target_key}'
             else:
                 # 保存到本地 uploads 目录作为备份
-                dest_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'sample', 'person', f'user_{user_id}')
+                if project_id:
+                    dest_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'sample', 'person', f'user_{user_id}', f'project_{project_id}')
+                else:
+                    dest_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'sample', 'person', f'user_{user_id}')
                 os.makedirs(dest_dir, exist_ok=True)
                 dest_path = os.path.join(dest_dir, filename)
                 import shutil
@@ -3358,7 +3705,10 @@ def add_to_person_library():
                     bucket.put_object(target_key, resp.content)
                     public_url = f'https://{endpoint_full}/{target_key}'
                 else:
-                    dest_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'sample', 'person', f'user_{user_id}')
+                    if project_id:
+                        dest_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'sample', 'person', f'user_{user_id}', f'project_{project_id}')
+                    else:
+                        dest_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'sample', 'person', f'user_{user_id}')
                     os.makedirs(dest_dir, exist_ok=True)
                     dest_path = os.path.join(dest_dir, filename)
                     with open(dest_path, 'wb') as fh:
@@ -3370,7 +3720,7 @@ def add_to_person_library():
 
         # 写入数据库记录
         try:
-            database.save_person_asset(user_id, filename, public_url, meta={'source_url': url})
+            database.save_person_asset(user_id, filename, public_url, meta={'source_url': url}, project_id=project_id)
             log_operation('添加人物库资源', f'用户ID: {user_id}, 文件: {filename}')
         except Exception as e:
             log_operation('保存人物库记录失败', f'用户ID: {user_id}, 错误: {str(e)}', 'WARNING')
@@ -3390,6 +3740,7 @@ def add_to_scene_library():
     """将指定图片保存到场景库（OSS 或本地备份）并写入数据库"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
         data = request.get_json() or {}
         url = data.get('url')
         filename = secure_filename(data.get('filename') or os.path.basename(url or ''))
@@ -3400,7 +3751,10 @@ def add_to_scene_library():
             return jsonify({'success': False, 'error': '缺少 url'}), 400
 
         bucket, endpoint_full = get_oss_bucket()
-        target_key = f'sample/scene/user_{user_id}/{filename}'
+        if project_id:
+            target_key = f'sample/scene/user_{user_id}/project_{project_id}/{filename}'
+        else:
+            target_key = f'sample/scene/user_{user_id}/{filename}'
         public_url = None
 
         if url.startswith('/output/') and os.path.exists(url.lstrip('/')):
@@ -3410,7 +3764,10 @@ def add_to_scene_library():
                     bucket.put_object(target_key, fh.read())
                 public_url = f'https://{endpoint_full}/{target_key}'
             else:
-                dest_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'sample', 'scene', f'user_{user_id}')
+                if project_id:
+                    dest_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'sample', 'scene', f'user_{user_id}', f'project_{project_id}')
+                else:
+                    dest_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'sample', 'scene', f'user_{user_id}')
                 os.makedirs(dest_dir, exist_ok=True)
                 dest_path = os.path.join(dest_dir, filename)
                 import shutil
@@ -3424,7 +3781,10 @@ def add_to_scene_library():
                     bucket.put_object(target_key, resp.content)
                     public_url = f'https://{endpoint_full}/{target_key}'
                 else:
-                    dest_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'sample', 'scene', f'user_{user_id}')
+                    if project_id:
+                        dest_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'sample', 'scene', f'user_{user_id}', f'project_{project_id}')
+                    else:
+                        dest_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'sample', 'scene', f'user_{user_id}')
                     os.makedirs(dest_dir, exist_ok=True)
                     dest_path = os.path.join(dest_dir, filename)
                     with open(dest_path, 'wb') as fh:
@@ -3435,7 +3795,7 @@ def add_to_scene_library():
                 return jsonify({'success': False, 'error': '无法下载远程图片'}), 400
 
         try:
-            database.save_scene_asset(user_id, filename, public_url, meta={'source_url': url})
+            database.save_scene_asset(user_id, filename, public_url, meta={'source_url': url}, project_id=project_id)
             log_operation('添加场景库资源', f'用户ID: {user_id}, 文件: {filename}')
         except Exception as e:
             log_operation('保存场景库记录失败', f'用户ID: {user_id}, 错误: {str(e)}', 'WARNING')
@@ -3454,6 +3814,7 @@ def batch_generate_all():
     """处理整个批量生成任务（后端处理）"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
         data = request.json
         tasks = data.get('tasks', [])
         
@@ -3493,7 +3854,7 @@ def batch_generate_all():
                         })
                     
                     # 调用原有的批量生成逻辑
-                    result = process_single_batch_task(task, batch_id, user_id)
+                    result = process_single_batch_task(task, batch_id, user_id, project_id)
                     
                     with batch_progress_lock:
                         if result.get('success'):
@@ -3551,7 +3912,7 @@ def batch_generate_all():
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
-def process_single_batch_task(task, batch_id, user_id):
+def process_single_batch_task(task, batch_id, user_id, project_id):
     """处理单个批量任务"""
     try:
         prompt = task.get('prompt', '').strip()
@@ -3688,10 +4049,10 @@ def process_single_batch_task(task, batch_id, user_id):
                             f.write(img_data)
                         
                         # 上传到 OSS（如果配置了OSS）
-                        image_url = f'/output/{user_id}/{filename}'  # 默认使用本地URL
+                        image_url = f'/output/{user_id}/{project_id}/{filename}'  # 默认使用本地URL
                         oss_enabled = os.environ.get('OSS_ENABLED', 'false').lower() == 'true'
                         if oss_enabled:
-                            oss_url = upload_to_aliyun_oss(filepath, user_id=user_id)
+                            oss_url = upload_to_aliyun_oss(filepath, user_id=user_id, project_id=project_id)
                             if oss_url:
                                 image_url = oss_url
                                 print(f"成功上传生成的图片到OSS: {oss_url}")
@@ -3699,6 +4060,7 @@ def process_single_batch_task(task, batch_id, user_id):
                         # 保存记录（无论是否上传到OSS都保存）
                         database.save_generation_record({
                             'user_id': user_id,
+                            'project_id': project_id,
                             'prompt': prompt,
                             'aspect_ratio': aspect_ratio,
                             'resolution': resolution,
@@ -3752,14 +4114,28 @@ def get_batch_progress(batch_id):
             'progress': progress
         })
 
+def user_has_project(user_id, project_id):
+    projects = database.get_user_projects(user_id)
+    return any(p.get('id') == project_id for p in projects)
+
+@app.route('/output/<int:user_id>/<int:project_id>/<filename>')
+@login_required
+def output_file_project(user_id, project_id, filename):
+    if session.get('user_id') != user_id:
+        return '403 Forbidden', 403
+    if not user_has_project(user_id, project_id):
+        return '403 Forbidden', 403
+    user_output_folder = get_user_output_folder(user_id, project_id)
+    return send_from_directory(user_output_folder, filename)
+
 @app.route('/output/<int:user_id>/<filename>')
 @login_required
 def output_file(user_id, filename):
-    # 确保用户只能访问自己的文件
+    # 兼容旧路径（不含项目ID）
     if session.get('user_id') != user_id:
         return '403 Forbidden', 403
-    user_output_folder = get_user_output_folder(user_id)
-    return send_from_directory(user_output_folder, filename)
+    legacy_folder = os.path.join(app.config['OUTPUT_FOLDER'], str(user_id))
+    return send_from_directory(legacy_folder, filename)
 
 @app.route('/favicon.ico')
 def favicon():
