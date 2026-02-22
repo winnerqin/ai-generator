@@ -13,6 +13,12 @@ def init_database():
     """初始化数据库"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+
+    def ensure_column(table, column, definition):
+        cursor.execute(f"PRAGMA table_info({table})")
+        cols = [col[1] for col in cursor.fetchall()]
+        if column not in cols:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     
     # 创建用户表
     cursor.execute('''
@@ -121,6 +127,93 @@ def init_database():
             project_id INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(user_id, project_id)
+        )
+    ''')
+
+    # 剧本提示词模板
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS script_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            project_id INTEGER,
+            name TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, project_id, name)
+        )
+    ''')
+
+    # 剧本保存记录
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS script_saves (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            project_id INTEGER,
+            title TEXT NOT NULL,
+            novel_text TEXT,
+            prompt TEXT,
+            min_seconds INTEGER,
+            max_seconds INTEGER,
+            script_text TEXT,
+            episodes_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # 剧本分集记录
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS script_episode_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            script_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            project_id INTEGER,
+            episode_index INTEGER,
+            title TEXT,
+            duration_seconds INTEGER,
+            summary TEXT,
+            content_url TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # 分镜保存记录
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS storyboard_saves (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            project_id INTEGER,
+            title TEXT NOT NULL,
+            script_text TEXT,
+            prompt TEXT,
+            storyboard_json TEXT,
+            storyboard_text TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # 迁移分镜保存记录字段
+    ensure_column('storyboard_saves', 'series_id', 'INTEGER')
+    ensure_column('storyboard_saves', 'version', 'INTEGER DEFAULT 1')
+    cursor.execute('UPDATE storyboard_saves SET version = 1 WHERE version IS NULL')
+    cursor.execute('UPDATE storyboard_saves SET series_id = id WHERE series_id IS NULL')
+
+    # 生成任务记录（用于进度与恢复）
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS generation_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            project_id INTEGER,
+            task_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            progress INTEGER DEFAULT 0,
+            payload_json TEXT,
+            result_json TEXT,
+            error TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
@@ -1010,6 +1103,455 @@ def get_project_users(project_id):
     users = [dict(r) for r in rows]
     conn.close()
     return users
+
+
+def get_script_templates(user_id, project_id=None):
+    """获取剧本提示词模板"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('SELECT * FROM script_templates WHERE user_id = ? ORDER BY id DESC', (user_id,))
+    else:
+        cursor.execute('SELECT * FROM script_templates WHERE user_id = ? AND project_id = ? ORDER BY id DESC', (user_id, project_id))
+    rows = cursor.fetchall()
+    templates = [dict(r) for r in rows]
+    conn.close()
+    return templates
+
+
+def create_script_template(user_id, project_id, name, prompt):
+    """创建剧本提示词模板"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO script_templates (user_id, project_id, name, prompt, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (user_id, project_id, name, prompt, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    template_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return template_id
+
+
+def delete_script_template(user_id, template_id):
+    """删除剧本提示词模板"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM script_templates WHERE id = ? AND user_id = ?', (template_id, user_id))
+    conn.commit()
+    conn.close()
+
+
+def create_generation_task(user_id, project_id, task_type, payload):
+    """创建生成任务"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO generation_tasks (
+            user_id, project_id, task_type, status, progress, payload_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        user_id,
+        project_id,
+        task_type,
+        'running',
+        0,
+        json.dumps(payload or {}, ensure_ascii=False),
+        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ))
+    task_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return task_id
+
+
+def update_generation_task(task_id, status=None, progress=None, result=None, error=None):
+    """更新生成任务"""
+    fields = []
+    values = []
+    if status is not None:
+        fields.append('status = ?')
+        values.append(status)
+    if progress is not None:
+        fields.append('progress = ?')
+        values.append(progress)
+    if result is not None:
+        fields.append('result_json = ?')
+        values.append(json.dumps(result, ensure_ascii=False))
+    if error is not None:
+        fields.append('error = ?')
+        values.append(error)
+    if not fields:
+        return
+    fields.append('updated_at = ?')
+    values.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    values.append(task_id)
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(f'''
+        UPDATE generation_tasks
+        SET {", ".join(fields)}
+        WHERE id = ?
+    ''', tuple(values))
+    conn.commit()
+    conn.close()
+
+
+def get_generation_task(user_id, project_id, task_id):
+    """获取生成任务"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('SELECT * FROM generation_tasks WHERE id = ? AND user_id = ?', (task_id, user_id))
+    else:
+        cursor.execute('SELECT * FROM generation_tasks WHERE id = ? AND user_id = ? AND project_id = ?', (task_id, user_id, project_id))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def save_script_record(user_id, project_id, title, novel_text, prompt, min_seconds, max_seconds, script_text, episodes, record_id=None):
+    """保存剧本记录"""
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    episodes_json = json.dumps(episodes or [], ensure_ascii=False)
+    if record_id:
+        cursor.execute('''
+            UPDATE script_saves
+            SET title = ?, novel_text = ?, prompt = ?, min_seconds = ?, max_seconds = ?, script_text = ?, episodes_json = ?, updated_at = ?
+            WHERE id = ? AND user_id = ?
+        ''', (
+            title, novel_text, prompt, min_seconds, max_seconds, script_text, episodes_json, now, record_id, user_id
+        ))
+        conn.commit()
+        conn.close()
+        return record_id
+    cursor.execute('''
+        INSERT INTO script_saves (
+            user_id, project_id, title, novel_text, prompt, min_seconds, max_seconds, script_text, episodes_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        user_id, project_id, title, novel_text, prompt, min_seconds, max_seconds, script_text, episodes_json, now, now
+    ))
+    record_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return record_id
+
+
+def list_script_records(user_id, project_id=None):
+    """获取剧本保存列表"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('SELECT id, title, created_at, updated_at FROM script_saves WHERE user_id = ? ORDER BY updated_at DESC', (user_id,))
+    else:
+        cursor.execute('''
+            SELECT id, title, created_at, updated_at
+            FROM script_saves
+            WHERE user_id = ? AND project_id = ?
+            ORDER BY updated_at DESC
+        ''', (user_id, project_id))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_script_record(user_id, project_id, record_id):
+    """获取剧本记录"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('SELECT * FROM script_saves WHERE id = ? AND user_id = ?', (record_id, user_id))
+    else:
+        cursor.execute('SELECT * FROM script_saves WHERE id = ? AND user_id = ? AND project_id = ?', (record_id, user_id, project_id))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def save_script_episodes(script_id, user_id, project_id, episodes):
+    """保存剧本分集记录"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    for ep in episodes:
+        cursor.execute('''
+            INSERT INTO script_episode_records (
+                script_id, user_id, project_id, episode_index, title, duration_seconds, summary, content_url, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            script_id,
+            user_id,
+            project_id,
+            ep.get('episode_index'),
+            ep.get('title'),
+            ep.get('duration_seconds'),
+            ep.get('summary'),
+            ep.get('content_url'),
+            now,
+            now
+        ))
+    conn.commit()
+    conn.close()
+
+
+def list_script_episodes(script_id, user_id, project_id=None):
+    """获取剧本分集列表"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('''
+            SELECT id, script_id, episode_index, title, duration_seconds, summary, content_url, created_at, updated_at
+            FROM script_episode_records
+            WHERE script_id = ? AND user_id = ?
+            ORDER BY episode_index ASC, id ASC
+        ''', (script_id, user_id))
+    else:
+        cursor.execute('''
+            SELECT id, script_id, episode_index, title, duration_seconds, summary, content_url, created_at, updated_at
+            FROM script_episode_records
+            WHERE script_id = ? AND user_id = ? AND project_id = ?
+            ORDER BY episode_index ASC, id ASC
+        ''', (script_id, user_id, project_id))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_script_episode(episode_id, user_id, project_id=None):
+    """获取单集记录"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('SELECT * FROM script_episode_records WHERE id = ? AND user_id = ?', (episode_id, user_id))
+    else:
+        cursor.execute('''
+            SELECT * FROM script_episode_records
+            WHERE id = ? AND user_id = ? AND project_id = ?
+        ''', (episode_id, user_id, project_id))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_max_script_episode_index(script_id, user_id, project_id=None):
+    """获取剧本当前最大集数"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('SELECT MAX(episode_index) FROM script_episode_records WHERE script_id = ? AND user_id = ?', (script_id, user_id))
+    else:
+        cursor.execute('''
+            SELECT MAX(episode_index) FROM script_episode_records
+            WHERE script_id = ? AND user_id = ? AND project_id = ?
+        ''', (script_id, user_id, project_id))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row and row[0] is not None else 0
+
+
+def list_all_script_episodes(user_id, project_id=None):
+    """获取所有剧本分集列表"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('''
+            SELECT id, script_id, episode_index, title, duration_seconds, summary, content_url, created_at, updated_at
+            FROM script_episode_records
+            WHERE user_id = ?
+            ORDER BY created_at DESC, script_id DESC, episode_index ASC, id ASC
+        ''', (user_id,))
+    else:
+        cursor.execute('''
+            SELECT id, script_id, episode_index, title, duration_seconds, summary, content_url, created_at, updated_at
+            FROM script_episode_records
+            WHERE user_id = ? AND project_id = ?
+            ORDER BY created_at DESC, script_id DESC, episode_index ASC, id ASC
+        ''', (user_id, project_id))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_script_episode(episode_id, user_id, content_url=None, summary=None):
+    """更新剧本分集内容"""
+    fields = []
+    values = []
+    if content_url is not None:
+        fields.append('content_url = ?')
+        values.append(content_url)
+    if summary is not None:
+        fields.append('summary = ?')
+        values.append(summary)
+    if not fields:
+        return
+    fields.append('updated_at = ?')
+    values.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    values.append(episode_id)
+    values.append(user_id)
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(f'''
+        UPDATE script_episode_records
+        SET {", ".join(fields)}
+        WHERE id = ? AND user_id = ?
+    ''', tuple(values))
+    conn.commit()
+    conn.close()
+
+
+def delete_script_episode(episode_id, user_id):
+    """删除剧本分集"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM script_episode_records WHERE id = ? AND user_id = ?', (episode_id, user_id))
+    conn.commit()
+    conn.close()
+
+
+def save_storyboard_record(user_id, project_id, title, script_text, prompt, storyboard_json, storyboard_text, record_id=None, series_id=None, create_version=False):
+    """保存分镜记录"""
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    storyboard_json_text = json.dumps(storyboard_json or {}, ensure_ascii=False)
+    if record_id and not create_version:
+        cursor.execute('''
+            UPDATE storyboard_saves
+            SET title = ?, script_text = ?, prompt = ?, storyboard_json = ?, storyboard_text = ?, updated_at = ?
+            WHERE id = ? AND user_id = ?
+        ''', (
+            title, script_text, prompt, storyboard_json_text, storyboard_text, now, record_id, user_id
+        ))
+        conn.commit()
+        conn.close()
+        return record_id
+    version = 1
+    if series_id:
+        cursor.execute('SELECT MAX(version) FROM storyboard_saves WHERE series_id = ? AND user_id = ?', (series_id, user_id))
+        row = cursor.fetchone()
+        max_ver = row[0] if row else None
+        version = (max_ver or 0) + 1
+    cursor.execute('''
+        INSERT INTO storyboard_saves (
+            user_id, project_id, title, script_text, prompt, storyboard_json, storyboard_text, created_at, updated_at, series_id, version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        user_id, project_id, title, script_text, prompt, storyboard_json_text, storyboard_text, now, now, series_id, version
+    ))
+    record_id = cursor.lastrowid
+    if not series_id:
+        cursor.execute('UPDATE storyboard_saves SET series_id = ? WHERE id = ?', (record_id, record_id))
+    conn.commit()
+    conn.close()
+    return record_id
+
+
+def list_storyboard_records(user_id, project_id=None):
+    """获取分镜保存列表"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('SELECT id, title, created_at, updated_at, series_id, version FROM storyboard_saves WHERE user_id = ? ORDER BY updated_at DESC', (user_id,))
+    else:
+        cursor.execute('''
+            SELECT id, title, created_at, updated_at, series_id, version
+            FROM storyboard_saves
+            WHERE user_id = ? AND project_id = ?
+            ORDER BY updated_at DESC
+        ''', (user_id, project_id))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def list_storyboard_series(user_id, project_id=None):
+    """获取分镜系列列表（每个系列最新版本）"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('''
+            SELECT s.*
+            FROM storyboard_saves s
+            JOIN (
+                SELECT series_id, MAX(version) AS max_version
+                FROM storyboard_saves
+                WHERE user_id = ?
+                GROUP BY series_id
+            ) latest ON latest.series_id = s.series_id AND latest.max_version = s.version
+            WHERE s.user_id = ?
+            ORDER BY s.updated_at DESC
+        ''', (user_id, user_id))
+    else:
+        cursor.execute('''
+            SELECT s.*
+            FROM storyboard_saves s
+            JOIN (
+                SELECT series_id, MAX(version) AS max_version
+                FROM storyboard_saves
+                WHERE user_id = ? AND project_id = ?
+                GROUP BY series_id
+            ) latest ON latest.series_id = s.series_id AND latest.max_version = s.version
+            WHERE s.user_id = ? AND s.project_id = ?
+            ORDER BY s.updated_at DESC
+        ''', (user_id, project_id, user_id, project_id))
+    rows = cursor.fetchall()
+    series = [dict(r) for r in rows]
+    for item in series:
+        cursor.execute('SELECT COUNT(*) FROM storyboard_saves WHERE series_id = ? AND user_id = ?', (item.get('series_id'), user_id))
+        item['version_count'] = cursor.fetchone()[0]
+    conn.close()
+    return series
+
+
+def list_storyboard_versions(user_id, project_id, series_id):
+    """获取分镜系列的版本列表"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('''
+            SELECT id, title, created_at, updated_at, series_id, version
+            FROM storyboard_saves
+            WHERE user_id = ? AND series_id = ?
+            ORDER BY version DESC
+        ''', (user_id, series_id))
+    else:
+        cursor.execute('''
+            SELECT id, title, created_at, updated_at, series_id, version
+            FROM storyboard_saves
+            WHERE user_id = ? AND project_id = ? AND series_id = ?
+            ORDER BY version DESC
+        ''', (user_id, project_id, series_id))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_storyboard_record(user_id, project_id, record_id):
+    """获取分镜记录"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('SELECT * FROM storyboard_saves WHERE id = ? AND user_id = ?', (record_id, user_id))
+    else:
+        cursor.execute('SELECT * FROM storyboard_saves WHERE id = ? AND user_id = ? AND project_id = ?', (record_id, user_id, project_id))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 def get_stats_overview():
     """获取统计概览"""

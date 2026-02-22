@@ -14,7 +14,7 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: radial-gradient(circle at top, rgba(82,108,255,0.18), transparent 40%), #0b0f1a;
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -170,6 +170,7 @@
     </style>
 </head>
 <body>
+    <div id="reactApp"></div>
     <div class="login-container">
         <div class="login-header">
             <div class="icon">🎨</div>
@@ -217,5 +218,8 @@
             btn.textContent = '登录中...';
         });
     </script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="/static/react-app.js"></script>
 </body>
 </html>

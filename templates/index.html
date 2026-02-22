@@ -3,6 +3,560 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>单图生成 - Ai创作工具</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .app-shell {
+            display: flex;
+            min-height: 100vh;
+        }
+        .main-content {
+            padding: 0;
+        }
+        .page-wrap {
+            padding: 20px 24px 36px;
+        }
+        .page-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 18px;
+        }
+        .page-title {
+            font-size: 1.4rem;
+            font-weight: 600;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            gap: 18px;
+        }
+        .panel {
+            border-radius: 16px;
+        }
+        .panel-body {
+            display: grid;
+            gap: 14px;
+        }
+        .form-row {
+            display: grid;
+            gap: 12px;
+        }
+        .form-row.two {
+            grid-template-columns: 1fr 1fr;
+        }
+        .form-row.three {
+            grid-template-columns: repeat(3, 1fr);
+        }
+        .sample-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+            gap: 8px;
+        }
+        .sample-item {
+            position: relative;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid rgba(86, 111, 255, 0.2);
+            cursor: pointer;
+        }
+        .sample-item.selected::after {
+            content: '✓';
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            background: rgba(86, 111, 255, 0.8);
+            color: #fff;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .sample-item img {
+            width: 100%;
+            height: 90px;
+            object-fit: cover;
+            display: block;
+        }
+        .reference-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .reference-chip {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            background: rgba(86, 111, 255, 0.18);
+            border-radius: 999px;
+            font-size: 0.82rem;
+        }
+        .result-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+        }
+        .result-card {
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid rgba(86, 111, 255, 0.2);
+            position: relative;
+            cursor: pointer;
+        }
+        .result-card.selected::after {
+            content: '✓';
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(86, 111, 255, 0.85);
+            color: #fff;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .result-card img {
+            width: 100%;
+            height: 160px;
+            object-fit: cover;
+            display: block;
+        }
+        .modal {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(6, 10, 20, 0.7);
+            z-index: 2000;
+        }
+        .modal img {
+            max-width: 90vw;
+            max-height: 85vh;
+            border-radius: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div id="reactApp"></div>
+    <script>
+        window.__APP_CONTEXT__ = {
+            username: "{{ user.username }}"
+        };
+    </script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    {% raw %}
+    <script type="text/babel">
+        const { useEffect, useMemo, useState } = React;
+
+        const ASPECT_RATIOS = [
+            { value: '9:16', label: '9:16 (手机屏)' },
+            { value: '1:1', label: '1:1 (正方形)' },
+            { value: '2:3', label: '2:3 (竖屏)' },
+            { value: '3:2', label: '3:2 (横屏)' },
+            { value: '3:4', label: '3:4 (竖屏)' },
+            { value: '4:3', label: '4:3 (横屏)' },
+            { value: '16:9', label: '16:9 (宽屏)' }
+        ];
+
+        const Sidebar = ({ username, projects, currentProjectId, onProjectChange }) => (
+            <nav className="sidebar-nav" id="sidebarNav">
+                <div className="sidebar-nav-header">
+                    <div className="sidebar-nav-title">Ai创作工具</div>
+                    <button className="sidebar-nav-toggle" onClick={() => toggleSidebar()} title="收缩/展开">
+                        <span id="toggleIcon">‹</span>
+                    </button>
+                </div>
+                <div className="sidebar-nav-menu">
+                    <a href="/" className="sidebar-nav-item active"><span className="sidebar-nav-icon">🎨</span><span className="sidebar-nav-text">单图生成</span></a>
+                    <a href="/batch" className="sidebar-nav-item"><span className="sidebar-nav-icon">📦</span><span className="sidebar-nav-text">批量生成</span></a>
+                    <a href="/records" className="sidebar-nav-item"><span className="sidebar-nav-icon">📊</span><span className="sidebar-nav-text">生图任务</span></a>
+                    <a href="/video-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
+                    <a href="/video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
+                    <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
+                    <a href="/storyboard" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">分镜生成</span></a>
+                    <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
+                    <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
+                </div>
+                <div className="sidebar-nav-user">
+                    <div className="sidebar-nav-user-info">
+                        <div className="sidebar-nav-user-avatar">👤</div>
+                        <div className="sidebar-nav-user-name">{username}</div>
+                    </div>
+                    <div style={{ marginTop: '8px' }}>
+                        <label style={{ fontSize: '0.85em', color: '#cbd4f5' }}>当前项目</label>
+                        <select
+                            style={{ width: '100%', padding: '6px', borderRadius: '6px' }}
+                            value={currentProjectId || ''}
+                            onChange={(e) => onProjectChange(e.target.value)}
+                        >
+                            {projects.length === 0 && <option>加载中...</option>}
+                            {projects.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <a href="/logout" className="sidebar-nav-logout">登出</a>
+                </div>
+            </nav>
+        );
+
+        function App() {
+            const [projects, setProjects] = useState([]);
+            const [currentProjectId, setCurrentProjectId] = useState('');
+            const [prompt, setPrompt] = useState('');
+            const [aspectRatio, setAspectRatio] = useState('9:16');
+            const [resolution, setResolution] = useState('2k');
+            const [generateMode, setGenerateMode] = useState('single');
+            const [numImages, setNumImages] = useState(4);
+            const [imageStyle, setImageStyle] = useState('');
+            const [seed, setSeed] = useState(0);
+            const [outputFilename, setOutputFilename] = useState('');
+            const [styles, setStyles] = useState([]);
+            const [sampleCategory, setSampleCategory] = useState('person');
+            const [sampleImages, setSampleImages] = useState([]);
+            const [selectedSample, setSelectedSample] = useState([]);
+            const [uploadedFiles, setUploadedFiles] = useState([]);
+            const [results, setResults] = useState([]);
+            const [selectedResults, setSelectedResults] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [progressText, setProgressText] = useState('');
+            const [error, setError] = useState('');
+            const [modalImage, setModalImage] = useState(null);
+
+            useEffect(() => {
+                document.body.classList.add('react-theme');
+            }, []);
+
+            useEffect(() => {
+                fetch('/api/projects').then(res => res.json()).then(data => {
+                    if (data.success) {
+                        setProjects(data.projects || []);
+                        setCurrentProjectId(String(data.current_project_id || ''));
+                    }
+                });
+                fetch('/api/image-styles').then(res => res.json()).then(data => {
+                    if (data.success) setStyles(data.styles || []);
+                });
+            }, []);
+
+            useEffect(() => {
+                if (sampleCategory === 'recent') {
+                    fetch('/api/recent-images?limit=50').then(res => res.json()).then(data => {
+                        if (data.success) setSampleImages(data.images || []);
+                        else setSampleImages([]);
+                    });
+                    return;
+                }
+                fetch(`/api/sample-images?category=${sampleCategory}`).then(res => res.json()).then(data => {
+                    if (data.success) setSampleImages(data.images || []);
+                    else setSampleImages([]);
+                });
+            }, [sampleCategory]);
+
+            const referenceChips = useMemo(() => {
+                return selectedSample.map(url => ({ type: 'sample', url }))
+                    .concat(uploadedFiles.map(f => ({ type: 'upload', url: f.preview, name: f.file.name })));
+            }, [selectedSample, uploadedFiles]);
+
+            const toggleSample = (img) => {
+                const url = img.url || img;
+                setSelectedSample(prev => {
+                    if (prev.includes(url)) return prev.filter(u => u !== url);
+                    if (prev.length >= 4) return prev;
+                    return [...prev, url];
+                });
+            };
+
+            const handleUploadFiles = (files) => {
+                const list = Array.from(files || []);
+                const newItems = list.map(file => ({ file, preview: URL.createObjectURL(file) }));
+                setUploadedFiles(prev => prev.concat(newItems).slice(0, 4));
+            };
+
+            const removeUploaded = (index) => {
+                setUploadedFiles(prev => {
+                    const item = prev[index];
+                    if (item) URL.revokeObjectURL(item.preview);
+                    return prev.filter((_, i) => i !== index);
+                });
+            };
+
+            const buildFormData = () => {
+                const form = new FormData();
+                form.append('prompt', prompt);
+                form.append('aspect_ratio', aspectRatio);
+                form.append('resolution', resolution);
+                form.append('generate_mode', generateMode);
+                form.append('num_images', String(numImages));
+                form.append('image_style', imageStyle);
+                form.append('seed', String(seed || 0));
+                form.append('output_filename', outputFilename);
+                form.append('stream', 'true');
+                selectedSample.forEach(url => form.append('sample_image_urls', url));
+                uploadedFiles.forEach(item => form.append('images', item.file));
+                return form;
+            };
+
+            const parseSseChunk = (chunk, onEvent) => {
+                const lines = chunk.split('\n\n');
+                lines.forEach(line => {
+                    const trimmed = line.trim();
+                    if (!trimmed.startsWith('data:')) return;
+                    const jsonStr = trimmed.replace(/^data:\s*/, '');
+                    try {
+                        const payload = JSON.parse(jsonStr);
+                        onEvent(payload);
+                    } catch (err) {
+                        return;
+                    }
+                });
+            };
+
+            const handleGenerate = async () => {
+                if (!prompt.trim()) {
+                    setError('请输入提示词');
+                    return;
+                }
+                setError('');
+                setResults([]);
+                setSelectedResults([]);
+                setLoading(true);
+                setProgressText('初始化中...');
+                const resp = await fetch('/generate', { method: 'POST', body: buildFormData() });
+                if (!resp.ok || !resp.body) {
+                    setError('生成失败，请重试');
+                    setLoading(false);
+                    return;
+                }
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buffer = '';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const parts = buffer.split('\n\n');
+                    buffer = parts.pop() || '';
+                    parts.forEach(part => parseSseChunk(part, (payload) => {
+                        if (payload.type === 'start') {
+                            setProgressText(`开始生成，共 ${payload.total || 0} 张`);
+                        } else if (payload.type === 'generating') {
+                            setProgressText(`生成中 ${payload.index || 0}/${payload.total || 0}`);
+                        } else if (payload.type === 'image') {
+                            setResults(prev => prev.concat({
+                                url: payload.url,
+                                filename: payload.filename,
+                                record_id: payload.record_id
+                            }));
+                        } else if (payload.type === 'error') {
+                            setError(payload.error || '生成失败');
+                        } else if (payload.type === 'complete') {
+                            setProgressText(`完成，共 ${payload.total || 0} 张`);
+                            setLoading(false);
+                        }
+                    }));
+                }
+                setLoading(false);
+            };
+
+            const toggleResult = (idx) => {
+                setSelectedResults(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : prev.concat(idx));
+            };
+
+            const batchAdd = async (type) => {
+                const targets = selectedResults.map(i => results[i]).filter(Boolean);
+                if (targets.length === 0) return;
+                for (const item of targets) {
+                    await fetch(type === 'person' ? '/api/add-to-person-library' : '/api/add-to-scene-library', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: item.url, filename: item.filename })
+                    });
+                }
+                setSelectedResults([]);
+            };
+
+            return (
+                <div className="app-shell">
+                    <Sidebar
+                        username={window.__APP_CONTEXT__?.username || 'user'}
+                        projects={projects}
+                        currentProjectId={currentProjectId}
+                        onProjectChange={async (pid) => {
+                            const resp = await fetch('/api/projects/switch', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ project_id: pid })
+                            });
+                            const data = await resp.json();
+                            if (data.success) window.location.reload();
+                        }}
+                    />
+                    <div className="main-content">
+                        <div className="page-wrap">
+                            <div className="page-header">
+                                <div className="page-title">🎨 单图生成</div>
+                                <div className="react-shell-badge">React Page</div>
+                            </div>
+                            <div className="grid">
+                                <div className="panel">
+                                    <div className="panel-title">生成参数</div>
+                                    <div className="panel-body">
+                                        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="输入提示词..." />
+                                        <div className="form-row two">
+                                            <div>
+                                                <label>图片比例</label>
+                                                <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)}>
+                                                    {ASPECT_RATIOS.map(r => (
+                                                        <option key={r.value} value={r.value}>{r.label}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label>分辨率</label>
+                                                <select value={resolution} onChange={(e) => setResolution(e.target.value)}>
+                                                    <option value="2k">2K</option>
+                                                    <option value="4k">4K</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div className="form-row two">
+                                            <div>
+                                                <label>生图模式</label>
+                                                <select value={generateMode} onChange={(e) => setGenerateMode(e.target.value)}>
+                                                    <option value="single">单图</option>
+                                                    <option value="group">组图</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label>生成数量</label>
+                                                <input type="number" min="1" max="20" value={numImages} onChange={(e) => setNumImages(Number(e.target.value))} />
+                                            </div>
+                                        </div>
+                                        <div className="form-row three">
+                                            <div>
+                                                <label>图片风格</label>
+                                                <select value={imageStyle} onChange={(e) => setImageStyle(e.target.value)}>
+                                                    <option value="">默认</option>
+                                                    {styles.map(style => (
+                                                        <option key={style.id} value={style.id}>{style.name || style.id}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label>种子</label>
+                                                <input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value))} />
+                                            </div>
+                                            <div>
+                                                <label>文件名</label>
+                                                <input value={outputFilename} onChange={(e) => setOutputFilename(e.target.value)} placeholder="可选" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="panel-title" style={{ marginBottom: '6px' }}>参考图</div>
+                                            <div className="reference-row">
+                                                {referenceChips.length === 0 && <div className="small-hint">未选择参考图</div>}
+                                                {referenceChips.map((item, idx) => (
+                                                    <span key={idx} className="reference-chip">
+                                                        {item.type === 'upload' ? item.name : '示例图'}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label>上传参考图（最多 4 张）</label>
+                                            <input type="file" accept="image/*" multiple onChange={(e) => handleUploadFiles(e.target.files)} />
+                                            <div className="reference-row" style={{ marginTop: '8px' }}>
+                                                {uploadedFiles.map((item, idx) => (
+                                                    <div key={idx} className="reference-chip">
+                                                        {item.file.name}
+                                                        <button className="btn btn-secondary" onClick={() => removeUploaded(idx)}>移除</button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <button className="btn btn-primary" onClick={handleGenerate} disabled={loading}>
+                                            {loading ? '生成中...' : '开始生成'}
+                                        </button>
+                                        {progressText && <div className="small-hint">{progressText}</div>}
+                                        {error && <div className="small-hint" style={{ color: '#ff9aa2' }}>{error}</div>}
+                                    </div>
+                                </div>
+                                <div className="panel">
+                                    <div className="panel-title">示例图库</div>
+                                    <div className="form-row three">
+                                        <button className={`btn ${sampleCategory === 'person' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSampleCategory('person')}>人物</button>
+                                        <button className={`btn ${sampleCategory === 'scene' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSampleCategory('scene')}>场景</button>
+                                        <button className={`btn ${sampleCategory === 'recent' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSampleCategory('recent')}>最近</button>
+                                    </div>
+                                    <div className="sample-grid" style={{ marginTop: '10px' }}>
+                                        {sampleImages.length === 0 && <div className="small-hint">暂无示例图</div>}
+                                        {sampleImages.map((img, idx) => (
+                                            <div
+                                                key={idx}
+                                                className={`sample-item ${selectedSample.includes(img.url) ? 'selected' : ''}`}
+                                                onClick={() => toggleSample(img)}
+                                            >
+                                                <img src={img.url} alt={img.filename || 'sample'} />
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="panel" style={{ marginTop: '18px' }}>
+                                <div className="panel-title">生成结果</div>
+                                <div className="form-row" style={{ marginBottom: '10px' }}>
+                                    <button className="btn btn-secondary" onClick={() => batchAdd('person')}>加入人物库</button>
+                                    <button className="btn btn-secondary" onClick={() => batchAdd('scene')}>加入场景库</button>
+                                    <div className="small-hint">已选 {selectedResults.length} 张</div>
+                                </div>
+                                <div className="result-grid">
+                                    {results.length === 0 && <div className="small-hint">暂无结果</div>}
+                                    {results.map((item, idx) => (
+                                        <div
+                                            key={idx}
+                                            className={`result-card ${selectedResults.includes(idx) ? 'selected' : ''}`}
+                                            onClick={() => toggleResult(idx)}
+                                            onDoubleClick={() => setModalImage(item.url)}
+                                        >
+                                            <img src={item.url} alt={item.filename || 'result'} />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {modalImage && (
+                        <div className="modal" onClick={() => setModalImage(null)}>
+                            <img src={modalImage} alt="preview" />
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('reactApp')).render(<App />);
+    </script>
+    {% endraw %}
+    <script src="/static/sidebar-nav.js"></script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ai创作工具</title>
     <script src="/static/state-manager.js"></script>
     <link rel="stylesheet" href="/static/sidebar-nav.css">
@@ -735,6 +1289,7 @@
     </style>
 </head>
 <body>
+    <div id="reactApp"></div>
     <!-- 左侧导航栏 -->
     <nav class="sidebar-nav" id="sidebarNav">
         <div class="sidebar-nav-header">
@@ -764,9 +1319,17 @@
                 <span class="sidebar-nav-icon">📹</span>
                 <span class="sidebar-nav-text">视频任务</span>
             </a>
-            <a href="/script-analysis" class="sidebar-nav-item">
+            <a href="/script-generate" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📜</span>
+                <span class="sidebar-nav-text">剧本生成</span>
+            </a>
+            <a href="/storyboard" class="sidebar-nav-item">
                 <span class="sidebar-nav-icon">🎬</span>
-                <span class="sidebar-nav-text">剧本分析</span>
+                <span class="sidebar-nav-text">分镜生成</span>
+            </a>
+            <a href="/storyboard-studio" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🧩</span>
+                <span class="sidebar-nav-text">分镜制作</span>
             </a>
             <a href="/content-management" class="sidebar-nav-item">
                 <span class="sidebar-nav-icon">📚</span>
@@ -2890,5 +3453,8 @@
             }
         });
     </script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="/static/react-app.js"></script>
 </body>
 </html>

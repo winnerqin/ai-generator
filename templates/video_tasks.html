@@ -3,892 +3,356 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>视频任务管理 - Ai创作工具</title>
-    <script src="/static/state-manager.js"></script>
-    <link rel="stylesheet" href="/static/sidebar-nav.css">
+    <title>视频任务 - Ai创作工具</title>
+    <link rel="stylesheet" href="/static/styles.css">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
-            margin: 0;
-            padding: 0;
-        }
-        
-        .container {
-            max-width: 2000px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            overflow: hidden;
-        }
-        
-        .content {
-            padding: 30px;
-        }
-        
-        .header-section {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        
-        .header-section h1 {
-            color: #667eea;
-        }
-        
-        .control-bar {
-            display: flex;
-            gap: 15px;
-            margin-bottom: 20px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-        
-        .control-bar input,
-        .control-bar select {
-            padding: 10px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 0.95em;
-        }
-        
-        .control-bar input:focus,
-        .control-bar select:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 8px;
-            font-size: 0.95em;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .btn-primary {
-            background: #28a745; /* 绿色 */
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            background: #218838;
-        }
-        
-        .btn-danger {
-            background: #dc3545;
-            color: white;
-        }
-        
-        .btn-danger:hover {
-            background: #c82333;
-        }
-        
-        .btn-secondary {
-            background: #6c757d;
-            color: white;
-        }
-        
-        .btn-secondary:hover {
-            background: #5a6268;
-        }
-        
-        .auto-refresh-toggle {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .auto-refresh-toggle input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-        }
-        
-        .status-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 0.85em;
-            font-weight: 500;
-        }
-        
-        .status-queued {
-            background: #fff3cd;
-            color: #856404;
-        }
-        
-        .status-running {
-            background: #d1ecf1;
-            color: #0c5460;
-        }
-        
-        .status-succeeded {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        .status-failed {
-            background: #f8d7da;
-            color: #721c24;
-        }
-        
-        .status-cancelled {
-            background: #e2e3e5;
-            color: #383d41;
-        }
-        
-        .tasks-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-            background: white;
-        }
-        
-        .tasks-table th,
-        .tasks-table td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #e0e0e0;
-        }
-        
-        .tasks-table th {
-            background: #f8f9ff;
-            font-weight: 600;
-            color: #667eea;
-            position: sticky;
-            top: 0;
-        }
-        
-        .tasks-table tr:hover {
-            background: #f8f9ff;
-        }
-        
-        .tasks-table .task-id {
-            font-family: monospace;
-            font-size: 0.9em;
-            max-width: 200px;
-            word-break: break-all;
-        }
-        
-        .tasks-table .video-url {
-            max-width: 150px;
-        }
-        
-        .tasks-table .prompt-cell {
-            max-width: 200px;
-            word-break: break-all;
-            font-size: 0.9em;
-        }
-        
-        .btn-info {
-            background: #17a2b8;
-            color: white;
-        }
-        
-        .btn-info:hover {
-            background: #138496;
-        }
-        
-        .tasks-table .action-btn {
-            padding: 6px 12px;
-            font-size: 0.85em;
-        }
-        
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #999;
-        }
-        
-        .empty-state .icon {
-            font-size: 4em;
-            margin-bottom: 20px;
-        }
-        
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #667eea;
-        }
-        
-        .loading-spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        .error-message {
-            padding: 12px;
-            background: #fee;
-            color: #c33;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            display: none;
-        }
-        
-        .pagination {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 10px;
-            margin-top: 20px;
-        }
-        
-        .pagination button {
-            padding: 8px 16px;
-            border: 1px solid #e0e0e0;
-            background: white;
-            border-radius: 6px;
-            cursor: pointer;
-        }
-        
-        .pagination button:hover:not(:disabled) {
-            background: #f8f9ff;
-        }
-        
-        .pagination button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        .pagination .page-info {
-            padding: 8px 16px;
-        }
+        .app-shell { display: flex; min-height: 100vh; }
+        .main-content { padding: 0; }
+        .page-wrap { padding: 20px 24px 36px; }
+        .page-title { font-size: 1.4rem; font-weight: 600; }
+        .panel { border-radius: 16px; padding: 16px; }
+        .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .row.space { justify-content: space-between; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px; border-bottom: 1px solid rgba(86,111,255,0.2); text-align: left; }
+        .status-badge { padding: 3px 8px; border-radius: 999px; font-size: 0.75rem; }
+        .status-queued { background: rgba(86,111,255,0.2); }
+        .status-running { background: rgba(255,193,7,0.2); }
+        .status-succeeded { background: rgba(40,167,69,0.2); }
+        .status-failed { background: rgba(220,53,69,0.2); }
+        .status-cancelled { background: rgba(108,117,125,0.2); }
+        .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: rgba(86,111,255,0.2); font-size: 0.75rem; }
+        .modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(6,10,20,0.7); z-index: 2000; }
+        .modal-card { width: min(980px, 92vw); max-height: 86vh; overflow: auto; padding: 16px; border-radius: 16px; }
+        video { width: 100%; border-radius: 12px; }
     </style>
 </head>
 <body>
-    <!-- 左侧导航栏 -->
-    <nav class="sidebar-nav" id="sidebarNav">
-        <div class="sidebar-nav-header">
-            <div class="sidebar-nav-title">Ai创作工具</div>
-            <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收缩/展开">
-                <span id="toggleIcon">‹</span>
-            </button>
-        </div>
-        <div class="sidebar-nav-menu">
-            <a href="/" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🎨</span>
-                <span class="sidebar-nav-text">单图生成</span>
-            </a>
-            <a href="/batch" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📦</span>
-                <span class="sidebar-nav-text">批量生成</span>
-            </a>
-            <a href="/records" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📊</span>
-                <span class="sidebar-nav-text">生图任务</span>
-            </a>
-            <a href="/video-generate" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🎬</span>
-                <span class="sidebar-nav-text">视频生成</span>
-            </a>
-            <a href="/video-tasks" class="sidebar-nav-item active">
-                <span class="sidebar-nav-icon">📹</span>
-                <span class="sidebar-nav-text">视频任务</span>
-            </a>
-            <a href="/script-analysis" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🎬</span>
-                <span class="sidebar-nav-text">剧本分析</span>
-            </a>
-            <a href="/content-management" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📚</span>
-                <span class="sidebar-nav-text">内容管理</span>
-            </a>
-            {% if user.username == 'system_admin' %}
-            <div class="sidebar-nav-divider"></div>
-            <a href="/admin" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🛠️</span>
-                <span class="sidebar-nav-text">系统管理</span>
-            </a>
-            <a href="/stats" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📈</span>
-                <span class="sidebar-nav-text">系统统计</span>
-            </a>
-            {% endif %}
-        </div>
-        <div class="sidebar-nav-user">
-            <div class="sidebar-nav-user-info">
-                <div class="sidebar-nav-user-avatar">👤</div>
-                <div class="sidebar-nav-user-name">{{ user.username }}</div>
-            </div>
-            <div style="margin-top: 8px;">
-                <label style="font-size: 0.85em; color: #666;">当前项目</label>
-                <select id="projectSelect" style="width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #ddd;">
-                    <option>加载中...</option>
-                </select>
-            </div>
-            <a href="/logout" class="sidebar-nav-logout">登出</a>
-        </div>
-    </nav>
-    
-    <div class="main-content">
-        <div class="container">
-        <div class="content">
-            <div class="header-section">
-                <h1>📹 视频任务管理</h1>
-                <div class="auto-refresh-toggle">
-                    <input type="checkbox" id="autoRefresh">
-                    <label for="autoRefresh">自动刷新（每10秒）</label>
-                </div>
-            </div>
-            
-            <div class="error-message" id="errorMessage"></div>
-            
-            <div class="control-bar">
-                <input type="text" id="taskIdSearch" placeholder="任务ID（可选）" style="width: 250px;">
-                <select id="statusFilter" style="width: 150px;">
-                    <option value="">全部状态</option>
-                    <option value="queued">排队中</option>
-                    <option value="running">运行中</option>
-                    <option value="succeeded">成功</option>
-                    <option value="failed">失败</option>
-                    <option value="cancelled">已取消</option>
-                </select>
-                <input type="date" id="startDate" placeholder="开始日期" style="width: 150px;" title="创建日期（开始）">
-                <input type="date" id="endDate" placeholder="结束日期" style="width: 150px;" title="创建日期（结束）">
-                <input type="number" id="pageSize" value="10" min="1" max="100" style="width: 100px;" placeholder="每页数量">
-                <button class="btn btn-primary" onclick="loadTasks()">🔍 查询</button>
-                <button class="btn btn-secondary" onclick="loadTasks()">🔄 刷新</button>
-            </div>
-            
-            <div id="tasksContainer">
-                <div class="loading">
-                    <div class="loading-spinner"></div>
-                    <p>加载中...</p>
-                </div>
-            </div>
-            
-            <div class="pagination" id="pagination" style="display: none;">
-                <button onclick="changePage(-1)" id="prevPage">上一页</button>
-                <span class="page-info" id="pageInfo">第 1 页</span>
-                <button onclick="changePage(1)" id="nextPage">下一页</button>
-            </div>
-        </div>
-    </div>
-    </div>
-    
+    <div id="reactApp"></div>
     <script>
-        let currentPage = 1;
-        let totalPages = 1;
-        let autoRefreshInterval = null;
-        let currentTasks = []; // 保存当前任务列表，用于重新生成功能
-        
-        // 格式化时间
-        function formatTime(timestamp) {
-            if (!timestamp) return '-';
-            const date = new Date(timestamp * 1000);
+        window.__APP_CONTEXT__ = { username: "{{ user.username }}" };
+    </script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    {% raw %}
+    <script type="text/babel">
+        const { useEffect, useMemo, useState } = React;
+
+        const Sidebar = ({ username, projects, currentProjectId, onProjectChange }) => (
+            <nav className="sidebar-nav" id="sidebarNav">
+                <div className="sidebar-nav-header">
+                    <div className="sidebar-nav-title">Ai创作工具</div>
+                    <button className="sidebar-nav-toggle" onClick={() => toggleSidebar()} title="收缩/展开">
+                        <span id="toggleIcon">‹</span>
+                    </button>
+                </div>
+                <div className="sidebar-nav-menu">
+                    <a href="/" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎨</span><span className="sidebar-nav-text">单图生成</span></a>
+                    <a href="/batch" className="sidebar-nav-item"><span className="sidebar-nav-icon">📦</span><span className="sidebar-nav-text">批量生成</span></a>
+                    <a href="/records" className="sidebar-nav-item"><span className="sidebar-nav-icon">📊</span><span className="sidebar-nav-text">生图任务</span></a>
+                    <a href="/video-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
+                    <a href="/video-tasks" className="sidebar-nav-item active"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
+                    <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
+                    <a href="/storyboard" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">分镜生成</span></a>
+                    <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
+                    <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
+                </div>
+                <div className="sidebar-nav-user">
+                    <div className="sidebar-nav-user-info">
+                        <div className="sidebar-nav-user-avatar">👤</div>
+                        <div className="sidebar-nav-user-name">{username}</div>
+                    </div>
+                    <div style={{ marginTop: '8px' }}>
+                        <label style={{ fontSize: '0.85em', color: '#cbd4f5' }}>当前项目</label>
+                        <select
+                            style={{ width: '100%', padding: '6px', borderRadius: '6px' }}
+                            value={currentProjectId || ''}
+                            onChange={(e) => onProjectChange(e.target.value)}
+                        >
+                            {projects.length === 0 && <option>加载中...</option>}
+                            {projects.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <a href="/logout" className="sidebar-nav-logout">登出</a>
+                </div>
+            </nav>
+        );
+
+        function formatTime(ts) {
+            if (!ts) return '-';
+            const date = new Date(ts * 1000);
             return date.toLocaleString('zh-CN');
         }
-        
-        // 格式化状态
-        function formatStatus(status) {
-            const statusMap = {
-                'queued': { text: '排队中', class: 'status-queued' },
-                'running': { text: '运行中', class: 'status-running' },
-                'succeeded': { text: '成功', class: 'status-succeeded' },
-                'failed': { text: '失败', class: 'status-failed' },
-                'cancelled': { text: '已取消', class: 'status-cancelled' }
+
+        function statusBadge(status) {
+            const map = {
+                queued: { text: '排队中', cls: 'status-queued' },
+                running: { text: '运行中', cls: 'status-running' },
+                succeeded: { text: '成功', cls: 'status-succeeded' },
+                failed: { text: '失败', cls: 'status-failed' },
+                cancelled: { text: '已取消', cls: 'status-cancelled' }
             };
-            const statusInfo = statusMap[status] || { text: status, class: 'status-queued' };
-            return `<span class="status-badge ${statusInfo.class}">${statusInfo.text}</span>`;
+            const info = map[status] || { text: status, cls: 'status-queued' };
+            return <span className={`status-badge ${info.cls}`}>{info.text}</span>;
         }
-        
-        // 加载任务列表
-        async function loadTasks() {
-            const container = document.getElementById('tasksContainer');
-            const errorMsg = document.getElementById('errorMessage');
-            errorMsg.style.display = 'none';
-            
-            container.innerHTML = '<div class="loading"><div class="loading-spinner"></div><p>加载中...</p></div>';
-            
-            try {
-                const taskId = document.getElementById('taskIdSearch').value.trim();
-                const status = document.getElementById('statusFilter').value;
-                const startDate = document.getElementById('startDate').value;
-                const endDate = document.getElementById('endDate').value;
-                const pageSize = parseInt(document.getElementById('pageSize').value) || 10;
-                
-                let url = `/api/video-tasks?page=${currentPage}&page_size=${pageSize}`;
-                if (taskId) {
-                    url += `&task_id=${encodeURIComponent(taskId)}`;
-                }
-                if (status) {
-                    url += `&status=${encodeURIComponent(status)}`;
-                }
-                if (startDate) {
-                    url += `&start_date=${encodeURIComponent(startDate)}`;
-                }
-                if (endDate) {
-                    url += `&end_date=${encodeURIComponent(endDate)}`;
-                }
-                
-                const response = await fetch(url);
-                const data = await response.json();
-                
-                if (!data.success) {
-                    throw new Error(data.error || '查询失败');
-                }
-                
-                // 根据API返回结构，优先使用 items（标准返回格式）
-                const tasks = data.items || data.tasks || [];
-                const total = data.total || tasks.length;
-                
-                // 保存当前任务列表，用于重新生成功能
-                currentTasks = tasks;
-                totalPages = Math.ceil(total / pageSize);
-                
-                if (tasks.length === 0) {
-                    let emptyMessage = '暂无任务';
-                    if (data.message) {
-                        emptyMessage = data.message;
+
+        function App() {
+            const [projects, setProjects] = useState([]);
+            const [currentProjectId, setCurrentProjectId] = useState('');
+            const [taskIdSearch, setTaskIdSearch] = useState('');
+            const [statusFilter, setStatusFilter] = useState('');
+            const [startDate, setStartDate] = useState('');
+            const [endDate, setEndDate] = useState('');
+            const [pageSize, setPageSize] = useState(10);
+            const [currentPage, setCurrentPage] = useState(1);
+            const [totalPages, setTotalPages] = useState(1);
+            const [tasks, setTasks] = useState([]);
+            const [error, setError] = useState('');
+            const [autoRefresh, setAutoRefresh] = useState(false);
+            const [modalVideo, setModalVideo] = useState('');
+
+            useEffect(() => {
+                document.body.classList.add('react-theme');
+            }, []);
+
+            useEffect(() => {
+                fetch('/api/projects').then(res => res.json()).then(data => {
+                    if (data.success) {
+                        setProjects(data.projects || []);
+                        setCurrentProjectId(String(data.current_project_id || ''));
                     }
-                    container.innerHTML = `
-                        <div class="empty-state">
-                            <div class="icon">📭</div>
-                            <p>${emptyMessage}</p>
-                            ${data.message && data.message.includes('ARK_API_KEY') ? '<p style="margin-top: 10px; font-size: 0.9em; color: #666;">请在环境变量中配置 ARK_API_KEY 以启用视频任务功能</p>' : ''}
-                            ${data.message && data.message.includes('volcenginesdkarkruntime') ? '<p style="margin-top: 10px; font-size: 0.9em; color: #666;">请运行: pip install volcenginesdkarkruntime</p>' : ''}
-                        </div>
-                    `;
-                    document.getElementById('pagination').style.display = 'none';
+                });
+            }, []);
+
+            const loadTasks = async (page = currentPage) => {
+                setError('');
+                let url = `/api/video-tasks?page=${page}&page_size=${pageSize}`;
+                if (taskIdSearch) url += `&task_id=${encodeURIComponent(taskIdSearch)}`;
+                if (statusFilter) url += `&status=${encodeURIComponent(statusFilter)}`;
+                if (startDate) url += `&start_date=${encodeURIComponent(startDate)}`;
+                if (endDate) url += `&end_date=${encodeURIComponent(endDate)}`;
+                const resp = await fetch(url);
+                const data = await resp.json();
+                if (!data.success) {
+                    setError(data.error || '查询失败');
+                    setTasks([]);
                     return;
                 }
-                
-                // 构建表格
-                let tableHTML = `
-                    <table class="tasks-table">
-                        <thead>
-                            <tr>
-                                <th>任务ID</th>
-                                <th>状态</th>
-                                <th>提示词</th>
-                                <th>首尾帧</th>
-                                <th>分辨率</th>
-                                <th>视频比例</th>
-                                <th>视频长度</th>
-                                <th>种子数</th>
-                                <th>固定镜头</th>
-                                <th>水印</th>
-                                <th>包含声音</th>
-                                <th>返回尾帧</th>
-                                <th>视频URL</th>
-                                <th>Token</th>
-                                <th>创建时间</th>
-                                <th>更新时间</th>
-                                <th>操作</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                `;
-                
-                // 保存当前任务列表
-                currentTasks = tasks;
-                
-                tasks.forEach(task => {
-                    const taskId = task.task_id || task.id || '-';
-                    const status = task.status || 'unknown';
-                    
-                    // 从服务器获取视频URL（优先使用task.video_url，否则从content中获取）
-                    const videoUrl = task.video_url || (task.content && task.content.video_url) || '-';
-                    
-                    // 获取提示词（优先从task.prompt获取）
-                    let prompt = task.prompt || '-';
-                    if (prompt === '-' && task.content) {
-                        const content = task.content;
-                        if (content && Array.isArray(content.content)) {
-                            const textContent = content.content.find(item => item.type === 'text');
-                            if (textContent && textContent.text) {
-                                prompt = textContent.text;
-                            }
-                        } else if (Array.isArray(content)) {
-                            const textContent = content.find(item => item.type === 'text');
-                            if (textContent && textContent.text) {
-                                prompt = textContent.text;
-                            }
-                        }
+                const items = data.items || data.tasks || [];
+                setTasks(items);
+                const total = data.total || items.length;
+                setTotalPages(Math.max(1, Math.ceil(total / pageSize)));
+                setCurrentPage(page);
+                if (data.message && items.length === 0) {
+                    setError(data.message);
+                }
+            };
+
+            useEffect(() => {
+                loadTasks(1);
+            }, []);
+
+            useEffect(() => {
+                if (!autoRefresh) return;
+                const timer = setInterval(() => loadTasks(currentPage), 5000);
+                return () => clearInterval(timer);
+            }, [autoRefresh, currentPage, pageSize, taskIdSearch, statusFilter, startDate, endDate]);
+
+            const playVideo = (url) => {
+                if (!url || url === '-') return;
+                setModalVideo(url);
+            };
+
+            const downloadVideo = (url, taskId) => {
+                if (!url || url === '-') return;
+                const downloadUrl = `/api/download-file?url=${encodeURIComponent(url)}`;
+                const link = document.createElement('a');
+                link.href = downloadUrl;
+                link.download = `video_${taskId}.mp4`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const deleteTask = async (taskId) => {
+                if (!confirm('确定删除任务吗？')) return;
+                const resp = await fetch(`/api/video-tasks/${taskId}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (!data.success) {
+                    alert(data.error || '删除失败');
+                } else {
+                    loadTasks(currentPage);
+                }
+            };
+
+            const regenerateVideo = (task) => {
+                if (!task) return;
+                const params = new URLSearchParams();
+                if (task.prompt) params.append('prompt', task.prompt);
+                const content = task.content || {};
+                let generateType = 'text';
+                let referenceImageCount = 0;
+                const contentArray = Array.isArray(content) ? content : (Array.isArray(content.content) ? content.content : []);
+                contentArray.forEach(item => {
+                    if (item.type === 'image_url' && item.role === 'reference_image') {
+                        params.append(`reference_image_url_${referenceImageCount}`, item.image_url?.url || '');
+                        referenceImageCount += 1;
+                    } else if (item.type === 'image_url' && item.role === 'first_frame') {
+                        generateType = 'first_last_frame';
+                        params.append('first_frame_url', item.image_url?.url || '');
+                    } else if (item.type === 'image_url' && item.role === 'last_frame') {
+                        generateType = 'first_last_frame';
+                        params.append('last_frame_url', item.image_url?.url || '');
+                    } else if (item.type === 'image_url' && !item.role) {
+                        generateType = 'first_frame';
+                        params.append('first_frame_url', item.image_url?.url || '');
                     }
-                    // 限制提示词显示长度
-                    const promptDisplay = prompt.length > 50 ? prompt.substring(0, 50) + '...' : prompt;
-                    
-                    // 获取首尾帧URL
-                    const firstFrameUrl = task.first_frame_url || null;
-                    const lastFrameUrl = task.last_frame_url || task.last_frame_image_url || null;
-                    
-                    // 构建首尾帧显示
-                    let framesDisplay = '-';
-                    if (firstFrameUrl || lastFrameUrl) {
-                        framesDisplay = '<div style="display: flex; gap: 5px; align-items: center;">';
-                        if (firstFrameUrl) {
-                            framesDisplay += `<img src="${firstFrameUrl}" alt="首帧" style="width: 60px; height: 40px; object-fit: cover; border-radius: 4px; cursor: pointer;" onclick="window.open('${firstFrameUrl}', '_blank')" title="首帧">`;
-                        }
-                        if (lastFrameUrl) {
-                            framesDisplay += `<img src="${lastFrameUrl}" alt="尾帧" style="width: 60px; height: 40px; object-fit: cover; border-radius: 4px; cursor: pointer;" onclick="window.open('${lastFrameUrl}', '_blank')" title="尾帧">`;
-                        }
-                        framesDisplay += '</div>';
-                    }
-                    
-                    // 从服务器获取token
-                    const tokens = task.token !== undefined ? task.token : (task.usage?.completion_tokens || task.usage?.total_tokens || '-');
-                    
-                    // 时间戳
-                    const createdAt = task.created_at || task.created || 0;
-                    const updatedAt = task.updated_at || task.updated || 0;
-                    
-                    // 所有生成参数（从任务对象中获取）
-                    const resolution = task.resolution || '-';
-                    const ratio = task.ratio || '-';
-                    const duration = task.duration !== undefined ? (task.duration + '秒') : '-';
-                    const seed = task.seed !== undefined ? task.seed : '-';
-                    const cameraFixed = task.camera_fixed !== undefined ? (task.camera_fixed ? '是' : '否') : '-';
-                    const watermark = task.watermark !== undefined ? (task.watermark ? '是' : '否') : '-';
-                    const generateAudio = task.generate_audio !== undefined ? (task.generate_audio ? '是' : '否') : '-';
-                    const returnLastFrame = task.return_last_frame !== undefined ? (task.return_last_frame ? '是' : '否') : '-';
-                    
-                    // 检查视频是否超过7天
-                    const isVideoOld = videoUrl !== '-' && createdAt && (Date.now() / 1000 - createdAt) > (7 * 24 * 60 * 60);
-                    const downloadBtnClass = isVideoOld ? 'btn btn-secondary action-btn' : 'btn btn-primary action-btn';
-                    const downloadBtnDisabled = isVideoOld ? 'disabled' : '';
-                    const downloadBtnText = isVideoOld ? '⬇️ 下载（已过期）' : '⬇️ 下载视频';
-                    
-                    tableHTML += `
-                        <tr>
-                            <td class="task-id">${taskId}</td>
-                            <td>${formatStatus(status)}</td>
-                            <td title="${prompt}">${promptDisplay}</td>
-                            <td>${framesDisplay}</td>
-                            <td>${resolution}</td>
-                            <td>${ratio}</td>
-                            <td>${duration}</td>
-                            <td>${seed}</td>
-                            <td>${cameraFixed}</td>
-                            <td>${watermark}</td>
-                            <td>${generateAudio}</td>
-                            <td>${returnLastFrame}</td>
-                            <td class="video-url">
-                                ${videoUrl !== '-' ? `<button class="${downloadBtnClass}" onclick="downloadVideo('${videoUrl}', '${taskId}')" ${downloadBtnDisabled}>${downloadBtnText}</button>` : '-'}
-                            </td>
-                            <td>${tokens}</td>
-                            <td>${formatTime(createdAt)}</td>
-                            <td>${formatTime(updatedAt)}</td>
-                            <td>
-                                ${videoUrl !== '-' ? `<button class="btn btn-primary action-btn" onclick="playVideo('${videoUrl.replace(/'/g, "\\'")}', '${taskId}')" style="margin-right: 5px;">▶️ 播放</button>` : ''}
-                                <button class="btn btn-info action-btn" onclick="regenerateVideo('${taskId}')" style="background: #17a2b8; color: white;">🔄 重新生成</button>
-                            </td>
-                        </tr>
-                    `;
                 });
-                
-                tableHTML += '</tbody></table>';
-                container.innerHTML = tableHTML;
-                
-                // 更新分页信息（只有在记录大于10条时才显示分页）
-                if (total > 10) {
-                    document.getElementById('pageInfo').textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页（共 ${total} 条）`;
-                    document.getElementById('pagination').style.display = 'flex';
-                    document.getElementById('prevPage').disabled = currentPage <= 1;
-                    document.getElementById('nextPage').disabled = currentPage >= totalPages;
-                } else {
-                    document.getElementById('pagination').style.display = 'none';
+                if (referenceImageCount > 0) {
+                    generateType = 'reference_image';
+                    params.append('reference_image_count', referenceImageCount);
                 }
-                
-            } catch (error) {
-                container.innerHTML = '';
-                errorMsg.textContent = '加载失败: ' + error.message;
-                errorMsg.style.display = 'block';
-            }
-        }
-        
-        // 下载视频
-        function downloadVideo(videoUrl, taskId) {
-            if (!videoUrl || videoUrl === '-') {
-                alert('视频地址不可用');
-                return;
-            }
-            
-            // 使用后端代理下载
-            const downloadUrl = `/api/download-file?url=${encodeURIComponent(videoUrl)}`;
-            const link = document.createElement('a');
-            link.href = downloadUrl;
-            link.download = `video_${taskId}.mp4`;
-            link.style.display = 'none';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        }
-        
-        // 删除任务
-        async function deleteTask(taskId) {
-            if (!confirm(`确定要删除任务 ${taskId} 吗？`)) {
-                return;
-            }
-            
-            try {
-                const response = await fetch(`/api/video-tasks/${taskId}`, {
-                    method: 'DELETE'
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    alert('任务删除成功');
-                    loadTasks();
-                } else {
-                    alert('删除失败: ' + (data.error || '未知错误'));
-                }
-            } catch (error) {
-                alert('删除失败: ' + error.message);
-            }
-        }
-        
-        // 切换页面
-        function changePage(delta) {
-            const newPage = currentPage + delta;
-            if (newPage >= 1 && newPage <= totalPages) {
-                currentPage = newPage;
-                loadTasks();
-            }
-        }
-        
-        // 自动刷新
-        function setupAutoRefresh() {
-            const checkbox = document.getElementById('autoRefresh');
-            checkbox.addEventListener('change', function() {
-                if (this.checked) {
-                    startAutoRefresh();
-                } else {
-                    stopAutoRefresh();
-                }
-            });
-            
-            if (checkbox.checked) {
-                startAutoRefresh();
-            }
-        }
-        
-        function startAutoRefresh() {
-            stopAutoRefresh();
-            autoRefreshInterval = setInterval(() => {
-                loadTasks();
-            }, 10000); // 每10秒刷新一次
-        }
-        
-        function stopAutoRefresh() {
-            if (autoRefreshInterval) {
-                clearInterval(autoRefreshInterval);
-                autoRefreshInterval = null;
-            }
-        }
-        
-        // 页面加载时初始化
-        document.addEventListener('DOMContentLoaded', function() {
-            loadTasks();
-            setupAutoRefresh();
-        });
-        
-        // 页面卸载时清理
-        window.addEventListener('beforeunload', function() {
-            stopAutoRefresh();
-        });
-        
-        // 播放视频
-        function playVideo(videoUrl, taskId) {
-            if (!videoUrl || videoUrl === '-') {
-                alert('视频地址不可用');
-                return;
-            }
-            
-            // 创建视频播放模态框
-            let modal = document.getElementById('videoPlayerModal');
-            if (!modal) {
-                // 如果模态框不存在，创建一个
-                const modalHTML = `
-                    <div id="videoPlayerModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; justify-content: center; align-items: center;">
-                        <div id="videoPlayerContainer" style="position: relative; max-width: 90%; max-height: 90%; background: #000; padding: 20px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
-                            <button id="closeVideoBtn" onclick="closeVideoPlayer()" style="position: absolute; top: -15px; right: -15px; background: #fff; border: none; padding: 8px 12px; border-radius: 50%; cursor: pointer; font-size: 20px; font-weight: bold; color: #333; box-shadow: 0 2px 8px rgba(0,0,0,0.3); z-index: 10001;" onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='#fff'">✕</button>
-                            <video id="videoPlayer" controls style="max-width: 100%; max-height: 80vh; display: block; border-radius: 4px;">
-                                您的浏览器不支持视频播放
-                            </video>
+                params.append('generate_type', generateType);
+                if (task.resolution) params.append('resolution', task.resolution);
+                if (task.ratio) params.append('ratio', task.ratio);
+                if (task.duration) params.append('duration', task.duration);
+                if (task.seed !== undefined) params.append('seed', task.seed);
+                if (task.camera_fixed !== undefined) params.append('camera_fixed', task.camera_fixed);
+                if (task.watermark !== undefined) params.append('watermark', task.watermark);
+                if (task.generate_audio !== undefined) params.append('generate_audio', task.generate_audio);
+                if (task.return_last_frame !== undefined) params.append('return_last_frame', task.return_last_frame);
+                window.location.href = `/video-generate?${params.toString()}`;
+            };
+
+            return (
+                <div className="app-shell">
+                    <Sidebar
+                        username={window.__APP_CONTEXT__?.username || 'user'}
+                        projects={projects}
+                        currentProjectId={currentProjectId}
+                        onProjectChange={async (pid) => {
+                            const resp = await fetch('/api/projects/switch', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ project_id: pid })
+                            });
+                            const data = await resp.json();
+                            if (data.success) window.location.reload();
+                        }}
+                    />
+                    <div className="main-content">
+                        <div className="page-wrap">
+                            <div className="page-title">📹 视频任务</div>
+                            <div className="panel" style={{ marginTop: '16px' }}>
+                                <div className="row space">
+                                    <div className="row">
+                                        <input placeholder="任务ID（可选）" value={taskIdSearch} onChange={(e) => setTaskIdSearch(e.target.value)} />
+                                        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                                            <option value="">全部状态</option>
+                                            <option value="queued">排队中</option>
+                                            <option value="running">运行中</option>
+                                            <option value="succeeded">成功</option>
+                                            <option value="failed">失败</option>
+                                            <option value="cancelled">已取消</option>
+                                        </select>
+                                        <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                                        <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                                        <input type="number" min="1" max="100" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} />
+                                        <button className="btn btn-primary" onClick={() => loadTasks(1)}>查询</button>
+                                        <button className="btn btn-secondary" onClick={() => loadTasks(currentPage)}>刷新</button>
+                                    </div>
+                                    <div className="row">
+                                        <label className="small-hint">自动刷新</label>
+                                        <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
+                                    </div>
+                                </div>
+                                {error && <div className="small-hint" style={{ color: '#ff9aa2', marginTop: '8px' }}>{error}</div>}
+                            </div>
+
+                            <div className="panel" style={{ marginTop: '16px' }}>
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>任务ID</th>
+                                            <th>状态</th>
+                                            <th>提示词</th>
+                                            <th>首尾帧</th>
+                                            <th>分辨率</th>
+                                            <th>比例</th>
+                                            <th>时长</th>
+                                            <th>种子</th>
+                                            <th>镜头</th>
+                                            <th>水印</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {tasks.map(task => {
+                                            const taskId = task.id || task.task_id || '-';
+                                            const videoUrl = task.video_url || (task.content && task.content.video_url) || '-';
+                                            const firstFrame = task.first_frame_url || (task.content && task.content.first_frame_url) || '-';
+                                            const lastFrame = task.last_frame_url || (task.content && task.content.last_frame_url) || '-';
+                                            return (
+                                                <tr key={taskId}>
+                                                    <td>{taskId}</td>
+                                                    <td>{statusBadge(task.status)}</td>
+                                                    <td>{task.prompt || '-'}</td>
+                                                    <td>
+                                                        {firstFrame !== '-' ? '首帧' : ''}
+                                                        {lastFrame !== '-' ? ' / 尾帧' : ''}
+                                                    </td>
+                                                    <td>{task.resolution || '-'}</td>
+                                                    <td>{task.ratio || '-'}</td>
+                                                    <td>{task.duration || '-'}</td>
+                                                    <td>{task.seed ?? '-'}</td>
+                                                    <td>{String(task.camera_fixed) || '-'}</td>
+                                                    <td>{String(task.watermark) || '-'}</td>
+                                                    <td>
+                                                        {videoUrl !== '-' && <button className="btn btn-secondary" onClick={() => playVideo(videoUrl)}>播放</button>}
+                                                        {videoUrl !== '-' && <button className="btn btn-secondary" onClick={() => downloadVideo(videoUrl, taskId)}>下载</button>}
+                                                        <button className="btn btn-secondary" onClick={() => regenerateVideo(task)}>重生成</button>
+                                                        <button className="btn btn-danger" onClick={() => deleteTask(taskId)}>删除</button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                        {tasks.length === 0 && (
+                                            <tr>
+                                                <td colSpan="11"><div className="small-hint">暂无任务</div></td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                                <div className="row space" style={{ marginTop: '12px' }}>
+                                    <button className="btn btn-secondary" onClick={() => loadTasks(Math.max(1, currentPage - 1))}>上一页</button>
+                                    <span className="small-hint">第 {currentPage} 页 / 共 {totalPages} 页</span>
+                                    <button className="btn btn-secondary" onClick={() => loadTasks(Math.min(totalPages, currentPage + 1))}>下一页</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                `;
-                document.body.insertAdjacentHTML('beforeend', modalHTML);
-                modal = document.getElementById('videoPlayerModal');
-                
-                // 点击背景关闭
-                modal.addEventListener('click', function(e) {
-                    if (e.target === modal) {
-                        closeVideoPlayer();
-                    }
-                });
-                
-                // ESC键关闭
-                document.addEventListener('keydown', function(e) {
-                    if (e.key === 'Escape' && modal.style.display === 'flex') {
-                        closeVideoPlayer();
-                    }
-                });
-            }
-            
-            const videoElement = document.getElementById('videoPlayer');
-            videoElement.src = videoUrl;
-            modal.style.display = 'flex';
+
+                    {modalVideo && (
+                        <div className="modal" onClick={() => setModalVideo('')}>
+                            <div className="modal-card panel" onClick={(e) => e.stopPropagation()}>
+                                <div className="row space">
+                                    <div className="section-title">视频播放</div>
+                                    <button className="btn btn-secondary" onClick={() => setModalVideo('')}>关闭</button>
+                                </div>
+                                <video controls src={modalVideo}></video>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
         }
-        
-        // 关闭视频播放器
-        function closeVideoPlayer() {
-            const modal = document.getElementById('videoPlayerModal');
-            if (modal) {
-                const videoElement = document.getElementById('videoPlayer');
-                if (videoElement) {
-                    videoElement.pause();
-                    videoElement.src = '';
-                    videoElement.load(); // 重置视频元素
-                }
-                modal.style.display = 'none';
-            }
-        }
-        
-        // 重新生成视频
-        function regenerateVideo(taskId) {
-            // 从当前任务列表中找到对应的任务
-            const task = currentTasks.find(t => (t.id || t.task_id) === taskId);
-            if (!task) {
-                alert('未找到任务信息');
-                return;
-            }
-            
-            // 构建URL参数
-            const params = new URLSearchParams();
-            
-            // 添加提示词
-            if (task.prompt) {
-                params.append('prompt', task.prompt);
-            }
-            
-            // 添加生成类型（根据content判断）
-            const content = task.content || {};
-            let generateType = 'text';
-            
-            // 检查是否有参考图
-            let referenceImageCount = 0;
-            if (Array.isArray(content)) {
-                for (const item of content) {
-                    if (item.type === 'image_url' && item.role === 'reference_image') {
-                        referenceImageCount++;
-                        params.append(`reference_image_url_${referenceImageCount - 1}`, item.image_url?.url || '');
-                    } else if (item.type === 'image_url' && item.role === 'first_frame') {
-                        generateType = 'first_last_frame';
-                        params.append('first_frame_url', item.image_url?.url || '');
-                    } else if (item.type === 'image_url' && item.role === 'last_frame') {
-                        generateType = 'first_last_frame';
-                        params.append('last_frame_url', item.image_url?.url || '');
-                    } else if (item.type === 'image_url' && !item.role) {
-                        generateType = 'first_frame';
-                        params.append('first_frame_url', item.image_url?.url || '');
-                    }
-                }
-            } else if (typeof content === 'object' && content.content) {
-                const contentArray = Array.isArray(content.content) ? content.content : [];
-                for (const item of contentArray) {
-                    if (item.type === 'image_url' && item.role === 'reference_image') {
-                        referenceImageCount++;
-                        params.append(`reference_image_url_${referenceImageCount - 1}`, item.image_url?.url || '');
-                    } else if (item.type === 'image_url' && item.role === 'first_frame') {
-                        generateType = 'first_last_frame';
-                        params.append('first_frame_url', item.image_url?.url || '');
-                    } else if (item.type === 'image_url' && item.role === 'last_frame') {
-                        generateType = 'first_last_frame';
-                        params.append('last_frame_url', item.image_url?.url || '');
-                    } else if (item.type === 'image_url' && !item.role) {
-                        generateType = 'first_frame';
-                        params.append('first_frame_url', item.image_url?.url || '');
-                    }
-                }
-            }
-            
-            if (referenceImageCount > 0) {
-                generateType = 'reference_image';
-                params.append('reference_image_count', referenceImageCount);
-            }
-            
-            params.append('generate_type', generateType);
-            
-            // 添加其他参数
-            if (task.resolution) params.append('resolution', task.resolution);
-            if (task.ratio) params.append('ratio', task.ratio);
-            if (task.duration) params.append('duration', task.duration);
-            if (task.seed !== undefined) params.append('seed', task.seed);
-            if (task.camera_fixed !== undefined) params.append('camera_fixed', task.camera_fixed);
-            if (task.watermark !== undefined) params.append('watermark', task.watermark);
-            if (task.generate_audio !== undefined) params.append('generate_audio', task.generate_audio);
-            if (task.return_last_frame !== undefined) params.append('return_last_frame', task.return_last_frame);
-            
-            // 跳转到视频生成页面
-            window.location.href = `/video-generate?${params.toString()}`;
-        }
+
+        ReactDOM.createRoot(document.getElementById('reactApp')).render(<App />);
     </script>
-    <script>
-        async function loadProjects() {
-            const select = document.getElementById('projectSelect');
-            if (!select) return;
-            try {
-                const resp = await fetch('/api/projects');
-                const data = await resp.json();
-                if (!data.success) throw new Error(data.error || '加载失败');
-                select.innerHTML = '';
-                data.projects.forEach(p => {
-                    const opt = document.createElement('option');
-                    opt.value = p.id;
-                    opt.textContent = p.name;
-                    if (String(p.id) === String(data.current_project_id)) {
-                        opt.selected = true;
-                    }
-                    select.appendChild(opt);
-                });
-            } catch (e) {
-                select.innerHTML = '<option>项目加载失败</option>';
-            }
-        }
-        async function switchProject(projectId) {
-            const resp = await fetch('/api/projects/switch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ project_id: projectId })
-            });
-            const data = await resp.json();
-            if (data.success) {
-                location.reload();
-            } else {
-                alert(data.error || '切换失败');
-            }
-        }
-        document.addEventListener('DOMContentLoaded', () => {
-            const select = document.getElementById('projectSelect');
-            if (select) {
-                select.addEventListener('change', () => switchProject(select.value));
-                loadProjects();
-            }
-        });
-    </script>
+    {% endraw %}
     <script src="/static/sidebar-nav.js"></script>
 </body>
 </html>

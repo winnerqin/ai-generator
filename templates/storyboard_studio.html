@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>分镜制作 - Ai创作工具</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+        body {
+            background: radial-gradient(circle at top, rgba(82,108,255,0.18), transparent 40%), #0b0f1a;
+            color: #e6ebff;
+            font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+        }
+        .main-content {
+            background: transparent;
+            padding: 0;
+        }
+        .studio-wrap {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 28px 24px 40px;
+        }
+        .studio-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+        .studio-title {
+            font-size: 1.6rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        .studio-subtitle {
+            color: #8d95b5;
+            font-size: 0.9rem;
+            margin-top: 6px;
+        }
+        .studio-badge {
+            background: rgba(86, 111, 255, 0.2);
+            border: 1px solid rgba(86, 111, 255, 0.4);
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            color: #b7c0ff;
+        }
+        .studio-grid {
+            display: grid;
+            grid-template-columns: 1.1fr 1.1fr 0.9fr;
+            gap: 18px;
+        }
+        .studio-card {
+            background: rgba(17, 24, 39, 0.8);
+            border: 1px solid rgba(93, 110, 170, 0.3);
+            border-radius: 18px;
+            padding: 18px;
+            box-shadow: 0 10px 30px rgba(5, 10, 25, 0.5);
+            backdrop-filter: blur(10px);
+        }
+        .card-title {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        .card-hint {
+            font-size: 0.85rem;
+            color: #9aa3c7;
+            margin-bottom: 12px;
+        }
+        textarea, input, select {
+            width: 100%;
+            border-radius: 12px;
+            border: 1px solid rgba(86, 111, 255, 0.25);
+            background: rgba(11, 15, 26, 0.8);
+            color: #e6ebff;
+            padding: 10px 12px;
+            font-size: 0.92rem;
+            outline: none;
+        }
+        textarea {
+            min-height: 220px;
+            resize: vertical;
+        }
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+        .btn {
+            padding: 9px 14px;
+            border-radius: 10px;
+            border: none;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #5871ff, #3b7bff);
+            color: #fff;
+        }
+        .btn-secondary {
+            background: rgba(86, 111, 255, 0.15);
+            color: #c8d2ff;
+            border: 1px solid rgba(86, 111, 255, 0.4);
+        }
+        .progress-text {
+            font-size: 0.85rem;
+            color: #8fd3ff;
+            margin-top: 8px;
+        }
+        .preview-list {
+            border: 1px dashed rgba(120, 132, 183, 0.4);
+            border-radius: 14px;
+            padding: 12px;
+            background: rgba(10, 14, 24, 0.6);
+            min-height: 200px;
+        }
+        .preview-item {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(120, 132, 183, 0.2);
+            font-size: 0.85rem;
+            color: #cbd4f5;
+        }
+        .preview-item:last-child {
+            border-bottom: none;
+        }
+        .image-grid {
+            display: grid;
+            gap: 12px;
+        }
+        .image-card {
+            background: rgba(12, 18, 32, 0.8);
+            border-radius: 12px;
+            border: 1px solid rgba(86, 111, 255, 0.2);
+            padding: 10px;
+        }
+        .image-card img {
+            width: 100%;
+            border-radius: 10px;
+            display: block;
+        }
+        .file-input {
+            border: 1px dashed rgba(86, 111, 255, 0.4);
+            padding: 10px;
+            border-radius: 12px;
+        }
+        @media (max-width: 1200px) {
+            .studio-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="reactApp"></div>
+    <nav class="sidebar-nav" id="sidebarNav">
+        <div class="sidebar-nav-header">
+            <div class="sidebar-nav-title">Ai创作工具</div>
+            <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收缩/展开">
+                <span id="toggleIcon">‹</span>
+            </button>
+        </div>
+        <div class="sidebar-nav-menu">
+            <a href="/" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎨</span>
+                <span class="sidebar-nav-text">单图生成</span>
+            </a>
+            <a href="/batch" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📦</span>
+                <span class="sidebar-nav-text">批量生成</span>
+            </a>
+            <a href="/records" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📊</span>
+                <span class="sidebar-nav-text">生图任务</span>
+            </a>
+            <a href="/video-generate" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎬</span>
+                <span class="sidebar-nav-text">视频生成</span>
+            </a>
+            <a href="/video-tasks" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📹</span>
+                <span class="sidebar-nav-text">视频任务</span>
+            </a>
+            <a href="/script-generate" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📜</span>
+                <span class="sidebar-nav-text">剧本生成</span>
+            </a>
+            <a href="/storyboard" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎬</span>
+                <span class="sidebar-nav-text">分镜生成</span>
+            </a>
+            <a href="/storyboard-studio" class="sidebar-nav-item active">
+                <span class="sidebar-nav-icon">🧩</span>
+                <span class="sidebar-nav-text">分镜制作</span>
+            </a>
+            <a href="/content-management" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📚</span>
+                <span class="sidebar-nav-text">内容管理</span>
+            </a>
+            {% if user.username == 'system_admin' %}
+            <div class="sidebar-nav-divider"></div>
+            <a href="/admin" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🛠️</span>
+                <span class="sidebar-nav-text">系统管理</span>
+            </a>
+            <a href="/stats" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📈</span>
+                <span class="sidebar-nav-text">系统统计</span>
+            </a>
+            {% endif %}
+        </div>
+        <div class="sidebar-nav-user">
+            <div class="sidebar-nav-user-info">
+                <div class="sidebar-nav-user-avatar">👤</div>
+                <div class="sidebar-nav-user-name">{{ user.username }}</div>
+            </div>
+            <div style="margin-top: 8px;">
+                <label style="font-size: 0.85em; color: #cbd4f5;">当前项目</label>
+                <select id="projectSelect" style="width: 100%; padding: 6px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.2); color: #e6ebff;">
+                    <option>加载中...</option>
+                </select>
+            </div>
+            <a href="/logout" class="sidebar-nav-logout">登出</a>
+        </div>
+    </nav>
+
+    <div class="main-content">
+        <div class="studio-wrap">
+            <div class="studio-header">
+                <div>
+                    <div class="studio-title">分镜制作 Studio</div>
+                    <div class="studio-subtitle">参考 OIIOii.ai / topnow.ai 的高级感布局与动线</div>
+                </div>
+                <div class="studio-badge">React · 独立页面</div>
+            </div>
+
+            <div id="storyboardStudioRoot">
+                <div class="studio-card">
+                    <div class="card-title">正在加载分镜制作组件…</div>
+                    <div class="card-hint">如长时间空白，请检查网络或刷新页面。</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script>
+        if (!window.React || !window.ReactDOM) {
+            const root = document.getElementById('storyboardStudioRoot');
+            if (root) {
+                root.innerHTML = '<div class="studio-card"><div class="card-title">React 资源加载失败</div><div class="card-hint">请确认可访问 unpkg.com 或联系管理员。</div></div>';
+            }
+        }
+    </script>
+    {% raw %}
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        function StoryboardStudio() {
+            const [scriptText, setScriptText] = useState('');
+            const [prompt, setPrompt] = useState('基于剧本文本生成分镜，输出清晰分镜列表，包含场景、人物动作、镜头、时长建议。');
+            const [storyboardText, setStoryboardText] = useState('');
+            const [storyboardJson, setStoryboardJson] = useState(null);
+            const [progressText, setProgressText] = useState('');
+            const [images, setImages] = useState([]);
+            const [taskId, setTaskId] = useState(null);
+            const [title, setTitle] = useState('');
+            const [seriesList, setSeriesList] = useState([]);
+            const [versionList, setVersionList] = useState([]);
+            const [currentRecordId, setCurrentRecordId] = useState(null);
+            const [currentSeriesId, setCurrentSeriesId] = useState(null);
+            const [currentVersion, setCurrentVersion] = useState(null);
+            const [materialType, setMaterialType] = useState('scene');
+            const [materials, setMaterials] = useState([]);
+            const [uploading, setUploading] = useState(false);
+
+            const previewItems = useMemo(() => {
+                if (!storyboardJson || !Array.isArray(storyboardJson.episodes)) return [];
+                return storyboardJson.episodes.flatMap(ep => {
+                    const scenes = Array.isArray(ep.scenes) ? ep.scenes : [];
+                    return scenes.map(scene => ({
+                        key: `${ep.index}-${scene.scene_index}`,
+                        text: `第${ep.index || ''}集 场${scene.scene_index || ''}｜${scene.location_time || ''}｜${scene.shot || ''}｜${scene.duration_seconds || ''}秒`
+                    }));
+                });
+            }, [storyboardJson]);
+
+            useEffect(() => {
+                const savedTask = localStorage.getItem('storyboard_studio_task');
+                if (savedTask) {
+                    pollTask(savedTask);
+                }
+                loadSeries();
+                loadMaterials('scene');
+            }, []);
+
+            const handleFileImport = async (file) => {
+                if (!file) return;
+                const text = await file.text();
+                setScriptText(text);
+            };
+
+            const generateStoryboard = async () => {
+                if (!scriptText.trim()) {
+                    alert('请先导入或粘贴剧本文本');
+                    return;
+                }
+                setProgressText('生成中 0%');
+                const resp = await fetch('/api/storyboard-generate-async', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ script: scriptText, prompt })
+                });
+                const data = await resp.json();
+                if (!data.success) {
+                    setProgressText('');
+                    alert(data.error || '生成失败');
+                    return;
+                }
+                setTaskId(data.task_id);
+                localStorage.setItem('storyboard_studio_task', data.task_id);
+                pollTask(data.task_id);
+            };
+
+            const pollTask = async (id) => {
+                const resp = await fetch(`/api/tasks/${id}`);
+                const data = await resp.json();
+                if (!data.success || !data.task) {
+                    setProgressText('');
+                    return;
+                }
+                const task = data.task;
+                setProgressText(`生成中 ${task.progress || 0}%`);
+                if (task.status === 'completed') {
+                    setProgressText('完成');
+                    const result = task.result || {};
+                    if (result.storyboard_json) {
+                        setStoryboardJson(result.storyboard_json);
+                        setStoryboardText(JSON.stringify(result.storyboard_json, null, 2));
+                    } else {
+                        setStoryboardJson(null);
+                        setStoryboardText(result.storyboard_text || '');
+                    }
+                    return;
+                }
+                if (task.status === 'failed') {
+                    setProgressText('失败');
+                    if (task.error) alert(task.error);
+                    return;
+                }
+                setTimeout(() => pollTask(id), 2000);
+            };
+
+            const generateImages = async () => {
+                let jsonData = null;
+                try {
+                    jsonData = JSON.parse(storyboardText || '{}');
+                } catch (e) {
+                    jsonData = storyboardJson;
+                }
+                if (!jsonData || !jsonData.episodes) {
+                    alert('请先生成分镜 JSON');
+                    return;
+                }
+                const resp = await fetch('/api/storyboard-sample-images', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ storyboard: jsonData, max_images: 6 })
+                });
+                const data = await resp.json();
+                if (!data.success) {
+                    alert(data.error || '生成示例图失败');
+                    return;
+                }
+                setImages(data.images || []);
+            };
+
+            const saveStoryboard = async (createVersion = false) => {
+                const payload = {
+                    id: currentRecordId,
+                    series_id: currentSeriesId,
+                    create_version: createVersion,
+                    title: title,
+                    script_text: scriptText,
+                    prompt,
+                    storyboard_text: storyboardText,
+                    storyboard_json: storyboardJson || {}
+                };
+                const resp = await fetch('/api/storyboard-saves', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await resp.json();
+                if (!data.success) {
+                    alert(data.error || '保存失败');
+                    return;
+                }
+                await loadSeries();
+                if (createVersion && currentSeriesId) {
+                    await loadVersions(currentSeriesId);
+                }
+                setCurrentRecordId(data.id);
+            };
+
+            const loadSeries = async () => {
+                const resp = await fetch('/api/storyboard-series');
+                const data = await resp.json();
+                if (data.success) {
+                    setSeriesList(data.records || []);
+                }
+            };
+
+            const loadVersions = async (seriesId) => {
+                const resp = await fetch(`/api/storyboard-series/${seriesId}/versions`);
+                const data = await resp.json();
+                if (data.success) {
+                    setVersionList(data.records || []);
+                }
+            };
+
+            const loadVersion = async (recordId) => {
+                const resp = await fetch(`/api/storyboard-saves/${recordId}`);
+                const data = await resp.json();
+                if (!data.success) {
+                    alert(data.error || '加载失败');
+                    return;
+                }
+                const record = data.record || {};
+                setCurrentRecordId(record.id);
+                setCurrentSeriesId(record.series_id);
+                setCurrentVersion(record.version);
+                setTitle(record.title || '');
+                setScriptText(record.script_text || '');
+                setPrompt(record.prompt || '');
+                if (record.storyboard_json && Object.keys(record.storyboard_json).length > 0) {
+                    setStoryboardJson(record.storyboard_json);
+                    setStoryboardText(JSON.stringify(record.storyboard_json, null, 2));
+                } else {
+                    setStoryboardJson(null);
+                    setStoryboardText(record.storyboard_text || '');
+                }
+                if (record.series_id) {
+                    loadVersions(record.series_id);
+                }
+            };
+
+            const handleDrop = async (e) => {
+                e.preventDefault();
+                const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
+                if (files.length === 0) return;
+                await uploadMaterials(files);
+            };
+
+            const uploadMaterials = async (files) => {
+                setUploading(true);
+                const formData = new FormData();
+                files.forEach(file => formData.append('file', file));
+                formData.append('category', materialType);
+                const resp = await fetch('/api/upload-sample-image', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await resp.json();
+                setUploading(false);
+                if (!data.success) {
+                    alert(data.error || '上传失败');
+                    return;
+                }
+                await loadMaterials(materialType);
+            };
+
+            const loadMaterials = async (type) => {
+                const resp = await fetch(`/api/content-library?type=${type}`);
+                const data = await resp.json();
+                if (data.success) {
+                    setMaterials(data.assets || []);
+                }
+            };
+
+            return (
+                <div className="studio-grid">
+                    <div className="studio-card">
+                        <div className="card-title">导入剧本</div>
+                        <div className="card-hint">支持粘贴文本或上传 txt 文件</div>
+                        <textarea
+                            value={scriptText}
+                            onChange={(e) => setScriptText(e.target.value)}
+                            placeholder="粘贴或导入剧本文本..."
+                        />
+                        <div className="btn-row">
+                            <label className="btn btn-secondary file-input">
+                                上传TXT
+                                <input
+                                    type="file"
+                                    accept=".txt"
+                                    style={{ display: 'none' }}
+                                    onChange={(e) => handleFileImport(e.target.files[0])}
+                                />
+                            </label>
+                            <button className="btn btn-secondary" onClick={() => setScriptText('')}>清空</button>
+                        </div>
+                        <div className="card-title" style={{ marginTop: 18 }}>分镜提示词</div>
+                        <textarea
+                            value={prompt}
+                            onChange={(e) => setPrompt(e.target.value)}
+                            placeholder="编辑分镜生成提示词..."
+                            style={{ minHeight: '140px' }}
+                        />
+                        <div className="btn-row">
+                            <button className="btn btn-primary" onClick={generateStoryboard}>生成分镜</button>
+                            <span className="progress-text">{progressText}</span>
+                        </div>
+                    </div>
+
+                    <div className="studio-card">
+                        <div className="card-title">分镜文本</div>
+                        <div className="card-hint">支持 JSON 或文本格式输出</div>
+                        <textarea
+                            value={storyboardText}
+                            onChange={(e) => setStoryboardText(e.target.value)}
+                            placeholder="分镜生成结果..."
+                        />
+                        <div className="card-title" style={{ marginTop: 16 }}>保存与版本</div>
+                        <input
+                            value={title}
+                            onChange={(e) => setTitle(e.target.value)}
+                            placeholder="保存标题（可选）"
+                        />
+                        <div className="btn-row">
+                            <button className="btn btn-primary" onClick={() => saveStoryboard(false)}>保存</button>
+                            <button className="btn btn-secondary" onClick={() => saveStoryboard(true)} disabled={!currentSeriesId}>保存新版本</button>
+                        </div>
+                        <div className="card-title" style={{ marginTop: 16 }}>结构预览</div>
+                        <div className="preview-list">
+                            {previewItems.length === 0 && <div className="card-hint">暂无结构化分镜</div>}
+                            {previewItems.map(item => (
+                                <div className="preview-item" key={item.key}>{item.text}</div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="studio-card">
+                        <div className="card-title">分镜示例图</div>
+                        <div className="card-hint">基于分镜 JSON 生成示例图片</div>
+                        <div className="btn-row">
+                            <button className="btn btn-primary" onClick={generateImages}>生成示例图</button>
+                        </div>
+                        <div className="image-grid" style={{ marginTop: 12 }}>
+                            {images.length === 0 && <div className="card-hint">暂无示例图</div>}
+                            {images.map((img, idx) => (
+                                <div className="image-card" key={`${img.url}-${idx}`}>
+                                    <div className="card-hint">第{img.episode_index || ''}集-场{img.scene_index || ''}</div>
+                                    <img src={img.url} alt="storyboard sample" />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="studio-grid" style={{ marginTop: '18px' }}>
+                    <div className="studio-card">
+                        <div className="card-title">保存列表</div>
+                        <div className="card-hint">系列列表，点击查看/切换版本</div>
+                        <div className="preview-list">
+                            {seriesList.length === 0 && <div className="card-hint">暂无保存记录</div>}
+                            {seriesList.map(item => (
+                                <div className="preview-item" key={item.series_id}>
+                                    <div>{item.title || '未命名'} · v{item.version || 1}</div>
+                                    <div className="card-hint">版本数：{item.version_count || 1}</div>
+                                    <div className="btn-row">
+                                        <button className="btn btn-secondary" onClick={() => {
+                                            setCurrentSeriesId(item.series_id);
+                                            loadVersions(item.series_id);
+                                            loadVersion(item.id);
+                                        }}>查看</button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="studio-card">
+                        <div className="card-title">版本管理</div>
+                        <div className="card-hint">当前系列：{currentSeriesId || '-'}</div>
+                        <div className="preview-list">
+                            {versionList.length === 0 && <div className="card-hint">暂无版本</div>}
+                            {versionList.map(v => (
+                                <div className="preview-item" key={v.id}>
+                                    <div>v{v.version} · {v.title || '未命名'}</div>
+                                    <div className="card-hint">{v.updated_at || v.created_at || ''}</div>
+                                    <div className="btn-row">
+                                        <button className="btn btn-secondary" onClick={() => loadVersion(v.id)}>加载此版本</button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="studio-card">
+                        <div className="card-title">素材上传</div>
+                        <div className="card-hint">拖拽导入或点击上传（存入素材库）</div>
+                        <select value={materialType} onChange={(e) => {
+                            setMaterialType(e.target.value);
+                            loadMaterials(e.target.value);
+                        }}>
+                            <option value="scene">场景素材</option>
+                            <option value="person">人物素材</option>
+                        </select>
+                        <div
+                            className="preview-list"
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={handleDrop}
+                            style={{ marginTop: '10px', textAlign: 'center' }}
+                        >
+                            {uploading ? '上传中...' : '拖拽图片到此处'}
+                            <div className="btn-row" style={{ justifyContent: 'center', marginTop: '10px' }}>
+                                <label className="btn btn-secondary file-input">
+                                    选择图片
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        multiple
+                                        style={{ display: 'none' }}
+                                        onChange={(e) => uploadMaterials(Array.from(e.target.files || []))}
+                                    />
+                                </label>
+                            </div>
+                        </div>
+                        <div className="image-grid" style={{ marginTop: '12px' }}>
+                            {materials.length === 0 && <div className="card-hint">暂无素材</div>}
+                            {materials.map((m, idx) => (
+                                <div className="image-card" key={`${m.url || m.id}-${idx}`}>
+                                    <img src={m.url} alt={m.filename || 'asset'} />
+                                    <div className="card-hint">{m.filename || ''}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('storyboardStudioRoot')).render(<StoryboardStudio />);
+    </script>
+    {% endraw %}
+    <script>
+        async function loadProjects() {
+            const select = document.getElementById('projectSelect');
+            if (!select) return;
+            try {
+                const resp = await fetch('/api/projects');
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || '加载失败');
+                select.innerHTML = '';
+                data.projects.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.id;
+                    opt.textContent = p.name;
+                    if (String(p.id) === String(data.current_project_id)) {
+                        opt.selected = true;
+                    }
+                    select.appendChild(opt);
+                });
+            } catch (e) {
+                select.innerHTML = '<option>项目加载失败</option>';
+            }
+        }
+
+        async function switchProject(projectId) {
+            const resp = await fetch('/api/projects/switch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project_id: projectId })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                location.reload();
+            } else {
+                alert(data.error || '切换失败');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const select = document.getElementById('projectSelect');
+            if (select) {
+                select.addEventListener('change', () => switchProject(select.value));
+                loadProjects();
+            }
+        });
+    </script>
+    <script src="/static/react-app.js"></script>
+    <script src="/static/sidebar-nav.js"></script>
+</body>
+</html>

@@ -15,6 +15,7 @@ from werkzeug.utils import secure_filename
 from openai import OpenAI
 import database
 import time
+import urllib.request
 
 def convert_to_dict(obj):
     """将响应对象转换为字典"""
@@ -722,6 +723,753 @@ def api_stats():
     except Exception as e:
         print(f"获取统计数据失败: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _extract_json_block(text):
+    if not text:
+        return None
+    text = text.strip()
+    if text.startswith('{') and text.endswith('}'):
+        return text
+    start = text.find('{')
+    end = text.rfind('}')
+    if start >= 0 and end > start:
+        return text[start:end + 1]
+    return None
+
+
+def _format_script_output(episodes):
+    script_text_lines = []
+    md_lines = []
+    for ep in episodes:
+        idx = ep.get('index', '')
+        title = ep.get('title', '')
+        duration = ep.get('duration_seconds', '')
+        script_body = ep.get('script', '')
+        header = f"第{idx}集 {title}（{duration}秒）"
+        script_text_lines.append(header)
+        script_text_lines.append(script_body)
+        script_text_lines.append('')
+        md_lines.append(f"## {header}")
+        md_lines.append(script_body)
+        md_lines.append('')
+    return {
+        'episodes': episodes,
+        'script_text': "\n".join(script_text_lines).strip(),
+        'script_markdown': "\n".join(md_lines).strip()
+    }
+
+
+def _summarize_episode(text, limit=80):
+    if not text:
+        return ''
+    summary = ' '.join(text.strip().split())
+    if len(summary) > limit:
+        return summary[:limit] + '...'
+    return summary
+
+
+def _upload_episode_text(text, user_id, project_id, script_id, episode_index):
+    if text is None:
+        text = ''
+    os.makedirs('uploads', exist_ok=True)
+    filename = f"script_{user_id}_{project_id or 'default'}_{script_id}_ep{episode_index}_{int(time.time())}.txt"
+    temp_path = os.path.join('uploads', filename)
+    with open(temp_path, 'w', encoding='utf-8') as f:
+        f.write(text)
+    url = upload_to_aliyun_oss(temp_path, user_id=user_id, project_id=project_id)
+    try:
+        os.remove(temp_path)
+    except Exception:
+        pass
+    return url
+
+
+def _persist_script_result(user_id, project_id, text, prompt, min_seconds, max_seconds, result, base_script_id=None):
+    title = f"剧本 {datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    script_text = result.get('script_text') or ''
+    episodes_payload = result.get('episodes') or []
+    if base_script_id:
+        existing = database.get_script_record(user_id, project_id, base_script_id)
+        if existing:
+            merged_text = (existing.get('script_text') or '').strip()
+            if merged_text and script_text:
+                merged_text = f"{merged_text}\n\n{script_text}"
+            else:
+                merged_text = merged_text or script_text
+            existing_episodes = []
+            if existing.get('episodes_json'):
+                try:
+                    existing_episodes = json.loads(existing['episodes_json'])
+                except Exception:
+                    existing_episodes = []
+            combined_episodes = existing_episodes + episodes_payload
+            script_id = database.save_script_record(
+                user_id,
+                project_id,
+                existing.get('title') or title,
+                existing.get('novel_text') or text,
+                existing.get('prompt') or prompt,
+                existing.get('min_seconds') or min_seconds,
+                existing.get('max_seconds') or max_seconds,
+                merged_text,
+                combined_episodes,
+                record_id=base_script_id
+            )
+        else:
+            script_id = base_script_id
+    else:
+        script_id = database.save_script_record(
+            user_id,
+            project_id,
+            title,
+            text,
+            prompt,
+            min_seconds,
+            max_seconds,
+            script_text,
+            episodes_payload
+        )
+    episodes = result.get('episodes') or []
+    episode_rows = []
+    offset = 0
+    if base_script_id:
+        offset = database.get_max_script_episode_index(script_id, user_id, project_id)
+    for i, ep in enumerate(episodes, start=1):
+        ep_index = ep.get('index') or ep.get('episode_index')
+        if isinstance(ep_index, str) and ep_index.isdigit():
+            ep_index = int(ep_index)
+        if not isinstance(ep_index, int) or ep_index <= 0:
+            ep_index = offset + i
+        script_body = ep.get('script') or ''
+        url = _upload_episode_text(script_body, user_id, project_id, script_id, ep_index)
+        if not url:
+            raise RuntimeError('OSS 上传失败，请检查配置')
+        episode_rows.append({
+            'episode_index': ep_index,
+            'title': ep.get('title') or '',
+            'duration_seconds': ep.get('duration_seconds') or '',
+            'summary': _summarize_episode(script_body),
+            'content_url': url
+        })
+    if episode_rows:
+        database.save_script_episodes(script_id, user_id, project_id, episode_rows)
+    return script_id
+
+
+def _fetch_text_from_url(url):
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = resp.read()
+        return data.decode('utf-8', errors='ignore')
+    except Exception:
+        return None
+
+
+def _generate_script_content(text, prompt, min_seconds, max_seconds):
+    api_key = os.environ.get('QWEN_API_KEY')
+    base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
+    if not api_key:
+        raise RuntimeError('QWEN_API_KEY 未配置')
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    system_prompt = "你是一位短剧编剧，擅长将小说改写为适合短剧拍摄的剧本。"
+    user_prompt = f"""请将以下小说文本改写为适配短剧拍摄的剧本，节奏紧凑，情节清晰。
+请按集拆分，每集时长在 {min_seconds}-{max_seconds} 秒之间。
+如果有需要，请合理续写或压缩剧情以符合时长要求。
+额外提示词（可为空）：{prompt}
+
+请严格返回JSON，不要包含markdown代码块：
+{{
+  "episodes": [
+    {{
+      "index": 1,
+      "title": "本集标题",
+      "duration_seconds": 120,
+      "script": "本集剧本文本"
+    }}
+  ]
+}}
+
+小说文本：
+{text}
+"""
+    response = client.chat.completions.create(
+        model=os.environ.get('SCRIPT_GENERATE_MODEL', 'qwen3.5-plus'),
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=0.7,
+        top_p=0.9
+    )
+    content = ''
+    if response.choices and len(response.choices) > 0:
+        content = response.choices[0].message.content.strip()
+    json_text = _extract_json_block(content) or ''
+    try:
+        parsed = json.loads(json_text)
+        episodes = parsed.get('episodes', []) if isinstance(parsed, dict) else []
+    except Exception as exc:
+        raise RuntimeError('模型返回解析失败') from exc
+    return _format_script_output(episodes)
+
+
+def _generate_storyboard_content(script, prompt):
+    api_key = os.environ.get('QWEN_API_KEY')
+    base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
+    if not api_key:
+        raise RuntimeError('QWEN_API_KEY 未配置')
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    system_prompt = "你是一位资深分镜师，擅长将剧本文本拆解为清晰的镜头列表。"
+    user_prompt = f"""请根据以下剧本文本生成分镜，按“每集/每场”拆分，输出为JSON（不要包含markdown代码块）：
+{{
+  "episodes": [
+    {{
+      "index": 1,
+      "title": "本集标题",
+      "scenes": [
+        {{
+          "scene_index": 1,
+          "location_time": "场景/时间",
+          "summary": "人物动作与对白摘要",
+          "shot": "镜头类型与运镜",
+          "duration_seconds": 6
+        }}
+      ]
+    }}
+  ]
+}}
+
+额外提示词（可为空）：{prompt}
+
+剧本文本：
+{script}
+"""
+    response = client.chat.completions.create(
+        model=os.environ.get('STORYBOARD_GENERATE_MODEL', 'qwen3.5-plus'),
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=0.7,
+        top_p=0.9
+    )
+    content = ''
+    if response.choices and len(response.choices) > 0:
+        content = response.choices[0].message.content.strip()
+    json_text = _extract_json_block(content) or ''
+    try:
+        parsed = json.loads(json_text)
+        return {'storyboard_json': parsed, 'storyboard_text': json_text}
+    except Exception:
+        return {'storyboard_json': None, 'storyboard_text': content}
+
+
+@app.route('/api/script-generate', methods=['POST'])
+@login_required
+def api_script_generate():
+    """根据小说文本生成短剧剧本并按集拆分"""
+    try:
+        user_id = session.get('user_id')
+        project_id = get_current_project_id()
+        data = request.get_json() or {}
+        base_script_id = data.get('script_id')
+        text = (data.get('text') or '').strip()
+        prompt = (data.get('prompt') or '').strip()
+        min_seconds = int(data.get('min_seconds') or 90)
+        max_seconds = int(data.get('max_seconds') or 150)
+        
+        log_request('POST', '/api/script-generate', user_id, f'文本长度: {len(text)}')
+        
+        if not text:
+            return jsonify({'success': False, 'error': '请输入小说文本'}), 400
+        if min_seconds < 60 or max_seconds < min_seconds:
+            return jsonify({'success': False, 'error': '分集时长设置不合法'}), 400
+        
+        result = _generate_script_content(text, prompt, min_seconds, max_seconds)
+        script_id = _persist_script_result(
+            user_id,
+            project_id,
+            text,
+            prompt,
+            min_seconds,
+            max_seconds,
+            result,
+            base_script_id=base_script_id
+        )
+        episodes = database.list_script_episodes(script_id, user_id, project_id)
+        return jsonify({'success': True, **result, 'script_id': script_id, 'episode_records': episodes})
+    except Exception as e:
+        user_id = session.get('user_id')
+        log_operation('剧本生成失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/storyboard-generate', methods=['POST'])
+@login_required
+def api_storyboard_generate():
+    """根据剧本文本生成分镜"""
+    try:
+        user_id = session.get('user_id')
+        data = request.get_json() or {}
+        script = (data.get('script') or '').strip()
+        prompt = (data.get('prompt') or '').strip()
+        
+        log_request('POST', '/api/storyboard-generate', user_id, f'剧本长度: {len(script)}')
+        
+        if not script:
+            return jsonify({'success': False, 'error': '请输入剧本文本'}), 400
+        
+        result = _generate_storyboard_content(script, prompt)
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        user_id = session.get('user_id')
+        log_operation('分镜生成失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _run_script_task(task_id, payload):
+    try:
+        user_id = payload.get('user_id')
+        project_id = payload.get('project_id')
+        base_script_id = payload.get('script_id')
+        database.update_generation_task(task_id, progress=10)
+        result = _generate_script_content(
+            payload.get('text', ''),
+            payload.get('prompt', ''),
+            payload.get('min_seconds', 90),
+            payload.get('max_seconds', 150)
+        )
+        database.update_generation_task(task_id, progress=90)
+        script_id = _persist_script_result(
+            user_id,
+            project_id,
+            payload.get('text', ''),
+            payload.get('prompt', ''),
+            payload.get('min_seconds', 90),
+            payload.get('max_seconds', 150),
+            result,
+            base_script_id=base_script_id
+        )
+        database.update_generation_task(
+            task_id,
+            status='completed',
+            progress=100,
+            result={**result, 'script_id': script_id}
+        )
+    except Exception as e:
+        database.update_generation_task(task_id, status='failed', progress=100, error=str(e))
+
+
+def _run_storyboard_task(task_id, payload):
+    try:
+        database.update_generation_task(task_id, progress=10)
+        result = _generate_storyboard_content(
+            payload.get('script', ''),
+            payload.get('prompt', '')
+        )
+        database.update_generation_task(task_id, progress=90)
+        database.update_generation_task(task_id, status='completed', progress=100, result=result)
+    except Exception as e:
+        database.update_generation_task(task_id, status='failed', progress=100, error=str(e))
+
+
+@app.route('/api/script-generate-async', methods=['POST'])
+@login_required
+def api_script_generate_async():
+    """异步生成剧本（支持进度与恢复）"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    data = request.get_json() or {}
+    text = (data.get('text') or '').strip()
+    prompt = (data.get('prompt') or '').strip()
+    min_seconds = int(data.get('min_seconds') or 90)
+    max_seconds = int(data.get('max_seconds') or 150)
+    if not text:
+        return jsonify({'success': False, 'error': '请输入小说文本'}), 400
+    if min_seconds < 60 or max_seconds < min_seconds:
+        return jsonify({'success': False, 'error': '分集时长设置不合法'}), 400
+    base_script_id = data.get('script_id')
+    payload = {
+        'user_id': user_id,
+        'project_id': project_id,
+        'text': text,
+        'prompt': prompt,
+        'min_seconds': min_seconds,
+        'max_seconds': max_seconds,
+        'script_id': base_script_id
+    }
+    task_id = database.create_generation_task(user_id, project_id, 'script', payload)
+    thread = threading.Thread(target=_run_script_task, args=(task_id, payload))
+    thread.daemon = True
+    thread.start()
+    return jsonify({'success': True, 'task_id': task_id})
+
+
+@app.route('/api/storyboard-generate-async', methods=['POST'])
+@login_required
+def api_storyboard_generate_async():
+    """异步生成分镜（支持进度与恢复）"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    data = request.get_json() or {}
+    script = (data.get('script') or '').strip()
+    prompt = (data.get('prompt') or '').strip()
+    if not script:
+        return jsonify({'success': False, 'error': '请输入剧本文本'}), 400
+    payload = {
+        'script': script,
+        'prompt': prompt
+    }
+    task_id = database.create_generation_task(user_id, project_id, 'storyboard', payload)
+    thread = threading.Thread(target=_run_storyboard_task, args=(task_id, payload))
+    thread.daemon = True
+    thread.start()
+    return jsonify({'success': True, 'task_id': task_id})
+
+
+@app.route('/api/tasks/<int:task_id>')
+@login_required
+def api_get_task(task_id):
+    """获取生成任务状态"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    task = database.get_generation_task(user_id, project_id, task_id)
+    if not task:
+        return jsonify({'success': False, 'error': '任务不存在'}), 404
+    result = None
+    payload = None
+    if task.get('result_json'):
+        try:
+            result = json.loads(task['result_json'])
+        except Exception:
+            result = None
+    if task.get('payload_json'):
+        try:
+            payload = json.loads(task['payload_json'])
+        except Exception:
+            payload = None
+    return jsonify({
+        'success': True,
+        'task': {
+            'id': task['id'],
+            'task_type': task['task_type'],
+            'status': task['status'],
+            'progress': task.get('progress', 0),
+            'result': result,
+            'payload': payload,
+            'error': task.get('error')
+        }
+    })
+
+
+@app.route('/api/script-saves', methods=['GET', 'POST'])
+@login_required
+def api_script_saves():
+    """剧本保存与列表"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    if request.method == 'GET':
+        records = database.list_script_records(user_id, project_id)
+        return jsonify({'success': True, 'records': records})
+    data = request.get_json() or {}
+    title = (data.get('title') or '').strip()
+    if not title:
+        title = f"剧本 {datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    record_id = data.get('id')
+    novel_text = data.get('novel_text') or ''
+    prompt = data.get('prompt') or ''
+    min_seconds = data.get('min_seconds')
+    max_seconds = data.get('max_seconds')
+    script_text = data.get('script_text') or ''
+    episodes = data.get('episodes') or []
+    record_id = database.save_script_record(
+        user_id,
+        project_id,
+        title,
+        novel_text,
+        prompt,
+        min_seconds,
+        max_seconds,
+        script_text,
+        episodes,
+        record_id=record_id
+    )
+    return jsonify({'success': True, 'id': record_id})
+
+
+@app.route('/api/script-saves/<int:record_id>')
+@login_required
+def api_script_save_detail(record_id):
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    record = database.get_script_record(user_id, project_id, record_id)
+    if not record:
+        return jsonify({'success': False, 'error': '记录不存在'}), 404
+    episodes = []
+    if record.get('episodes_json'):
+        try:
+            episodes = json.loads(record['episodes_json'])
+        except Exception:
+            episodes = []
+    record['episodes'] = episodes
+    return jsonify({'success': True, 'record': record})
+
+
+@app.route('/api/script-episodes', methods=['GET'])
+@login_required
+def api_script_episodes():
+    """获取剧本分集表格数据"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    script_id = request.args.get('script_id')
+    if not script_id:
+        episodes = database.list_all_script_episodes(user_id, project_id)
+        return jsonify({'success': True, 'episodes': episodes})
+    try:
+        script_id = int(script_id)
+    except ValueError:
+        return jsonify({'success': False, 'error': 'script_id 非法'}), 400
+    episodes = database.list_script_episodes(script_id, user_id, project_id)
+    return jsonify({'success': True, 'episodes': episodes})
+
+
+@app.route('/api/script-episodes/<int:episode_id>', methods=['POST'])
+@login_required
+def api_update_script_episode(episode_id):
+    """更新单集内容并同步到 OSS"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    data = request.get_json() or {}
+    content = data.get('content')
+    script_id = data.get('script_id')
+    episode_index = data.get('episode_index') or ''
+    if content is None:
+        return jsonify({'success': False, 'error': '缺少内容'}), 400
+    if not script_id:
+        return jsonify({'success': False, 'error': '缺少 script_id'}), 400
+    try:
+        script_id = int(script_id)
+    except ValueError:
+        return jsonify({'success': False, 'error': 'script_id 非法'}), 400
+    url = _upload_episode_text(content, user_id, project_id, script_id, episode_index)
+    if not url:
+        return jsonify({'success': False, 'error': 'OSS 上传失败'}), 500
+    summary = _summarize_episode(content)
+    database.update_script_episode(episode_id, user_id, content_url=url, summary=summary)
+    return jsonify({'success': True, 'content_url': url, 'summary': summary})
+
+
+@app.route('/api/script-episodes/<int:episode_id>/content', methods=['GET'])
+@login_required
+def api_get_script_episode_content(episode_id):
+    """读取单集内容（从 OSS 取回）"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    ep = database.get_script_episode(episode_id, user_id, project_id)
+    if not ep:
+        return jsonify({'success': False, 'error': '记录不存在'}), 404
+    content_url = ep.get('content_url')
+    if not content_url:
+        return jsonify({'success': False, 'error': '内容地址为空'}), 404
+    content = _fetch_text_from_url(content_url)
+    if content is None:
+        return jsonify({'success': False, 'error': '内容读取失败'}), 500
+    return Response(content, mimetype='text/plain; charset=utf-8')
+
+
+@app.route('/api/script-episodes/<int:episode_id>', methods=['DELETE'])
+@login_required
+def api_delete_script_episode(episode_id):
+    """删除单集记录"""
+    user_id = session.get('user_id')
+    database.delete_script_episode(episode_id, user_id)
+    return jsonify({'success': True})
+
+
+@app.route('/api/storyboard-saves', methods=['GET', 'POST'])
+@login_required
+def api_storyboard_saves():
+    """分镜保存与列表"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    if request.method == 'GET':
+        records = database.list_storyboard_records(user_id, project_id)
+        return jsonify({'success': True, 'records': records})
+    data = request.get_json() or {}
+    title = (data.get('title') or '').strip()
+    if not title:
+        title = f"分镜 {datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    record_id = data.get('id')
+    series_id = data.get('series_id')
+    create_version = bool(data.get('create_version'))
+    script_text = data.get('script_text') or ''
+    prompt = data.get('prompt') or ''
+    storyboard_json = data.get('storyboard_json') or {}
+    storyboard_text = data.get('storyboard_text') or ''
+    if create_version and not series_id and record_id:
+        existing = database.get_storyboard_record(user_id, project_id, record_id)
+        if existing:
+            series_id = existing.get('series_id')
+            if not title:
+                title = existing.get('title') or title
+    record_id = database.save_storyboard_record(
+        user_id,
+        project_id,
+        title,
+        script_text,
+        prompt,
+        storyboard_json,
+        storyboard_text,
+        record_id=record_id,
+        series_id=series_id,
+        create_version=create_version
+    )
+    return jsonify({'success': True, 'id': record_id})
+
+
+@app.route('/api/storyboard-saves/<int:record_id>')
+@login_required
+def api_storyboard_save_detail(record_id):
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    record = database.get_storyboard_record(user_id, project_id, record_id)
+    if not record:
+        return jsonify({'success': False, 'error': '记录不存在'}), 404
+    storyboard_json = {}
+    if record.get('storyboard_json'):
+        try:
+            storyboard_json = json.loads(record['storyboard_json'])
+        except Exception:
+            storyboard_json = {}
+    record['storyboard_json'] = storyboard_json
+    return jsonify({'success': True, 'record': record})
+
+
+@app.route('/api/storyboard-series', methods=['GET'])
+@login_required
+def api_storyboard_series():
+    """分镜系列列表（最新版本）"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    records = database.list_storyboard_series(user_id, project_id)
+    return jsonify({'success': True, 'records': records})
+
+
+@app.route('/api/storyboard-series/<int:series_id>/versions', methods=['GET'])
+@login_required
+def api_storyboard_versions(series_id):
+    """分镜系列版本列表"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    records = database.list_storyboard_versions(user_id, project_id, series_id)
+    return jsonify({'success': True, 'records': records})
+
+
+@app.route('/api/storyboard-sample-images', methods=['POST'])
+@login_required
+def api_storyboard_sample_images():
+    """根据分镜JSON生成示例图"""
+    try:
+        user_id = session.get('user_id')
+        project_id = get_current_project_id()
+        data = request.get_json() or {}
+        storyboard = data.get('storyboard') or {}
+        max_images = int(data.get('max_images') or 6)
+
+        episodes = storyboard.get('episodes') if isinstance(storyboard, dict) else None
+        if not isinstance(episodes, list) or len(episodes) == 0:
+            return jsonify({'success': False, 'error': '分镜数据为空'}), 400
+
+        images = []
+        count = 0
+        for ep in episodes:
+            if count >= max_images:
+                break
+            scenes = ep.get('scenes') if isinstance(ep, dict) else None
+            if not isinstance(scenes, list):
+                continue
+            for scene in scenes:
+                if count >= max_images:
+                    break
+                if not isinstance(scene, dict):
+                    continue
+                location_time = scene.get('location_time') or ''
+                summary = scene.get('summary') or ''
+                shot = scene.get('shot') or ''
+                prompt = f"{location_time}，{summary}，{shot}，高质量电影感分镜示例图"
+                output_folder = get_user_output_folder(user_id, project_id)
+                ensure_dir(output_folder)
+                filename = f"storyboard_sample_{user_id}_{project_id}_{int(time.time()*1000)}_{count}.png"
+                output_file = os.path.join(output_folder, filename)
+
+                resp = client.images.generate(
+                    model="doubao-seedream-4-5-251128",
+                    prompt=prompt,
+                    size="1024x1024",
+                    response_format="b64_json",
+                    n=1
+                )
+                image_data = resp.data[0].b64_json
+                with open(output_file, "wb") as f:
+                    f.write(base64.b64decode(image_data))
+
+                url = None
+                if OSS_ENABLED:
+                    url = upload_to_aliyun_oss(output_file, user_id, project_id)
+                if not url:
+                    url = url_for('static', filename=f'outputs/{user_id}/{project_id}/{filename}', _external=True)
+
+                images.append({
+                    'episode_index': ep.get('index'),
+                    'scene_index': scene.get('scene_index'),
+                    'url': url
+                })
+                count += 1
+
+        return jsonify({'success': True, 'images': images})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/script-templates', methods=['GET'])
+@login_required
+def api_script_templates_list():
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    templates = database.get_script_templates(user_id, project_id)
+    return jsonify({'success': True, 'templates': templates})
+
+
+@app.route('/api/script-templates', methods=['POST'])
+@login_required
+def api_script_templates_create():
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    prompt = (data.get('prompt') or '').strip()
+    if not name or not prompt:
+        return jsonify({'success': False, 'error': '模板名称与提示词不能为空'}), 400
+    try:
+        template_id = database.create_script_template(user_id, project_id, name, prompt)
+        return jsonify({'success': True, 'template_id': template_id})
+    except Exception:
+        return jsonify({'success': False, 'error': '模板名称已存在'}), 400
+
+
+@app.route('/api/script-templates/<int:template_id>', methods=['DELETE'])
+@login_required
+def api_script_templates_delete(template_id):
+    user_id = session.get('user_id')
+    database.delete_script_template(user_id, template_id)
+    return jsonify({'success': True})
 
 # ==================== 主页路由 ====================
 @app.route('/')
@@ -1650,8 +2398,27 @@ def video_tasks():
 @app.route('/script-analysis')
 @login_required
 def script_analysis():
-    """剧本分析页面"""
-    return render_template('script_analysis.html', user=get_current_user())
+    """剧本分析页面（兼容旧入口）"""
+    return redirect(url_for('script_generate'))
+
+@app.route('/script-generate')
+@login_required
+def script_generate():
+    """剧本生成页面"""
+    return render_template('script_generate.html', user=get_current_user())
+
+@app.route('/storyboard')
+@login_required
+def storyboard_generate():
+    """分镜生成页面"""
+    return render_template('storyboard_generate.html', user=get_current_user())
+
+
+@app.route('/storyboard-studio')
+@login_required
+def storyboard_studio():
+    """全新分镜制作页面（React）"""
+    return render_template('storyboard_studio.html', user=get_current_user())
 
 @app.route('/api/batch-generate', methods=['POST'])
 @login_required

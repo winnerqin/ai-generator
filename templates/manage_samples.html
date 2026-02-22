@@ -438,13 +438,14 @@
     </style>
 </head>
 <body>
+    <div id="reactApp"></div>
     <div class="nav-bar">
         <a href="/">🎨 单图生成</a>
         <a href="/batch">📦 批量生成</a>
         <a href="/records">📊 生成记录</a>
         <a href="/video-generate">🎬 视频生成</a>
         <a href="/video-tasks">📹 视频任务</a>
-        <a href="/script-analysis">🎬 剧本分析</a>
+        <a href="/script-generate">📜 剧本生成</a>
         <a href="/manage-samples" class="active">🖼️ 素材管理</a>
         {% if user.username == 'system_admin' %}
         <a href="/admin">🛠️ 系统管理</a>
@@ -881,5 +882,8 @@
             }
         });
     </script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="/static/react-app.js"></script>
 </body>
 </html>

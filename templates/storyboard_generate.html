@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>分镜生成 - Ai创作工具</title>
+    <script src="/static/state-manager.js"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .page-title {
+            font-size: 1.3em;
+            font-weight: 600;
+            margin-bottom: 14px;
+            color: #333;
+        }
+
+        .panel {
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+            margin-bottom: 16px;
+        }
+
+        .panel-title {
+            font-size: 1.05em;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        textarea {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.95em;
+            min-height: 160px;
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        .btn {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+
+        .btn-primary {
+            background: #28a745;
+            color: #fff;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: #fff;
+        }
+
+        .episode-list {
+            border: 1px dashed #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            background: #fafafa;
+        }
+
+        .episode-item {
+            padding: 6px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 0.9em;
+        }
+
+        .episode-item:last-child {
+            border-bottom: none;
+        }
+
+        .small-hint {
+            color: #666;
+            font-size: 0.85em;
+        }
+
+        .workflow {
+            display: flex;
+            gap: 12px;
+            align-items: stretch;
+            flex-wrap: wrap;
+        }
+
+        .workflow-node {
+            flex: 1;
+            min-width: 220px;
+            background: #f8f9fb;
+            border: 1px solid #e6e9ef;
+            border-radius: 10px;
+            padding: 12px;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+        }
+
+        .workflow-arrow {
+            display: flex;
+            align-items: center;
+            font-size: 1.4em;
+            color: #999;
+        }
+
+        .node-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .node-body {
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div id="reactApp"></div>
+    <nav class="sidebar-nav" id="sidebarNav">
+        <div class="sidebar-nav-header">
+            <div class="sidebar-nav-title">Ai创作工具</div>
+            <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收缩/展开">
+                <span id="toggleIcon">‹</span>
+            </button>
+        </div>
+        <div class="sidebar-nav-menu">
+            <a href="/" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎨</span>
+                <span class="sidebar-nav-text">单图生成</span>
+            </a>
+            <a href="/batch" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📦</span>
+                <span class="sidebar-nav-text">批量生成</span>
+            </a>
+            <a href="/records" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📊</span>
+                <span class="sidebar-nav-text">生图任务</span>
+            </a>
+            <a href="/video-generate" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎬</span>
+                <span class="sidebar-nav-text">视频生成</span>
+            </a>
+            <a href="/video-tasks" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📹</span>
+                <span class="sidebar-nav-text">视频任务</span>
+            </a>
+            <a href="/script-generate" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📜</span>
+                <span class="sidebar-nav-text">剧本生成</span>
+            </a>
+            <a href="/storyboard" class="sidebar-nav-item active">
+                <span class="sidebar-nav-icon">🎬</span>
+                <span class="sidebar-nav-text">分镜生成</span>
+            </a>
+            <a href="/storyboard-studio" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🧩</span>
+                <span class="sidebar-nav-text">分镜制作</span>
+            </a>
+            <a href="/content-management" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📚</span>
+                <span class="sidebar-nav-text">内容管理</span>
+            </a>
+            {% if user.username == 'system_admin' %}
+            <div class="sidebar-nav-divider"></div>
+            <a href="/admin" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🛠️</span>
+                <span class="sidebar-nav-text">系统管理</span>
+            </a>
+            <a href="/stats" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📈</span>
+                <span class="sidebar-nav-text">系统统计</span>
+            </a>
+            {% endif %}
+        </div>
+        <div class="sidebar-nav-user">
+            <div class="sidebar-nav-user-info">
+                <div class="sidebar-nav-user-avatar">👤</div>
+                <div class="sidebar-nav-user-name">{{ user.username }}</div>
+            </div>
+            <div style="margin-top: 8px;">
+                <label style="font-size: 0.85em; color: #666;">当前项目</label>
+                <select id="projectSelect" style="width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option>加载中...</option>
+                </select>
+            </div>
+            <a href="/logout" class="sidebar-nav-logout">登出</a>
+        </div>
+    </nav>
+
+    <div class="main-content">
+        <div class="container">
+            <div class="content" style="padding-top: 20px;">
+                <div class="page-title">🎬 分镜生成</div>
+
+                <div class="panel">
+                    <div class="panel-title">分镜工作流（ComfyUI 风格）</div>
+                    <div class="workflow">
+                        <div class="workflow-node">
+                            <div class="node-title">输入剧本</div>
+                            <div class="node-body">粘贴剧本文本</div>
+                            <textarea id="storyboardInput" placeholder="粘贴剧本文本..."></textarea>
+                            <div class="form-row" style="margin-top: 8px;">
+                                <button class="btn btn-secondary" onclick="clearStoryboard()">清空</button>
+                            </div>
+                        </div>
+                        <div class="workflow-arrow">➡</div>
+                        <div class="workflow-node">
+                            <div class="node-title">生成分镜</div>
+                            <div class="node-body">按集/场拆分，输出结构化 JSON</div>
+                            <textarea id="storyboardPrompt" placeholder="编辑分镜生成提示词..."></textarea>
+                            <div class="form-row" style="margin-top: 8px;">
+                                <button class="btn btn-primary" onclick="generateStoryboard()">生成分镜</button>
+                                <button class="btn btn-secondary" onclick="copyText('storyboardOutput')">复制</button>
+                                <div id="storyboardProgress" class="small-hint"></div>
+                            </div>
+                            <textarea id="storyboardOutput" placeholder="分镜 JSON 输出..."></textarea>
+                            <div class="form-row" style="margin-top: 8px;">
+                                <input type="text" id="storyboardTitle" placeholder="保存标题（可选）">
+                                <button class="btn btn-primary" onclick="saveStoryboard()">保存</button>
+                            </div>
+                            <div class="panel-title" style="margin-top: 10px;">分镜结构预览（按集/场）</div>
+                            <div id="storyboardPreview" class="episode-list"></div>
+                        </div>
+                        <div class="workflow-arrow">➡</div>
+                        <div class="workflow-node">
+                            <div class="node-title">分镜生成示例图</div>
+                            <div class="node-body">基于分镜场次生成示例图</div>
+                            <button class="btn btn-secondary" onclick="generateStoryboardImages()">生成示例图</button>
+                            <div id="storyboardImages" class="episode-list" style="margin-top: 10px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">已保存分镜</div>
+                    <div id="storyboardRecords" class="episode-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentProjectId = null;
+        let currentStoryboardRecordId = null;
+        let lastStoryboardJson = null;
+        let pollingTimer = null;
+
+        function updateStoryboardProgress(text) {
+            const el = document.getElementById('storyboardProgress');
+            if (el) {
+                el.textContent = text || '';
+            }
+        }
+
+        function clearStoryboard() {
+            document.getElementById('storyboardInput').value = '';
+        }
+
+        async function generateStoryboard() {
+            const script = document.getElementById('storyboardInput').value.trim();
+            const prompt = document.getElementById('storyboardPrompt').value.trim();
+            if (!script) {
+                alert('请先输入剧本文本');
+                return;
+            }
+            updateStoryboardProgress('生成中 0%');
+            const resp = await fetch('/api/storyboard-generate-async', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ script, prompt })
+            });
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.error || '生成失败');
+                updateStoryboardProgress('');
+                return;
+            }
+            const taskId = data.task_id;
+            if (taskId) {
+                const key = `storyboard_task_${currentProjectId || 'default'}`;
+                localStorage.setItem(key, String(taskId));
+                pollStoryboardTask(taskId);
+            }
+        }
+
+        async function generateStoryboardImages() {
+            let storyboardJson = null;
+            try {
+                storyboardJson = JSON.parse(document.getElementById('storyboardOutput').value || '{}');
+            } catch (e) {
+                alert('分镜 JSON 格式错误，请先生成或修正分镜');
+                return;
+            }
+            const resp = await fetch('/api/storyboard-sample-images', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ storyboard: storyboardJson, max_images: 6 })
+            });
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.error || '生成示例图失败');
+                return;
+            }
+            const container = document.getElementById('storyboardImages');
+            const images = data.images || [];
+            if (images.length === 0) {
+                container.innerHTML = '<div class="small-hint">暂无示例图</div>';
+                return;
+            }
+            container.innerHTML = images.map(img => `
+                <div class="episode-item">
+                    <div class="small-hint">第${img.episode_index || ''}集-场${img.scene_index || ''}</div>
+                    <img src="${img.url}" style="max-width: 220px; border-radius: 6px; margin-top: 6px;" />
+                </div>
+            `).join('');
+        }
+
+        function copyText(id) {
+            const el = document.getElementById(id);
+            el.select();
+            document.execCommand('copy');
+        }
+
+        async function saveStoryboard() {
+            let jsonData = {};
+            const rawText = document.getElementById('storyboardOutput').value || '';
+            try {
+                jsonData = JSON.parse(rawText);
+            } catch (e) {
+                jsonData = lastStoryboardJson || {};
+            }
+            const payload = {
+                id: currentStoryboardRecordId,
+                title: document.getElementById('storyboardTitle').value.trim(),
+                script_text: document.getElementById('storyboardInput').value || '',
+                prompt: document.getElementById('storyboardPrompt').value || '',
+                storyboard_json: jsonData,
+                storyboard_text: rawText
+            };
+            const resp = await fetch('/api/storyboard-saves', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.error || '保存失败');
+                return;
+            }
+            currentStoryboardRecordId = data.id;
+            await loadStoryboardRecords();
+        }
+
+        async function loadStoryboardRecords() {
+            const container = document.getElementById('storyboardRecords');
+            if (!container) return;
+            const resp = await fetch('/api/storyboard-saves');
+            const data = await resp.json();
+            if (!data.success) {
+                container.innerHTML = '<div class="small-hint">加载失败</div>';
+                return;
+            }
+            const records = data.records || [];
+            if (records.length === 0) {
+                container.innerHTML = '<div class="small-hint">暂无保存记录</div>';
+                return;
+            }
+            container.innerHTML = records.map(r => `
+                <div class="episode-item">
+                    <div>${r.title || '未命名'}</div>
+                    <div class="small-hint">${r.updated_at || r.created_at || ''}</div>
+                    <div class="form-row" style="margin-top: 6px;">
+                        <button class="btn btn-secondary" onclick="loadStoryboardRecord(${r.id})">查看/继续</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function loadStoryboardRecord(recordId) {
+            const resp = await fetch(`/api/storyboard-saves/${recordId}`);
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.error || '加载失败');
+                return;
+            }
+            const record = data.record || {};
+            currentStoryboardRecordId = record.id;
+            document.getElementById('storyboardTitle').value = record.title || '';
+            document.getElementById('storyboardInput').value = record.script_text || '';
+            document.getElementById('storyboardPrompt').value = record.prompt || '';
+            const jsonData = record.storyboard_json || null;
+            if (jsonData && Object.keys(jsonData).length > 0) {
+                document.getElementById('storyboardOutput').value = JSON.stringify(jsonData, null, 2);
+                lastStoryboardJson = jsonData;
+                renderStoryboardPreview(jsonData);
+            } else {
+                document.getElementById('storyboardOutput').value = record.storyboard_text || '';
+                lastStoryboardJson = null;
+                renderStoryboardPreview(null);
+            }
+        }
+
+        async function pollStoryboardTask(taskId) {
+            if (pollingTimer) {
+                clearTimeout(pollingTimer);
+            }
+            const resp = await fetch(`/api/tasks/${taskId}`);
+            const data = await resp.json();
+            if (!data.success || !data.task) {
+                updateStoryboardProgress('');
+                return;
+            }
+            const task = data.task;
+            updateStoryboardProgress(`生成中 ${task.progress || 0}%`);
+            if (task.status === 'completed') {
+                updateStoryboardProgress('完成');
+                const result = task.result || {};
+                const jsonData = result.storyboard_json;
+                if (jsonData) {
+                    document.getElementById('storyboardOutput').value = JSON.stringify(jsonData, null, 2);
+                    lastStoryboardJson = jsonData;
+                    renderStoryboardPreview(jsonData);
+                } else {
+                    document.getElementById('storyboardOutput').value = result.storyboard_text || '';
+                    lastStoryboardJson = null;
+                    renderStoryboardPreview(null);
+                }
+                return;
+            }
+            if (task.status === 'failed') {
+                updateStoryboardProgress('失败');
+                if (task.error) {
+                    alert(task.error);
+                }
+                return;
+            }
+            pollingTimer = setTimeout(() => pollStoryboardTask(taskId), 2000);
+        }
+
+        async function resumeStoryboardTask() {
+            const key = `storyboard_task_${currentProjectId || 'default'}`;
+            const taskId = localStorage.getItem(key);
+            if (taskId) {
+                pollStoryboardTask(taskId);
+            }
+        }
+
+        function renderStoryboardPreview(data) {
+            const container = document.getElementById('storyboardPreview');
+            if (!container) return;
+            if (!data || !Array.isArray(data.episodes) || data.episodes.length === 0) {
+                container.innerHTML = '<div class="small-hint">暂无结构化分镜</div>';
+                return;
+            }
+            container.innerHTML = data.episodes.map(ep => {
+                const scenes = Array.isArray(ep.scenes) ? ep.scenes : [];
+                const sceneHtml = scenes.map(s => `
+                    <div class="episode-item">场${s.scene_index || ''}：${s.location_time || ''}｜${s.shot || ''}｜${s.duration_seconds || ''}秒</div>
+                `).join('');
+                return `
+                    <div class="episode-item"><strong>第${ep.index || ''}集 ${ep.title || ''}</strong></div>
+                    ${sceneHtml || '<div class="episode-item">暂无场次</div>'}
+                `;
+            }).join('');
+        }
+
+        async function loadProjects() {
+            const select = document.getElementById('projectSelect');
+            if (!select) return;
+            try {
+                const resp = await fetch('/api/projects');
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || '加载失败');
+                select.innerHTML = '';
+                currentProjectId = data.current_project_id;
+                data.projects.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.id;
+                    opt.textContent = p.name;
+                    if (String(p.id) === String(data.current_project_id)) {
+                        opt.selected = true;
+                    }
+                    select.appendChild(opt);
+                });
+                resumeStoryboardTask();
+            } catch (e) {
+                select.innerHTML = '<option>项目加载失败</option>';
+            }
+        }
+
+        async function switchProject(projectId) {
+            const resp = await fetch('/api/projects/switch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project_id: projectId })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                location.reload();
+            } else {
+                alert(data.error || '切换失败');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const storyboardPrompt = document.getElementById('storyboardPrompt');
+            if (storyboardPrompt && !storyboardPrompt.value) {
+                storyboardPrompt.value = '基于剧本文本生成分镜，输出清晰分镜列表，包含场景、人物动作、镜头、时长建议。';
+            }
+            const select = document.getElementById('projectSelect');
+            if (select) {
+                select.addEventListener('change', () => switchProject(select.value));
+                loadProjects();
+            }
+            loadStoryboardRecords();
+        });
+    </script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="/static/react-app.js"></script>
+    <script src="/static/sidebar-nav.js"></script>
+</body>
+</html>

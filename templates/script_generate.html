@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>剧本与分镜 - Ai创作工具</title>
+    <title>剧本生成 - Ai创作工具</title>
     <script src="/static/state-manager.js"></script>
     <link rel="stylesheet" href="/static/styles.css">
     <style>
@@ -107,41 +107,6 @@
             border-bottom: none;
         }
 
-        .workflow {
-            display: flex;
-            gap: 12px;
-            align-items: stretch;
-            flex-wrap: wrap;
-        }
-
-        .workflow-node {
-            flex: 1;
-            min-width: 220px;
-            background: #f8f9fb;
-            border: 1px solid #e6e9ef;
-            border-radius: 10px;
-            padding: 12px;
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
-        }
-
-        .workflow-arrow {
-            display: flex;
-            align-items: center;
-            font-size: 1.4em;
-            color: #999;
-        }
-
-        .node-title {
-            font-weight: 600;
-            margin-bottom: 6px;
-        }
-
-        .node-body {
-            color: #666;
-            font-size: 0.9em;
-            margin-bottom: 8px;
-        }
-
         @media (max-width: 1100px) {
             .grid-two {
                 grid-template-columns: 1fr;
@@ -149,7 +114,7 @@
         }
     </style>
 </head>
-<body data-default-tab="{{ default_tab or 'scriptTab' }}">
+<body>
     <div id="reactApp"></div>
     <nav class="sidebar-nav" id="sidebarNav">
         <div class="sidebar-nav-header">
@@ -179,13 +144,17 @@
                 <span class="sidebar-nav-icon">📹</span>
                 <span class="sidebar-nav-text">视频任务</span>
             </a>
-            <a href="/script-generate" class="sidebar-nav-item {% if (default_tab or 'scriptTab') == 'scriptTab' %}active{% endif %}">
+            <a href="/script-generate" class="sidebar-nav-item active">
                 <span class="sidebar-nav-icon">📜</span>
                 <span class="sidebar-nav-text">剧本生成</span>
             </a>
-            <a href="/storyboard" class="sidebar-nav-item {% if (default_tab or 'scriptTab') == 'storyboardTab' %}active{% endif %}">
+            <a href="/storyboard" class="sidebar-nav-item">
                 <span class="sidebar-nav-icon">🎬</span>
                 <span class="sidebar-nav-text">分镜生成</span>
+            </a>
+            <a href="/storyboard-studio" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🧩</span>
+                <span class="sidebar-nav-text">分镜制作</span>
             </a>
             <a href="/content-management" class="sidebar-nav-item">
                 <span class="sidebar-nav-icon">📚</span>
@@ -221,101 +190,58 @@
     <div class="main-content">
         <div class="container">
             <div class="content" style="padding-top: 20px;">
-                <div class="page-title">
-                    {% if (default_tab or 'scriptTab') == 'scriptTab' %}
-                    📝 剧本生成
-                    {% else %}
-                    🎬 分镜生成
-                    {% endif %}
-                </div>
+                <div class="page-title">📝 剧本生成</div>
 
-                {% if (default_tab or 'scriptTab') == 'scriptTab' %}
-                <div id="scriptTab">
-                    <div class="grid-two">
-                        <div class="panel">
-                            <div class="panel-title">小说文本输入</div>
-                            <textarea id="novelInput" placeholder="粘贴小说原文..."></textarea>
-                            <div class="form-row" style="margin-top: 8px;">
-                                <input type="file" id="novelFile" accept=".txt">
-                                <button class="btn btn-secondary" onclick="loadNovelFile()">加载TXT</button>
-                                <button class="btn btn-secondary" onclick="clearNovel()">清空</button>
-                            </div>
-                            <div class="small-hint">支持粘贴文本或上传 txt 文件</div>
+                <div class="grid-two">
+                    <div class="panel">
+                        <div class="panel-title">小说文本输入</div>
+                        <textarea id="novelInput" placeholder="粘贴小说原文..."></textarea>
+                        <div class="form-row" style="margin-top: 8px;">
+                            <input type="file" id="novelFile" accept=".txt">
+                            <button class="btn btn-secondary" onclick="loadNovelFile()">加载TXT</button>
+                            <button class="btn btn-secondary" onclick="clearNovel()">清空</button>
                         </div>
+                        <div class="small-hint">支持粘贴文本或上传 txt 文件</div>
+                    </div>
 
-                        <div class="panel">
-                            <div class="panel-title">提示词与拆分设置</div>
+                    <div class="panel">
+                        <div class="panel-title">提示词与拆分设置</div>
                         <div class="form-row">
                             <select id="promptTemplateSelect"></select>
                             <button class="btn btn-secondary" onclick="loadTemplate()">应用模板</button>
                             <button class="btn btn-danger" onclick="deleteTemplate()">删除模板</button>
                         </div>
-                            <div class="form-row" style="margin-top: 8px;">
-                                <input type="text" id="templateName" placeholder="模板名称">
-                                <button class="btn btn-secondary" onclick="saveTemplate()">保存为模板</button>
-                            </div>
-                            <textarea id="scriptPrompt" placeholder="编辑提示词..."></textarea>
-                            <div class="form-row" style="margin-top: 8px;">
-                                <label>每集时长(秒)：</label>
-                                <input type="number" id="minSeconds" value="90" min="60" max="300" style="width: 120px;">
-                                <span>至</span>
-                                <input type="number" id="maxSeconds" value="150" min="60" max="300" style="width: 120px;">
-                            </div>
-                            <div class="form-row" style="margin-top: 8px;">
-                                <button class="btn btn-primary" onclick="generateScript()">生成剧本</button>
-                            </div>
+                        <div class="form-row" style="margin-top: 8px;">
+                            <input type="text" id="templateName" placeholder="模板名称">
+                            <button class="btn btn-secondary" onclick="saveTemplate()">保存为模板</button>
+                        </div>
+                        <textarea id="scriptPrompt" placeholder="编辑提示词..."></textarea>
+                        <div class="form-row" style="margin-top: 8px;">
+                            <label>每集时长(秒)：</label>
+                            <input type="number" id="minSeconds" value="90" min="60" max="300" style="width: 120px;">
+                            <span>至</span>
+                            <input type="number" id="maxSeconds" value="150" min="60" max="300" style="width: 120px;">
+                        </div>
+                        <div class="form-row" style="margin-top: 8px;">
+                            <button class="btn btn-primary" onclick="generateScript()">生成剧本</button>
+                            <div id="scriptProgress" class="small-hint"></div>
                         </div>
                     </div>
+                </div>
 
-                    <div class="panel">
-                        <div class="panel-title">剧本结果（可编辑）</div>
-                        <textarea id="scriptOutput" placeholder="生成的剧本会出现在这里，可直接编辑..."></textarea>
-                        <div class="output-actions" style="margin-top: 8px;">
-                            <button class="btn btn-secondary" onclick="copyText('scriptOutput')">复制</button>
-                            <button class="btn btn-secondary" onclick="exportText('scriptOutput', 'txt')">导出TXT</button>
-                            <button class="btn btn-secondary" onclick="exportText('scriptOutput', 'md')">导出Markdown</button>
-                        </div>
-                        <div class="panel-title" style="margin-top: 12px;">按集概览</div>
-                        <div id="episodeList" class="episode-list"></div>
+                <div class="panel">
+                    <div class="panel-title">剧本分集表格</div>
+                    <div id="episodeTableWrap" class="episode-list"></div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">本集内容编辑</div>
+                    <div class="small-hint" id="episodeEditHint">点击表格中的“编辑”进入修改</div>
+                    <textarea id="episodeEditor" placeholder="请选择一集进行编辑..." style="min-height: 180px;"></textarea>
+                    <div class="form-row" style="margin-top: 8px;">
+                        <button class="btn btn-primary" onclick="saveEpisodeContent()">保存本集</button>
                     </div>
                 </div>
-                {% else %}
-                <div id="storyboardTab">
-                    <div class="panel">
-                        <div class="panel-title">分镜工作流（ComfyUI 风格）</div>
-                        <div class="workflow">
-                            <div class="workflow-node">
-                                <div class="node-title">输入剧本</div>
-                                <div class="node-body">粘贴剧本文本</div>
-                                <textarea id="storyboardInput" placeholder="粘贴剧本文本..."></textarea>
-                                <div class="form-row" style="margin-top: 8px;">
-                                    <button class="btn btn-secondary" onclick="clearStoryboard()">清空</button>
-                                </div>
-                            </div>
-                            <div class="workflow-arrow">➡</div>
-                            <div class="workflow-node">
-                                <div class="node-title">生成分镜</div>
-                                <div class="node-body">按集/场拆分，输出结构化 JSON</div>
-                                <textarea id="storyboardPrompt" placeholder="编辑分镜生成提示词..."></textarea>
-                                <div class="form-row" style="margin-top: 8px;">
-                                    <button class="btn btn-primary" onclick="generateStoryboard()">生成分镜</button>
-                                    <button class="btn btn-secondary" onclick="copyText('storyboardOutput')">复制</button>
-                                </div>
-                                <textarea id="storyboardOutput" placeholder="分镜 JSON 输出..."></textarea>
-                                <div class="panel-title" style="margin-top: 10px;">分镜结构预览（按集/场）</div>
-                                <div id="storyboardPreview" class="episode-list"></div>
-                            </div>
-                            <div class="workflow-arrow">➡</div>
-                            <div class="workflow-node">
-                                <div class="node-title">分镜生成示例图</div>
-                                <div class="node-body">基于分镜场次生成示例图</div>
-                                <button class="btn btn-secondary" onclick="generateStoryboardImages()">生成示例图</button>
-                                <div id="storyboardImages" class="episode-list" style="margin-top: 10px;"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
             </div>
         </div>
     </div>
@@ -422,6 +348,20 @@
             document.getElementById('novelInput').value = '';
         }
 
+        let currentProjectId = null;
+        let currentScriptRecordId = null;
+        let currentScriptId = null;
+        let lastEpisodes = [];
+        let currentEpisodeRow = null;
+        let pollingTimer = null;
+
+        function updateScriptProgress(text) {
+            const el = document.getElementById('scriptProgress');
+            if (el) {
+                el.textContent = text || '';
+            }
+        }
+
         async function generateScript() {
             const text = document.getElementById('novelInput').value.trim();
             const prompt = document.getElementById('scriptPrompt').value.trim();
@@ -431,98 +371,187 @@
                 alert('请先输入小说文本');
                 return;
             }
-            const resp = await fetch('/api/script-generate', {
+            updateScriptProgress('生成中 0%');
+            const resp = await fetch('/api/script-generate-async', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text, prompt, min_seconds: minSeconds, max_seconds: maxSeconds })
+                body: JSON.stringify({
+                    text,
+                    prompt,
+                    min_seconds: minSeconds,
+                    max_seconds: maxSeconds,
+                    script_id: currentScriptId
+                })
             });
             const data = await resp.json();
             if (!data.success) {
                 alert(data.error || '生成失败');
+                updateScriptProgress('');
                 return;
             }
-            document.getElementById('scriptOutput').value = data.script_text || '';
-            renderEpisodeList(data.episodes || []);
+            const taskId = data.task_id;
+            if (taskId) {
+                const key = `script_task_${currentProjectId || 'default'}`;
+                localStorage.setItem(key, String(taskId));
+                pollScriptTask(taskId);
+            }
         }
 
-        function renderEpisodeList(episodes) {
-            const list = document.getElementById('episodeList');
+        function renderEpisodeTable(episodes) {
+            const wrap = document.getElementById('episodeTableWrap');
+            if (!wrap) return;
             if (!episodes || episodes.length === 0) {
-                list.innerHTML = '<div class="small-hint">暂无拆分结果</div>';
+                wrap.innerHTML = '<div class="small-hint">暂无分集记录</div>';
                 return;
             }
-            list.innerHTML = episodes.map(ep => `
-                <div class="episode-item">
-                    第${ep.index || '-'}集 ${ep.title ? ' - ' + ep.title : ''}（${ep.duration_seconds || '-'}秒）
-                </div>
+            const rows = episodes.map(ep => `
+                <tr>
+                    <td style="padding:6px;">${ep.id || '-'}</td>
+                    <td style="padding:6px;">${ep.created_at || '-'}</td>
+                    <td style="padding:6px;">${ep.episode_index || '-'}</td>
+                    <td style="padding:6px;">${ep.title || '-'}</td>
+                    <td style="padding:6px;">${ep.duration_seconds || '-'}</td>
+                    <td style="padding:6px;">${ep.summary || '-'}</td>
+                    <td style="padding:6px;">
+                        <button class="btn btn-secondary" onclick="editEpisode(${ep.id}, ${ep.episode_index || 0}, ${ep.script_id || 0})">编辑</button>
+                        <button class="btn btn-danger" onclick="deleteEpisode(${ep.id})">删除</button>
+                    </td>
+                </tr>
             `).join('');
+            wrap.innerHTML = `
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr>
+                            <th style="text-align:left; padding:6px;">编号</th>
+                            <th style="text-align:left; padding:6px;">生成时间</th>
+                            <th style="text-align:left; padding:6px;">集数</th>
+                            <th style="text-align:left; padding:6px;">集名</th>
+                            <th style="text-align:left; padding:6px;">时长</th>
+                            <th style="text-align:left; padding:6px;">概览</th>
+                            <th style="text-align:left; padding:6px;">本集内容</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            `;
         }
 
-        function importScript() {
-            document.getElementById('storyboardInput').value = document.getElementById('scriptOutput').value;
-        }
-
-        function clearStoryboard() {
-            document.getElementById('storyboardInput').value = '';
-        }
-
-        async function generateStoryboard() {
-            const script = document.getElementById('storyboardInput').value.trim();
-            const prompt = document.getElementById('storyboardPrompt').value.trim();
-            if (!script) {
-                alert('请先输入剧本文本');
-                return;
-            }
-            const resp = await fetch('/api/storyboard-generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ script, prompt })
-            });
+        async function loadEpisodeTable(scriptId) {
+            const resp = await fetch(`/api/script-episodes?script_id=${scriptId}`);
             const data = await resp.json();
             if (!data.success) {
-                alert(data.error || '生成失败');
+                renderEpisodeTable([]);
                 return;
             }
-            const jsonData = data.storyboard_json;
-            if (jsonData) {
-                document.getElementById('storyboardOutput').value = JSON.stringify(jsonData, null, 2);
-                renderStoryboardPreview(jsonData);
-            } else {
-                document.getElementById('storyboardOutput').value = data.storyboard_text || '';
-                renderStoryboardPreview(null);
-            }
+            renderEpisodeTable(data.episodes || []);
         }
 
-        async function generateStoryboardImages() {
-            let storyboardJson = null;
+        async function editEpisode(id, episodeIndex, scriptId) {
+            currentEpisodeRow = { id, episodeIndex, scriptId };
+            const hint = document.getElementById('episodeEditHint');
+            if (hint) {
+                hint.textContent = `正在编辑第 ${episodeIndex} 集`;
+            }
             try {
-                storyboardJson = JSON.parse(document.getElementById('storyboardOutput').value || '{}');
+                const resp = await fetch(`/api/script-episodes/${id}/content`);
+                if (!resp.ok) {
+                    document.getElementById('episodeEditor').value = '';
+                    return;
+                }
+                const text = await resp.text();
+                document.getElementById('episodeEditor').value = text;
             } catch (e) {
-                alert('分镜 JSON 格式错误，请先生成或修正分镜');
+                document.getElementById('episodeEditor').value = '';
+            }
+        }
+
+        async function saveEpisodeContent() {
+            if (!currentEpisodeRow) {
+                alert('请先选择一集');
                 return;
             }
-            const resp = await fetch('/api/storyboard-sample-images', {
+            const content = document.getElementById('episodeEditor').value || '';
+            const resp = await fetch(`/api/script-episodes/${currentEpisodeRow.id}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ storyboard: storyboardJson, max_images: 6 })
+                body: JSON.stringify({
+                    script_id: currentEpisodeRow.scriptId,
+                    episode_index: currentEpisodeRow.episodeIndex,
+                    content
+                })
             });
             const data = await resp.json();
             if (!data.success) {
-                alert(data.error || '生成示例图失败');
+                alert(data.error || '保存失败');
                 return;
             }
-            const container = document.getElementById('storyboardImages');
-            const images = data.images || [];
-            if (images.length === 0) {
-                container.innerHTML = '<div class="small-hint">暂无示例图</div>';
+            loadAllEpisodeTable();
+        }
+
+        async function deleteEpisode(id) {
+            if (!confirm('确认删除本集？')) return;
+            const resp = await fetch(`/api/script-episodes/${id}`, { method: 'DELETE' });
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.error || '删除失败');
                 return;
             }
-            container.innerHTML = images.map(img => `
-                <div class="episode-item">
-                    <div class="small-hint">第${img.episode_index || ''}集-场${img.scene_index || ''}</div>
-                    <img src="${img.url}" style="max-width: 220px; border-radius: 6px; margin-top: 6px;" />
-                </div>
-            `).join('');
+            loadAllEpisodeTable();
+        }
+
+        async function loadAllEpisodeTable() {
+            const resp = await fetch('/api/script-episodes');
+            const data = await resp.json();
+            if (!data.success) {
+                renderEpisodeTable([]);
+                return;
+            }
+            const episodes = data.episodes || [];
+            renderEpisodeTable(episodes);
+            if (episodes.length > 0) {
+                const maxScriptId = episodes.reduce((acc, ep) => Math.max(acc, Number(ep.script_id || 0)), 0);
+                if (maxScriptId) {
+                    currentScriptId = maxScriptId;
+                }
+            }
+        }
+
+        async function pollScriptTask(taskId) {
+            if (pollingTimer) {
+                clearTimeout(pollingTimer);
+            }
+            const resp = await fetch(`/api/tasks/${taskId}`);
+            const data = await resp.json();
+            if (!data.success || !data.task) {
+                updateScriptProgress('');
+                return;
+            }
+            const task = data.task;
+            updateScriptProgress(`生成中 ${task.progress || 0}%`);
+            if (task.status === 'completed') {
+                updateScriptProgress('完成');
+                const result = task.result || {};
+                lastEpisodes = result.episodes || [];
+                currentScriptId = result.script_id || currentScriptId;
+                loadAllEpisodeTable();
+                return;
+            }
+            if (task.status === 'failed') {
+                updateScriptProgress('失败');
+                if (task.error) {
+                    alert(task.error);
+                }
+                return;
+            }
+            pollingTimer = setTimeout(() => pollScriptTask(taskId), 2000);
+        }
+
+        async function resumeScriptTask() {
+            const key = `script_task_${currentProjectId || 'default'}`;
+            const taskId = localStorage.getItem(key);
+            if (taskId) {
+                pollScriptTask(taskId);
+            }
         }
 
         function copyText(id) {
@@ -544,36 +573,6 @@
             URL.revokeObjectURL(url);
         }
 
-        function renderStoryboardPreview(data) {
-            const container = document.getElementById('storyboardPreview');
-            if (!container) return;
-            if (!data || !Array.isArray(data.episodes) || data.episodes.length === 0) {
-                container.innerHTML = '<div class="small-hint">暂无结构化分镜</div>';
-                return;
-            }
-            container.innerHTML = data.episodes.map(ep => {
-                const scenes = Array.isArray(ep.scenes) ? ep.scenes : [];
-                const sceneHtml = scenes.map(s => `
-                    <div class="episode-item">场${s.scene_index || ''}：${s.location_time || ''}｜${s.shot || ''}｜${s.duration_seconds || ''}秒</div>
-                `).join('');
-                return `
-                    <div class="episode-item"><strong>第${ep.index || ''}集 ${ep.title || ''}</strong></div>
-                    ${sceneHtml || '<div class="episode-item">暂无场次</div>'}
-                `;
-            }).join('');
-        }
-
-        function initDefaults() {
-            if (document.getElementById('promptTemplateSelect')) {
-                renderTemplates();
-                loadTemplate();
-            }
-            const storyboardPrompt = document.getElementById('storyboardPrompt');
-            if (storyboardPrompt && !storyboardPrompt.value) {
-                storyboardPrompt.value = '基于剧本文本生成分镜，输出清晰分镜列表，包含场景、人物动作、镜头、时长建议。';
-            }
-        }
-
         async function loadProjects() {
             const select = document.getElementById('projectSelect');
             if (!select) return;
@@ -582,6 +581,7 @@
                 const data = await resp.json();
                 if (!data.success) throw new Error(data.error || '加载失败');
                 select.innerHTML = '';
+                currentProjectId = data.current_project_id;
                 data.projects.forEach(p => {
                     const opt = document.createElement('option');
                     opt.value = p.id;
@@ -591,6 +591,7 @@
                     }
                     select.appendChild(opt);
                 });
+                resumeScriptTask();
             } catch (e) {
                 select.innerHTML = '<option>项目加载失败</option>';
             }
@@ -611,12 +612,14 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            initDefaults();
+            renderTemplates();
+            loadTemplate();
             const select = document.getElementById('projectSelect');
             if (select) {
                 select.addEventListener('change', () => switchProject(select.value));
                 loadProjects();
             }
+            loadAllEpisodeTable();
         });
     </script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>

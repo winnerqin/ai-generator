@@ -1,0 +1,119 @@
+body.react-theme {
+    background: radial-gradient(circle at top, rgba(82,108,255,0.18), transparent 40%), #0b0f1a;
+    color: #e6ebff;
+}
+
+body.react-theme .main-content {
+    background: transparent;
+}
+
+body.react-theme .panel,
+body.react-theme .studio-card,
+body.react-theme .episode-list,
+body.react-theme .content,
+body.react-theme .container,
+body.react-theme .section,
+body.react-theme .section-card,
+body.react-theme .card,
+body.react-theme .task-card,
+body.react-theme .record-card,
+body.react-theme .record-item,
+body.react-theme .batch-view-item,
+body.react-theme .content-item,
+body.react-theme .content-card,
+body.react-theme .modal-content {
+    background: rgba(17, 24, 39, 0.85);
+    border: 1px solid rgba(93, 110, 170, 0.3);
+    color: #e6ebff;
+    box-shadow: 0 10px 30px rgba(5, 10, 25, 0.4);
+}
+
+body.react-theme textarea,
+body.react-theme input,
+body.react-theme select {
+    background: rgba(11, 15, 26, 0.85);
+    color: #e6ebff;
+    border: 1px solid rgba(86, 111, 255, 0.35);
+}
+
+body.react-theme .btn-primary {
+    background: linear-gradient(135deg, #5871ff, #3b7bff);
+    color: #fff;
+}
+
+body.react-theme .btn-secondary {
+    background: rgba(86, 111, 255, 0.15);
+    color: #c8d2ff;
+    border: 1px solid rgba(86, 111, 255, 0.4);
+}
+
+body.react-theme .btn-danger {
+    background: rgba(220, 53, 69, 0.18);
+    color: #ffb3bf;
+    border: 1px solid rgba(220, 53, 69, 0.5);
+}
+
+body.react-theme .small-hint {
+    color: #9aa3c7;
+}
+
+body.react-theme .page-title,
+body.react-theme .panel-title,
+body.react-theme .section-title {
+    color: #e6ebff;
+}
+
+body.react-theme a,
+body.react-theme .link {
+    color: #b7c0ff;
+}
+
+body.react-theme .active,
+body.react-theme .selected,
+body.react-theme .is-active {
+    background: rgba(86, 111, 255, 0.18);
+    border-color: rgba(86, 111, 255, 0.45);
+}
+
+body.react-theme table th,
+body.react-theme table td {
+    border-color: rgba(86, 111, 255, 0.2);
+}
+
+body.react-theme .modal {
+    background: rgba(6, 10, 20, 0.7);
+}
+
+body.react-theme .sidebar-nav {
+    background: #0f172a;
+    border-right: 1px solid rgba(86, 111, 255, 0.2);
+}
+
+body.react-theme .sidebar-nav-item.active {
+    background: rgba(86, 111, 255, 0.2);
+    color: #fff;
+}
+
+.react-shell-bar {
+    position: sticky;
+    top: 0;
+    z-index: 1200;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    background: rgba(10, 15, 28, 0.8);
+    border-bottom: 1px solid rgba(86, 111, 255, 0.25);
+    backdrop-filter: blur(10px);
+    color: #e6ebff;
+    font-size: 0.9rem;
+}
+
+.react-shell-badge {
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(86, 111, 255, 0.2);
+    border: 1px solid rgba(86, 111, 255, 0.4);
+    color: #b7c0ff;
+    font-size: 0.75rem;
+}
