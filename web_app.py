@@ -760,6 +760,26 @@ def _format_script_output(episodes):
     }
 
 
+def _collect_stream_content(response):
+    parts = []
+    try:
+        for chunk in response:
+            if not chunk:
+                continue
+            try:
+                delta = chunk.choices[0].delta
+                content = getattr(delta, 'content', None)
+            except Exception:
+                content = None
+            if content:
+                parts.append(content)
+        return ''.join(parts)
+    except TypeError:
+        if hasattr(response, 'choices') and response.choices:
+            return response.choices[0].message.content.strip()
+        return ''
+
+
 def _summarize_episode(text, limit=80):
     if not text:
         return ''
@@ -841,6 +861,8 @@ def _persist_script_result(user_id, project_id, text, prompt, min_seconds, max_s
             ep_index = int(ep_index)
         if not isinstance(ep_index, int) or ep_index <= 0:
             ep_index = offset + i
+        elif offset > 0:
+            ep_index = offset + ep_index
         script_body = ep.get('script') or ''
         url = _upload_episode_text(script_body, user_id, project_id, script_id, ep_index)
         if not url:
@@ -901,11 +923,10 @@ def _generate_script_content(text, prompt, min_seconds, max_seconds):
             {"role": "user", "content": user_prompt}
         ],
         temperature=0.7,
-        top_p=0.9
+        top_p=0.9,
+        stream=True
     )
-    content = ''
-    if response.choices and len(response.choices) > 0:
-        content = response.choices[0].message.content.strip()
+    content = _collect_stream_content(response)
     json_text = _extract_json_block(content) or ''
     try:
         parsed = json.loads(json_text)
@@ -913,6 +934,99 @@ def _generate_script_content(text, prompt, min_seconds, max_seconds):
     except Exception as exc:
         raise RuntimeError('模型返回解析失败') from exc
     return _format_script_output(episodes)
+
+
+@app.route('/api/script-generate-stream', methods=['POST'])
+@login_required
+def api_script_generate_stream():
+    """流式生成剧本文本"""
+    try:
+        user_id = session.get('user_id')
+        project_id = get_current_project_id()
+        data = request.get_json() or {}
+        text = (data.get('text') or '').strip()
+        prompt = (data.get('prompt') or '').strip()
+        min_seconds = int(data.get('min_seconds') or 90)
+        max_seconds = int(data.get('max_seconds') or 150)
+
+        if not text:
+            return jsonify({'success': False, 'error': '请输入小说文本'}), 400
+        if min_seconds < 60 or max_seconds < min_seconds:
+            return jsonify({'success': False, 'error': '分集时长设置不合法'}), 400
+
+        api_key = os.environ.get('QWEN_API_KEY')
+        base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
+        if not api_key:
+            return jsonify({'success': False, 'error': 'QWEN_API_KEY 未配置'}), 500
+
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        system_prompt = "你是一位短剧编剧，擅长将小说改写为适合短剧拍摄的剧本。"
+        user_prompt = f"""请将以下小说文本改写为适配短剧拍摄的剧本，节奏紧凑，情节清晰。
+请按集拆分，每集时长在 {min_seconds}-{max_seconds} 秒之间。
+如果有需要，请合理续写或压缩剧情以符合时长要求。
+额外提示词（可为空）：{prompt}
+
+请严格返回JSON，不要包含markdown代码块：
+{{
+  "episodes": [
+    {{
+      "index": 1,
+      "title": "本集标题",
+      "duration_seconds": 120,
+      "script": "本集剧本文本"
+    }}
+  ]
+}}
+
+小说文本：
+{text}
+"""
+
+        def generate_stream():
+            full_text = ''
+            response = client.chat.completions.create(
+                model=os.environ.get('SCRIPT_GENERATE_MODEL', 'qwen3.5-plus'),
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                top_p=0.9,
+                stream=True
+            )
+            for chunk in response:
+                try:
+                    delta = chunk.choices[0].delta
+                    content = getattr(delta, 'content', None)
+                except Exception:
+                    content = None
+                if content:
+                    full_text += content
+                    yield format_sse_event({'type': 'chunk', 'content': content})
+
+            json_text = _extract_json_block(full_text) or ''
+            try:
+                parsed = json.loads(json_text)
+                episodes = parsed.get('episodes', []) if isinstance(parsed, dict) else []
+                result = _format_script_output(episodes)
+                script_id = _persist_script_result(user_id, project_id, text, prompt, min_seconds, max_seconds, result)
+                payload = {'type': 'complete', 'result': result, 'script_id': script_id}
+                yield format_sse_event(payload)
+            except Exception:
+                yield format_sse_event({'type': 'error', 'error': '模型返回解析失败'})
+
+        return Response(
+            stream_with_context(generate_stream()),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'X-Accel-Buffering': 'no'
+            }
+        )
+    except Exception as e:
+        user_id = session.get('user_id')
+        log_operation('剧本生成流式失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 def _generate_storyboard_content(script, prompt):
@@ -954,11 +1068,10 @@ def _generate_storyboard_content(script, prompt):
             {"role": "user", "content": user_prompt}
         ],
         temperature=0.7,
-        top_p=0.9
+        top_p=0.9,
+        stream=True
     )
-    content = ''
-    if response.choices and len(response.choices) > 0:
-        content = response.choices[0].message.content.strip()
+    content = _collect_stream_content(response)
     json_text = _extract_json_block(content) or ''
     try:
         parsed = json.loads(json_text)
@@ -1250,6 +1363,8 @@ def api_update_script_episode(episode_id):
     content = data.get('content')
     script_id = data.get('script_id')
     episode_index = data.get('episode_index') or ''
+    title = data.get('title')
+    duration_seconds = data.get('duration_seconds')
     if content is None:
         return jsonify({'success': False, 'error': '缺少内容'}), 400
     if not script_id:
@@ -1262,8 +1377,69 @@ def api_update_script_episode(episode_id):
     if not url:
         return jsonify({'success': False, 'error': 'OSS 上传失败'}), 500
     summary = _summarize_episode(content)
-    database.update_script_episode(episode_id, user_id, content_url=url, summary=summary)
+    database.update_script_episode(
+        episode_id,
+        user_id,
+        content_url=url,
+        summary=summary,
+        title=title,
+        episode_index=episode_index,
+        duration_seconds=duration_seconds
+    )
     return jsonify({'success': True, 'content_url': url, 'summary': summary})
+
+
+@app.route('/api/script-episodes/import', methods=['POST'])
+@login_required
+def api_import_script_episodes():
+    """导入分集文本文件"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    script_id = request.form.get('script_id')
+    files = request.files.getlist('files')
+    if not files:
+        return jsonify({'success': False, 'error': '未选择文件'}), 400
+    if script_id:
+        try:
+            script_id = int(script_id)
+        except ValueError:
+            script_id = None
+    if not script_id:
+        title = f"导入剧本 {datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        script_id = database.save_script_record(
+            user_id,
+            project_id,
+            title,
+            '',
+            '',
+            None,
+            None,
+            '',
+            []
+        )
+    import re
+    rows = []
+    for f in files:
+        filename = f.filename or ''
+        filename_base = os.path.splitext(filename)[0]
+        text = f.read().decode('utf-8', errors='ignore')
+        match = re.search(r'第\s*(\d+)\s*集[-_ ]?(.*)', filename_base)
+        ep_index = None
+        ep_title = ''
+        if match:
+            ep_index = int(match.group(1)) if match.group(1) else None
+            ep_title = (match.group(2) or '').strip()
+        url = _upload_episode_text(text, user_id, project_id, script_id, ep_index or '')
+        rows.append({
+            'episode_index': ep_index,
+            'title': ep_title,
+            'duration_seconds': None,
+            'summary': _summarize_episode(text),
+            'content_url': url
+        })
+    if rows:
+        database.save_script_episodes(script_id, user_id, project_id, rows)
+    return jsonify({'success': True, 'script_id': script_id, 'count': len(rows)})
 
 
 @app.route('/api/script-episodes/<int:episode_id>/content', methods=['GET'])
@@ -1436,6 +1612,47 @@ def api_storyboard_sample_images():
         return jsonify({'success': True, 'images': images})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/storyboard-episodes', methods=['GET', 'POST'])
+@login_required
+def api_storyboard_episodes():
+    """分镜分集记录：按剧本分集保存"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    if request.method == 'GET':
+        script_episode_id = request.args.get('script_episode_id')
+        if not script_episode_id:
+            return jsonify({'success': False, 'error': '缺少 script_episode_id'}), 400
+        try:
+            script_episode_id = int(script_episode_id)
+        except ValueError:
+            return jsonify({'success': False, 'error': 'script_episode_id 非法'}), 400
+        record = database.get_storyboard_episode(user_id, project_id, script_episode_id)
+        return jsonify({'success': True, 'record': record})
+
+    data = request.get_json() or {}
+    script_episode_id = data.get('script_episode_id')
+    if not script_episode_id:
+        return jsonify({'success': False, 'error': '缺少 script_episode_id'}), 400
+    try:
+        script_episode_id = int(script_episode_id)
+    except ValueError:
+        return jsonify({'success': False, 'error': 'script_episode_id 非法'}), 400
+    prompt = data.get('prompt') or ''
+    storyboard_json = data.get('storyboard_json') or {}
+    storyboard_text = data.get('storyboard_text') or ''
+    images_json = data.get('images_json') or {}
+    record_id = database.save_storyboard_episode(
+        user_id,
+        project_id,
+        script_episode_id,
+        prompt,
+        storyboard_json,
+        storyboard_text,
+        images_json
+    )
+    return jsonify({'success': True, 'id': record_id})
 
 
 @app.route('/api/script-templates', methods=['GET'])
@@ -4201,7 +4418,7 @@ def upload_sample_image():
             return jsonify({'success': False, 'error': 'OSS 配置不完整'}), 500
 
         category = request.form.get('category', 'person')
-        if category not in ('person', 'scene'):
+        if category not in ('person', 'scene', 'ref'):
             category = 'person'
 
         uploaded = []
@@ -4209,6 +4426,11 @@ def upload_sample_image():
 
         # 上传文件到 OSS
         import oss2  # noqa: F401
+
+        # 仅参考图（分镜制作用）：不入人物/场景库，只上传到 OSS 并返回 URL
+        ref_only = (category == 'ref')
+        if ref_only:
+            category = 'ref'
 
         for file in files:
             try:
@@ -4223,7 +4445,7 @@ def upload_sample_image():
                     failed.append({'filename': original_name, 'error': '文件名非法或为空'})
                     continue
 
-                # 生成对象键 - 按用户/项目与类别保存
+                # 生成对象键 - 按用户/项目与类别保存；ref 使用 sample/ref/ 不入库
                 if project_id:
                     object_key = f"sample/{category}/user_{user_id}/project_{project_id}/{filename}"
                 else:
@@ -4236,14 +4458,15 @@ def upload_sample_image():
                 # 生成公网访问 URL
                 url = f"https://{endpoint_full}/{object_key}"
 
-                # 保存到数据库
-                try:
-                    if category == 'person':
-                        database.save_person_asset(user_id, filename, url, project_id=project_id)
-                    else:
-                        database.save_scene_asset(user_id, filename, url, project_id=project_id)
-                except Exception as db_err:
-                    log_operation('保存到数据库失败', f'用户ID: {user_id}, 文件: {filename}, 错误: {str(db_err)}', 'WARNING')
+                # 仅 person/scene 入库；ref 仅作参考图，不入人物库/场景库
+                if not ref_only:
+                    try:
+                        if category == 'person':
+                            database.save_person_asset(user_id, filename, url, project_id=project_id)
+                        else:
+                            database.save_scene_asset(user_id, filename, url, project_id=project_id)
+                    except Exception as db_err:
+                        log_operation('保存到数据库失败', f'用户ID: {user_id}, 文件: {filename}, 错误: {str(db_err)}', 'WARNING')
 
                 log_operation('上传样本图', f'用户ID: {user_id}, 文件: {filename}, 类别: {category}, 大小: {len(file_content)} bytes')
                 uploaded.append({'url': url, 'filename': filename, 'key': object_key})

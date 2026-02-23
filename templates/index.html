@@ -38,6 +38,24 @@
             display: grid;
             gap: 14px;
         }
+        .panel-body label {
+            display: inline-block;
+            margin-bottom: 0.6em;
+        }
+        .panel-body select,
+        .panel-body input[type="text"],
+        .panel-body input[type="number"],
+        .panel-body input[type="file"] {
+            height: 32px;
+            padding: 4px 10px;
+        }
+        .panel-body .filename-input {
+            height: 32px;
+        }
+        .panel-body textarea {
+            height: 96px;
+            min-height: 96px;
+        }
         .form-row {
             display: grid;
             gap: 12px;
@@ -94,6 +112,47 @@
             background: rgba(86, 111, 255, 0.18);
             border-radius: 999px;
             font-size: 0.82rem;
+        }
+        .upload-ref-thumbs {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+            gap: 10px;
+            margin-top: 8px;
+        }
+        .upload-ref-thumb {
+            position: relative;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid rgba(86, 111, 255, 0.25);
+            cursor: pointer;
+            aspect-ratio: 1;
+            background: rgba(0,0,0,0.2);
+        }
+        .upload-ref-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .upload-ref-thumb .remove-ref-btn {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            border: none;
+            background: rgba(0,0,0,0.6);
+            color: #fff;
+            font-size: 14px;
+            line-height: 1;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .upload-ref-thumb .remove-ref-btn:hover {
+            background: rgba(220, 53, 69, 0.9);
         }
         .result-grid {
             display: grid;
@@ -183,7 +242,6 @@
                     <a href="/video-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
                     <a href="/video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
                     <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
-                    <a href="/storyboard" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">分镜生成</span></a>
                     <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
                     <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
                 </div>
@@ -191,6 +249,7 @@
                     <div className="sidebar-nav-user-info">
                         <div className="sidebar-nav-user-avatar">👤</div>
                         <div className="sidebar-nav-user-name">{username}</div>
+                        <a href="/logout" className="sidebar-nav-logout">登出</a>
                     </div>
                     <div style={{ marginTop: '8px' }}>
                         <label style={{ fontSize: '0.85em', color: '#cbd4f5' }}>当前项目</label>
@@ -205,7 +264,6 @@
                             ))}
                         </select>
                     </div>
-                    <a href="/logout" className="sidebar-nav-logout">登出</a>
                 </div>
             </nav>
         );
@@ -247,6 +305,30 @@
                 fetch('/api/image-styles').then(res => res.json()).then(data => {
                     if (data.success) setStyles(data.styles || []);
                 });
+            }, []);
+
+            // 从生图任务「重新生成」跳转时恢复参数（与 localStorage regenerateData 约定一致）
+            useEffect(() => {
+                try {
+                    const raw = localStorage.getItem('regenerateData');
+                    if (!raw) return;
+                    const data = JSON.parse(raw);
+                    if (data.timestamp && Date.now() - data.timestamp > 5 * 60 * 1000) {
+                        localStorage.removeItem('regenerateData');
+                        return;
+                    }
+                    if (data.prompt) setPrompt(data.prompt);
+                    if (data.aspect_ratio) setAspectRatio(data.aspect_ratio);
+                    if (data.resolution) setResolution(String(data.resolution).toLowerCase() === '4k' ? '4k' : '2k');
+                    if (data.generate_mode) setGenerateMode(data.generate_mode);
+                    if (data.seed != null) setSeed(Number(data.seed));
+                    if (Array.isArray(data.sample_image_urls) && data.sample_image_urls.length > 0) {
+                        setSelectedSample(data.sample_image_urls.slice(0, 4));
+                    }
+                    localStorage.removeItem('regenerateData');
+                } catch (e) {
+                    localStorage.removeItem('regenerateData');
+                }
             }, []);
 
             useEffect(() => {
@@ -459,31 +541,46 @@
                                             </div>
                                             <div>
                                                 <label>文件名</label>
-                                                <input value={outputFilename} onChange={(e) => setOutputFilename(e.target.value)} placeholder="可选" />
+                                                <input className="filename-input" value={outputFilename} onChange={(e) => setOutputFilename(e.target.value)} placeholder="可选" />
                                             </div>
                                         </div>
                                         <div>
                                             <div className="panel-title" style={{ marginBottom: '6px' }}>参考图</div>
-                                            <div className="reference-row">
-                                                {referenceChips.length === 0 && <div className="small-hint">未选择参考图</div>}
-                                                {referenceChips.map((item, idx) => (
-                                                    <span key={idx} className="reference-chip">
-                                                        {item.type === 'upload' ? item.name : '示例图'}
-                                                    </span>
+                                            <div className="upload-ref-thumbs">
+                                                {selectedSample.map((url) => (
+                                                    <div
+                                                        key={url}
+                                                        className="upload-ref-thumb"
+                                                        onClick={() => setModalImage(url)}
+                                                    >
+                                                        <img src={url} alt="示例图" />
+                                                        <button
+                                                            type="button"
+                                                            className="remove-ref-btn"
+                                                            onClick={(e) => { e.stopPropagation(); toggleSample({ url }); }}
+                                                            title="取消选择"
+                                                        >×</button>
+                                                    </div>
                                                 ))}
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label>上传参考图（最多 4 张）</label>
-                                            <input type="file" accept="image/*" multiple onChange={(e) => handleUploadFiles(e.target.files)} />
-                                            <div className="reference-row" style={{ marginTop: '8px' }}>
                                                 {uploadedFiles.map((item, idx) => (
-                                                    <div key={idx} className="reference-chip">
-                                                        {item.file.name}
-                                                        <button className="btn btn-secondary" onClick={() => removeUploaded(idx)}>移除</button>
+                                                    <div
+                                                        key={`upload-${idx}`}
+                                                        className="upload-ref-thumb"
+                                                        onClick={() => setModalImage(item.preview)}
+                                                    >
+                                                        <img src={item.preview} alt={item.file.name} />
+                                                        <button
+                                                            type="button"
+                                                            className="remove-ref-btn"
+                                                            onClick={(e) => { e.stopPropagation(); removeUploaded(idx); }}
+                                                            title="移除"
+                                                        >×</button>
                                                     </div>
                                                 ))}
                                             </div>
+                                            {(referenceChips.length === 0) && <div className="small-hint">未选择参考图，可从下方示例图库选择或上传</div>}
+                                            <label style={{ marginTop: '12px', display: 'block' }}>上传参考图（最多 4 张）</label>
+                                            <input type="file" accept="image/*" multiple onChange={(e) => handleUploadFiles(e.target.files)} />
                                         </div>
                                         <button className="btn btn-primary" onClick={handleGenerate} disabled={loading}>
                                             {loading ? '生成中...' : '开始生成'}
@@ -539,7 +636,7 @@
                     </div>
                     {modalImage && (
                         <div className="modal" onClick={() => setModalImage(null)}>
-                            <img src={modalImage} alt="preview" />
+                            <img src={modalImage} alt="preview" onClick={(e) => e.stopPropagation()} />
                         </div>
                     )}
                 </div>
@@ -1323,10 +1420,6 @@
                 <span class="sidebar-nav-icon">📜</span>
                 <span class="sidebar-nav-text">剧本生成</span>
             </a>
-            <a href="/storyboard" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🎬</span>
-                <span class="sidebar-nav-text">分镜生成</span>
-            </a>
             <a href="/storyboard-studio" class="sidebar-nav-item">
                 <span class="sidebar-nav-icon">🧩</span>
                 <span class="sidebar-nav-text">分镜制作</span>
@@ -1351,6 +1444,7 @@
             <div class="sidebar-nav-user-info">
                 <div class="sidebar-nav-user-avatar">👤</div>
                 <div class="sidebar-nav-user-name">{{ user.username }}</div>
+                <a href="/logout" class="sidebar-nav-logout">登出</a>
             </div>
             <div style="margin-top: 8px;">
                 <label style="font-size: 0.85em; color: #666;">当前项目</label>
@@ -1358,7 +1452,6 @@
                     <option>加载中...</option>
                 </select>
             </div>
-            <a href="/logout" class="sidebar-nav-logout">登出</a>
         </div>
     </nav>
     
@@ -1437,7 +1530,7 @@
                     
                     <div class="form-row">
                         <div class="form-group">
-                            <label for="aspect_ratio">图片比例</label>
+                            <label for="aspect_ratio">图片比例：</label>
                             <select id="aspect_ratio" name="aspect_ratio">
                                 <option value="9:16" selected>9:16 (手机屏)</option>
                                 <option value="1:1">1:1 (正方形)</option>
@@ -1450,7 +1543,7 @@
                         </div>
                         
                         <div class="form-group">
-                            <label for="resolution">分辨率</label>
+                            <label for="resolution">分辨率：</label>
                             <select id="resolution" name="resolution">
                                 <option value="2k" selected>2K</option>
                                 <option value="4k">4K</option>
@@ -1460,7 +1553,7 @@
                     
                     <div class="form-row">
                         <div class="form-group">
-                            <label for="generate_mode">生图模式</label>
+                            <label for="generate_mode">生图模式：</label>
                             <select id="generate_mode" name="generate_mode">
                                 <option value="single" selected>单图</option>
                                 <option value="group">组图</option>
@@ -1468,7 +1561,7 @@
                         </div>
                         
                         <div class="form-group">
-                            <label for="num_images">生成数量</label>
+                            <label for="num_images">生成数量：</label>
                             <input type="number" id="num_images" name="num_images" value="4" min="1" max="20">
                             <small style="color: #666; font-size: 0.85em;">单图模式：生成单图数量；组图模式：生成组数</small>
                         </div>
@@ -1476,7 +1569,7 @@
                     
                     <div class="form-row">
                         <div class="form-group">
-                            <label for="image_style">图片风格</label>
+                            <label for="image_style">图片风格：</label>
                             <select id="image_style" name="image_style">
                                 <option value="">无（使用默认风格）</option>
                             </select>

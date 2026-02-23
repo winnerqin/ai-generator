@@ -11,6 +11,35 @@
     z-index: 1000;
     overflow-y: auto;
     overflow-x: hidden;
+    font-size: 14px;
+    line-height: 1.2;
+}
+
+/* 统一为单图生成的菜单间距 */
+.sidebar-compact .sidebar-nav {
+    font-size: 14px;
+    line-height: 1.2;
+}
+
+.sidebar-compact .sidebar-nav-menu {
+    padding: 8px 0;
+    gap: 2px;
+}
+
+.sidebar-compact .sidebar-nav-item {
+    padding: 0 20px;
+    height: 44px;
+    min-height: 44px;
+    line-height: 1.2;
+    box-sizing: border-box;
+}
+
+.sidebar-compact .sidebar-nav-text {
+    line-height: 1.2;
+}
+
+.sidebar-compact .sidebar-nav-icon {
+    margin-right: 8px;
 }
 
 .sidebar-nav.collapsed {
@@ -18,12 +47,14 @@
 }
 
 .sidebar-nav-header {
-    padding: 20px;
+    padding: 0 20px;
+    height: 70px;
+    min-height: 70px;
+    box-sizing: border-box;
     border-bottom: 1px solid rgba(255,255,255,0.1);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    min-height: 70px;
 }
 
 .sidebar-nav-title {
@@ -33,11 +64,15 @@
     white-space: nowrap;
     overflow: hidden;
     transition: opacity 0.3s;
+    /* 与菜单项文字左对齐：菜单项为 padding 20px + icon 24px + gap 10px = 54px，header 已有 padding 20px，故补 34px */
+    padding-left: 34px;
+    box-sizing: border-box;
 }
 
 .sidebar-nav.collapsed .sidebar-nav-title {
     opacity: 0;
     width: 0;
+    padding-left: 0;
 }
 
 .sidebar-nav-toggle {
@@ -60,17 +95,25 @@
 }
 
 .sidebar-nav-menu {
-    padding: 10px 0;
+    padding: 8px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .sidebar-nav-item {
     display: flex;
     align-items: center;
-    padding: 12px 20px;
+    padding: 0 20px;
+    height: 44px;
+    min-height: 44px;
+    box-sizing: border-box;
+    gap: 10px;
     color: rgba(255,255,255,0.8);
     text-decoration: none;
     transition: all 0.3s;
     position: relative;
+    line-height: 1.2;
 }
 
 .sidebar-nav-item:hover {
@@ -97,19 +140,43 @@
 .sidebar-nav-icon {
     font-size: 20px;
     width: 24px;
-    text-align: center;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
-    margin-right: 12px;
+    margin-right: 8px;
+    line-height: 1;
 }
 
 .sidebar-nav.collapsed .sidebar-nav-icon {
     margin-right: 0;
 }
 
+.sidebar-nav-user > div + div {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+    margin-top: 8px;
+}
+
+.sidebar-nav-user > div + div label {
+    margin: 0;
+    white-space: nowrap;
+}
+
+.sidebar-nav-user > div + div select {
+    width: auto !important;
+    min-width: 120px;
+    height: 30px;
+    padding: 4px 8px !important;
+}
+
 .sidebar-nav-text {
     white-space: nowrap;
     overflow: hidden;
     transition: opacity 0.3s;
+    line-height: 1.2;
 }
 
 .sidebar-nav.collapsed .sidebar-nav-text {
@@ -138,6 +205,12 @@
     align-items: center;
     gap: 10px;
     margin-bottom: 10px;
+    width: 100%;
+}
+.sidebar-nav-user-info .sidebar-nav-logout {
+    margin-left: auto;
+    width: auto;
+    flex-shrink: 0;
 }
 
 .sidebar-nav-user-avatar {
@@ -167,8 +240,7 @@
 }
 
 .sidebar-nav-logout {
-    width: 100%;
-    padding: 8px;
+    padding: 6px 12px;
     background: #1e3a5f; /* 深蓝色 */
     color: white;
     border: 1px solid rgba(255,255,255,0.2);
@@ -176,6 +248,8 @@
     cursor: pointer;
     font-size: 14px;
     transition: all 0.3s;
+    text-decoration: none;
+    display: inline-block;
 }
 
 .sidebar-nav-logout:hover {

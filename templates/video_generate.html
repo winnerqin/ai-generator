@@ -31,6 +31,8 @@
         .library-card { border-radius: 12px; overflow: hidden; border: 1px solid rgba(86,111,255,0.25); cursor: pointer; }
         .library-card img { width: 100%; height: 140px; object-fit: cover; display: block; }
         .dropzone { border: 2px dashed rgba(86,111,255,0.5); border-radius: 12px; padding: 14px; text-align: center; cursor: pointer; }
+        .panel textarea { min-height: 96px; height: 96px; resize: vertical; box-sizing: border-box; }
+        .panel select, .panel input[type="number"], .panel input[type="text"] { height: 32px; box-sizing: border-box; }
     </style>
 </head>
 <body>
@@ -60,7 +62,6 @@
                     <a href="/video-generate" className="sidebar-nav-item active"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
                     <a href="/video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
                     <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
-                    <a href="/storyboard" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">分镜生成</span></a>
                     <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
                     <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
                 </div>
@@ -68,6 +69,7 @@
                     <div className="sidebar-nav-user-info">
                         <div className="sidebar-nav-user-avatar">👤</div>
                         <div className="sidebar-nav-user-name">{username}</div>
+                        <a href="/logout" className="sidebar-nav-logout">登出</a>
                     </div>
                     <div style={{ marginTop: '8px' }}>
                         <label style={{ fontSize: '0.85em', color: '#cbd4f5' }}>当前项目</label>
@@ -82,7 +84,6 @@
                             ))}
                         </select>
                     </div>
-                    <a href="/logout" className="sidebar-nav-logout">登出</a>
                 </div>
             </nav>
         );
@@ -113,7 +114,7 @@
             const [libraryAssets, setLibraryAssets] = useState([]);
 
             useEffect(() => {
-                document.body.classList.add('react-theme');
+                document.body.classList.add('react-theme', 'sidebar-compact');
             }, []);
 
             useEffect(() => {

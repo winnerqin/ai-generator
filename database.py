@@ -194,6 +194,22 @@ def init_database():
         )
     ''')
 
+    # 分镜分集记录（按剧本分集保存）
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS storyboard_episode_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            script_episode_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            project_id INTEGER,
+            prompt TEXT,
+            storyboard_json TEXT,
+            storyboard_text TEXT,
+            images_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     # 迁移分镜保存记录字段
     ensure_column('storyboard_saves', 'series_id', 'INTEGER')
     ensure_column('storyboard_saves', 'version', 'INTEGER DEFAULT 1')
@@ -1369,21 +1385,21 @@ def list_all_script_episodes(user_id, project_id=None):
             SELECT id, script_id, episode_index, title, duration_seconds, summary, content_url, created_at, updated_at
             FROM script_episode_records
             WHERE user_id = ?
-            ORDER BY created_at DESC, script_id DESC, episode_index ASC, id ASC
+            ORDER BY id ASC
         ''', (user_id,))
     else:
         cursor.execute('''
             SELECT id, script_id, episode_index, title, duration_seconds, summary, content_url, created_at, updated_at
             FROM script_episode_records
             WHERE user_id = ? AND project_id = ?
-            ORDER BY created_at DESC, script_id DESC, episode_index ASC, id ASC
+            ORDER BY id ASC
         ''', (user_id, project_id))
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def update_script_episode(episode_id, user_id, content_url=None, summary=None):
+def update_script_episode(episode_id, user_id, content_url=None, summary=None, title=None, episode_index=None, duration_seconds=None):
     """更新剧本分集内容"""
     fields = []
     values = []
@@ -1393,6 +1409,15 @@ def update_script_episode(episode_id, user_id, content_url=None, summary=None):
     if summary is not None:
         fields.append('summary = ?')
         values.append(summary)
+    if title is not None:
+        fields.append('title = ?')
+        values.append(title)
+    if episode_index is not None:
+        fields.append('episode_index = ?')
+        values.append(episode_index)
+    if duration_seconds is not None:
+        fields.append('duration_seconds = ?')
+        values.append(duration_seconds)
     if not fields:
         return
     fields.append('updated_at = ?')
@@ -1538,6 +1563,74 @@ def list_storyboard_versions(user_id, project_id, series_id):
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def save_storyboard_episode(user_id, project_id, script_episode_id, prompt, storyboard_json, storyboard_text, images_json):
+    """保存分镜分集记录（按剧本分集）"""
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id FROM storyboard_episode_records
+        WHERE script_episode_id = ? AND user_id = ?
+    ''', (script_episode_id, user_id))
+    row = cursor.fetchone()
+    storyboard_json_text = json.dumps(storyboard_json or {}, ensure_ascii=False)
+    images_json_text = json.dumps(images_json or {}, ensure_ascii=False)
+    if row:
+        record_id = row[0]
+        cursor.execute('''
+            UPDATE storyboard_episode_records
+            SET prompt = ?, storyboard_json = ?, storyboard_text = ?, images_json = ?, updated_at = ?
+            WHERE id = ? AND user_id = ?
+        ''', (
+            prompt, storyboard_json_text, storyboard_text, images_json_text, now, record_id, user_id
+        ))
+    else:
+        cursor.execute('''
+            INSERT INTO storyboard_episode_records (
+                script_episode_id, user_id, project_id, prompt, storyboard_json, storyboard_text, images_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            script_episode_id, user_id, project_id, prompt, storyboard_json_text, storyboard_text, images_json_text, now, now
+        ))
+        record_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return record_id
+
+
+def get_storyboard_episode(user_id, project_id, script_episode_id):
+    """获取分镜分集记录"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('''
+            SELECT * FROM storyboard_episode_records
+            WHERE script_episode_id = ? AND user_id = ?
+            ORDER BY updated_at DESC LIMIT 1
+        ''', (script_episode_id, user_id))
+    else:
+        cursor.execute('''
+            SELECT * FROM storyboard_episode_records
+            WHERE script_episode_id = ? AND user_id = ? AND project_id = ?
+            ORDER BY updated_at DESC LIMIT 1
+        ''', (script_episode_id, user_id, project_id))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    record = dict(row)
+    for key in ('storyboard_json', 'images_json'):
+        if record.get(key):
+            try:
+                record[key] = json.loads(record[key])
+            except Exception:
+                record[key] = {}
+        else:
+            record[key] = {}
+    return record
 
 
 def get_storyboard_record(user_id, project_id, record_id):

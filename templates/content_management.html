@@ -27,9 +27,18 @@
         .asset-card img, .asset-card video { width: 100%; height: 140px; object-fit: cover; display: block; }
         .asset-info { padding: 8px 10px; font-size: 0.8rem; }
         .upload-zone { border: 2px dashed rgba(86,111,255,0.5); border-radius: 12px; padding: 18px; text-align: center; cursor: pointer; }
-        .modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(6,10,20,0.7); z-index: 2000; }
-        .modal-card { width: min(980px, 92vw); max-height: 86vh; overflow: auto; padding: 16px; border-radius: 16px; }
-        .modal-media { width: 100%; border-radius: 12px; }
+        .modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(6,10,20,0.85); z-index: 2000; overflow: hidden; }
+        .modal-content-wrap { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; padding: 48px 56px; box-sizing: border-box; }
+        .modal-content-wrap img, .modal-content-wrap video { max-width: 100%; max-height: 100%; object-fit: contain; }
+        .modal-nav-btn { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,0.15); color: #fff; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 2001; }
+        .modal-nav-btn:hover { background: rgba(255,255,255,0.25); }
+        .modal-nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .modal-nav-btn.prev { left: 12px; }
+        .modal-nav-btn.next { right: 12px; }
+        .modal-top-bar { position: absolute; top: 0; left: 0; right: 0; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; background: linear-gradient(to bottom, rgba(0,0,0,0.5), transparent); z-index: 2001; color: #fff; }
+        .modal-top-bar .title { font-size: 0.95rem; }
+        .modal-top-bar .close-btn { padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.3); background: rgba(0,0,0,0.3); color: #fff; cursor: pointer; }
+        .modal-index-hint { font-size: 0.85rem; opacity: 0.9; }
         .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: rgba(86,111,255,0.2); font-size: 0.75rem; }
     </style>
 </head>
@@ -67,7 +76,6 @@
                     <a href="/video-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
                     <a href="/video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
                     <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
-                    <a href="/storyboard" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">分镜生成</span></a>
                     <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
                     <a href="/content-management" className="sidebar-nav-item active"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
                 </div>
@@ -75,6 +83,7 @@
                     <div className="sidebar-nav-user-info">
                         <div className="sidebar-nav-user-avatar">👤</div>
                         <div className="sidebar-nav-user-name">{username}</div>
+                        <a href="/logout" className="sidebar-nav-logout">登出</a>
                     </div>
                     <div style={{ marginTop: '8px' }}>
                         <label style={{ fontSize: '0.85em', color: '#cbd4f5' }}>当前项目</label>
@@ -89,7 +98,6 @@
                             ))}
                         </select>
                     </div>
-                    <a href="/logout" className="sidebar-nav-logout">登出</a>
                 </div>
             </nav>
         );
@@ -107,7 +115,7 @@
             const [modalIndex, setModalIndex] = useState(null);
 
             useEffect(() => {
-                document.body.classList.add('react-theme');
+                document.body.classList.add('react-theme', 'sidebar-compact');
             }, []);
 
             useEffect(() => {
@@ -247,6 +255,19 @@
 
             const currentAsset = modalIndex !== null ? filteredAssets[modalIndex] : null;
             const isVideo = currentAsset && (currentTab === 'video' || currentAsset.url?.match(/\.(mp4|webm|mov)$/i));
+            const canPrev = modalIndex !== null && modalIndex > 0;
+            const canNext = modalIndex !== null && modalIndex < filteredAssets.length - 1;
+
+            useEffect(() => {
+                if (modalIndex === null) return;
+                const onKey = (e) => {
+                    if (e.key === 'Escape') setModalIndex(null);
+                    if (e.key === 'ArrowLeft' && modalIndex > 0) setModalIndex(modalIndex - 1);
+                    if (e.key === 'ArrowRight' && modalIndex < filteredAssets.length - 1) setModalIndex(modalIndex + 1);
+                };
+                window.addEventListener('keydown', onKey);
+                return () => window.removeEventListener('keydown', onKey);
+            }, [modalIndex, filteredAssets.length]);
 
             return (
                 <div className="app-shell">
@@ -338,17 +359,34 @@
 
                     {modalIndex !== null && currentAsset && (
                         <div className="modal" onClick={() => setModalIndex(null)}>
-                            <div className="modal-card panel" onClick={(e) => e.stopPropagation()}>
-                                <div className="row space">
-                                    <div className="section-title">{currentAsset.filename || '预览'}</div>
-                                    <button className="btn btn-secondary" onClick={() => setModalIndex(null)}>关闭</button>
+                            <div className="modal-top-bar" onClick={(e) => e.stopPropagation()}>
+                                <span className="title">{currentAsset.filename || '预览'}</span>
+                                <div className="row" style={{ gap: '10px', alignItems: 'center' }}>
+                                    <span className="modal-index-hint">{modalIndex + 1} / {filteredAssets.length}</span>
+                                    <button className="close-btn" onClick={() => setModalIndex(null)}>关闭</button>
                                 </div>
+                            </div>
+                            <button
+                                type="button"
+                                className="modal-nav-btn prev"
+                                onClick={(e) => { e.stopPropagation(); if (modalIndex > 0) setModalIndex(modalIndex - 1); }}
+                                disabled={!canPrev}
+                                aria-label="上一张"
+                            >‹</button>
+                            <div className="modal-content-wrap" onClick={(e) => e.stopPropagation()}>
                                 {isVideo ? (
-                                    <video className="modal-media" controls src={currentAsset.url}></video>
+                                    <video key={currentAsset.url} controls autoPlay src={currentAsset.url} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
                                 ) : (
-                                    <img className="modal-media" src={currentAsset.url} alt={currentAsset.filename || 'asset'} />
+                                    <img src={currentAsset.url} alt={currentAsset.filename || 'asset'} />
                                 )}
                             </div>
+                            <button
+                                type="button"
+                                className="modal-nav-btn next"
+                                onClick={(e) => { e.stopPropagation(); if (modalIndex < filteredAssets.length - 1) setModalIndex(modalIndex + 1); }}
+                                disabled={!canNext}
+                                aria-label="下一张"
+                            >›</button>
                         </div>
                     )}
                 </div>

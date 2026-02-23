@@ -123,7 +123,7 @@
         }
     </style>
 </head>
-<body>
+<body class="sidebar-compact">
     <div id="reactApp"></div>
     <nav class="sidebar-nav" id="sidebarNav">
         <div class="sidebar-nav-header">
@@ -157,10 +157,6 @@
                 <span class="sidebar-nav-icon">📜</span>
                 <span class="sidebar-nav-text">剧本生成</span>
             </a>
-            <a href="/storyboard" class="sidebar-nav-item active">
-                <span class="sidebar-nav-icon">🎬</span>
-                <span class="sidebar-nav-text">分镜生成</span>
-            </a>
             <a href="/storyboard-studio" class="sidebar-nav-item">
                 <span class="sidebar-nav-icon">🧩</span>
                 <span class="sidebar-nav-text">分镜制作</span>
@@ -185,6 +181,7 @@
             <div class="sidebar-nav-user-info">
                 <div class="sidebar-nav-user-avatar">👤</div>
                 <div class="sidebar-nav-user-name">{{ user.username }}</div>
+                <a href="/logout" class="sidebar-nav-logout">登出</a>
             </div>
             <div style="margin-top: 8px;">
                 <label style="font-size: 0.85em; color: #666;">当前项目</label>
@@ -192,57 +189,15 @@
                     <option>加载中...</option>
                 </select>
             </div>
-            <a href="/logout" class="sidebar-nav-logout">登出</a>
         </div>
     </nav>
 
     <div class="main-content">
         <div class="container">
             <div class="content" style="padding-top: 20px;">
-                <div class="page-title">🎬 分镜生成</div>
-
                 <div class="panel">
-                    <div class="panel-title">分镜工作流（ComfyUI 风格）</div>
-                    <div class="workflow">
-                        <div class="workflow-node">
-                            <div class="node-title">输入剧本</div>
-                            <div class="node-body">粘贴剧本文本</div>
-                            <textarea id="storyboardInput" placeholder="粘贴剧本文本..."></textarea>
-                            <div class="form-row" style="margin-top: 8px;">
-                                <button class="btn btn-secondary" onclick="clearStoryboard()">清空</button>
-                            </div>
-                        </div>
-                        <div class="workflow-arrow">➡</div>
-                        <div class="workflow-node">
-                            <div class="node-title">生成分镜</div>
-                            <div class="node-body">按集/场拆分，输出结构化 JSON</div>
-                            <textarea id="storyboardPrompt" placeholder="编辑分镜生成提示词..."></textarea>
-                            <div class="form-row" style="margin-top: 8px;">
-                                <button class="btn btn-primary" onclick="generateStoryboard()">生成分镜</button>
-                                <button class="btn btn-secondary" onclick="copyText('storyboardOutput')">复制</button>
-                                <div id="storyboardProgress" class="small-hint"></div>
-                            </div>
-                            <textarea id="storyboardOutput" placeholder="分镜 JSON 输出..."></textarea>
-                            <div class="form-row" style="margin-top: 8px;">
-                                <input type="text" id="storyboardTitle" placeholder="保存标题（可选）">
-                                <button class="btn btn-primary" onclick="saveStoryboard()">保存</button>
-                            </div>
-                            <div class="panel-title" style="margin-top: 10px;">分镜结构预览（按集/场）</div>
-                            <div id="storyboardPreview" class="episode-list"></div>
-                        </div>
-                        <div class="workflow-arrow">➡</div>
-                        <div class="workflow-node">
-                            <div class="node-title">分镜生成示例图</div>
-                            <div class="node-body">基于分镜场次生成示例图</div>
-                            <button class="btn btn-secondary" onclick="generateStoryboardImages()">生成示例图</button>
-                            <div id="storyboardImages" class="episode-list" style="margin-top: 10px;"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <div class="panel-title">已保存分镜</div>
-                    <div id="storyboardRecords" class="episode-list"></div>
+                    <div class="panel-title">分镜生成已下线</div>
+                    <div class="small-hint">请使用「分镜制作」页面完成分镜生产流程。</div>
                 </div>
             </div>
         </div>
@@ -250,228 +205,6 @@
 
     <script>
         let currentProjectId = null;
-        let currentStoryboardRecordId = null;
-        let lastStoryboardJson = null;
-        let pollingTimer = null;
-
-        function updateStoryboardProgress(text) {
-            const el = document.getElementById('storyboardProgress');
-            if (el) {
-                el.textContent = text || '';
-            }
-        }
-
-        function clearStoryboard() {
-            document.getElementById('storyboardInput').value = '';
-        }
-
-        async function generateStoryboard() {
-            const script = document.getElementById('storyboardInput').value.trim();
-            const prompt = document.getElementById('storyboardPrompt').value.trim();
-            if (!script) {
-                alert('请先输入剧本文本');
-                return;
-            }
-            updateStoryboardProgress('生成中 0%');
-            const resp = await fetch('/api/storyboard-generate-async', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ script, prompt })
-            });
-            const data = await resp.json();
-            if (!data.success) {
-                alert(data.error || '生成失败');
-                updateStoryboardProgress('');
-                return;
-            }
-            const taskId = data.task_id;
-            if (taskId) {
-                const key = `storyboard_task_${currentProjectId || 'default'}`;
-                localStorage.setItem(key, String(taskId));
-                pollStoryboardTask(taskId);
-            }
-        }
-
-        async function generateStoryboardImages() {
-            let storyboardJson = null;
-            try {
-                storyboardJson = JSON.parse(document.getElementById('storyboardOutput').value || '{}');
-            } catch (e) {
-                alert('分镜 JSON 格式错误，请先生成或修正分镜');
-                return;
-            }
-            const resp = await fetch('/api/storyboard-sample-images', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ storyboard: storyboardJson, max_images: 6 })
-            });
-            const data = await resp.json();
-            if (!data.success) {
-                alert(data.error || '生成示例图失败');
-                return;
-            }
-            const container = document.getElementById('storyboardImages');
-            const images = data.images || [];
-            if (images.length === 0) {
-                container.innerHTML = '<div class="small-hint">暂无示例图</div>';
-                return;
-            }
-            container.innerHTML = images.map(img => `
-                <div class="episode-item">
-                    <div class="small-hint">第${img.episode_index || ''}集-场${img.scene_index || ''}</div>
-                    <img src="${img.url}" style="max-width: 220px; border-radius: 6px; margin-top: 6px;" />
-                </div>
-            `).join('');
-        }
-
-        function copyText(id) {
-            const el = document.getElementById(id);
-            el.select();
-            document.execCommand('copy');
-        }
-
-        async function saveStoryboard() {
-            let jsonData = {};
-            const rawText = document.getElementById('storyboardOutput').value || '';
-            try {
-                jsonData = JSON.parse(rawText);
-            } catch (e) {
-                jsonData = lastStoryboardJson || {};
-            }
-            const payload = {
-                id: currentStoryboardRecordId,
-                title: document.getElementById('storyboardTitle').value.trim(),
-                script_text: document.getElementById('storyboardInput').value || '',
-                prompt: document.getElementById('storyboardPrompt').value || '',
-                storyboard_json: jsonData,
-                storyboard_text: rawText
-            };
-            const resp = await fetch('/api/storyboard-saves', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const data = await resp.json();
-            if (!data.success) {
-                alert(data.error || '保存失败');
-                return;
-            }
-            currentStoryboardRecordId = data.id;
-            await loadStoryboardRecords();
-        }
-
-        async function loadStoryboardRecords() {
-            const container = document.getElementById('storyboardRecords');
-            if (!container) return;
-            const resp = await fetch('/api/storyboard-saves');
-            const data = await resp.json();
-            if (!data.success) {
-                container.innerHTML = '<div class="small-hint">加载失败</div>';
-                return;
-            }
-            const records = data.records || [];
-            if (records.length === 0) {
-                container.innerHTML = '<div class="small-hint">暂无保存记录</div>';
-                return;
-            }
-            container.innerHTML = records.map(r => `
-                <div class="episode-item">
-                    <div>${r.title || '未命名'}</div>
-                    <div class="small-hint">${r.updated_at || r.created_at || ''}</div>
-                    <div class="form-row" style="margin-top: 6px;">
-                        <button class="btn btn-secondary" onclick="loadStoryboardRecord(${r.id})">查看/继续</button>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        async function loadStoryboardRecord(recordId) {
-            const resp = await fetch(`/api/storyboard-saves/${recordId}`);
-            const data = await resp.json();
-            if (!data.success) {
-                alert(data.error || '加载失败');
-                return;
-            }
-            const record = data.record || {};
-            currentStoryboardRecordId = record.id;
-            document.getElementById('storyboardTitle').value = record.title || '';
-            document.getElementById('storyboardInput').value = record.script_text || '';
-            document.getElementById('storyboardPrompt').value = record.prompt || '';
-            const jsonData = record.storyboard_json || null;
-            if (jsonData && Object.keys(jsonData).length > 0) {
-                document.getElementById('storyboardOutput').value = JSON.stringify(jsonData, null, 2);
-                lastStoryboardJson = jsonData;
-                renderStoryboardPreview(jsonData);
-            } else {
-                document.getElementById('storyboardOutput').value = record.storyboard_text || '';
-                lastStoryboardJson = null;
-                renderStoryboardPreview(null);
-            }
-        }
-
-        async function pollStoryboardTask(taskId) {
-            if (pollingTimer) {
-                clearTimeout(pollingTimer);
-            }
-            const resp = await fetch(`/api/tasks/${taskId}`);
-            const data = await resp.json();
-            if (!data.success || !data.task) {
-                updateStoryboardProgress('');
-                return;
-            }
-            const task = data.task;
-            updateStoryboardProgress(`生成中 ${task.progress || 0}%`);
-            if (task.status === 'completed') {
-                updateStoryboardProgress('完成');
-                const result = task.result || {};
-                const jsonData = result.storyboard_json;
-                if (jsonData) {
-                    document.getElementById('storyboardOutput').value = JSON.stringify(jsonData, null, 2);
-                    lastStoryboardJson = jsonData;
-                    renderStoryboardPreview(jsonData);
-                } else {
-                    document.getElementById('storyboardOutput').value = result.storyboard_text || '';
-                    lastStoryboardJson = null;
-                    renderStoryboardPreview(null);
-                }
-                return;
-            }
-            if (task.status === 'failed') {
-                updateStoryboardProgress('失败');
-                if (task.error) {
-                    alert(task.error);
-                }
-                return;
-            }
-            pollingTimer = setTimeout(() => pollStoryboardTask(taskId), 2000);
-        }
-
-        async function resumeStoryboardTask() {
-            const key = `storyboard_task_${currentProjectId || 'default'}`;
-            const taskId = localStorage.getItem(key);
-            if (taskId) {
-                pollStoryboardTask(taskId);
-            }
-        }
-
-        function renderStoryboardPreview(data) {
-            const container = document.getElementById('storyboardPreview');
-            if (!container) return;
-            if (!data || !Array.isArray(data.episodes) || data.episodes.length === 0) {
-                container.innerHTML = '<div class="small-hint">暂无结构化分镜</div>';
-                return;
-            }
-            container.innerHTML = data.episodes.map(ep => {
-                const scenes = Array.isArray(ep.scenes) ? ep.scenes : [];
-                const sceneHtml = scenes.map(s => `
-                    <div class="episode-item">场${s.scene_index || ''}：${s.location_time || ''}｜${s.shot || ''}｜${s.duration_seconds || ''}秒</div>
-                `).join('');
-                return `
-                    <div class="episode-item"><strong>第${ep.index || ''}集 ${ep.title || ''}</strong></div>
-                    ${sceneHtml || '<div class="episode-item">暂无场次</div>'}
-                `;
-            }).join('');
-        }
 
         async function loadProjects() {
             const select = document.getElementById('projectSelect');
@@ -491,7 +224,6 @@
                     }
                     select.appendChild(opt);
                 });
-                resumeStoryboardTask();
             } catch (e) {
                 select.innerHTML = '<option>项目加载失败</option>';
             }
@@ -512,16 +244,11 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            const storyboardPrompt = document.getElementById('storyboardPrompt');
-            if (storyboardPrompt && !storyboardPrompt.value) {
-                storyboardPrompt.value = '基于剧本文本生成分镜，输出清晰分镜列表，包含场景、人物动作、镜头、时长建议。';
-            }
             const select = document.getElementById('projectSelect');
             if (select) {
                 select.addEventListener('change', () => switchProject(select.value));
                 loadProjects();
             }
-            loadStoryboardRecords();
         });
     </script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>

@@ -30,26 +30,17 @@
             margin-bottom: 24px;
         }
         .studio-title {
-            font-size: 1.6rem;
+            font-size: 1.4rem;
             font-weight: 600;
-            letter-spacing: 0.02em;
-        }
-        .studio-subtitle {
-            color: #8d95b5;
-            font-size: 0.9rem;
-            margin-top: 6px;
-        }
-        .studio-badge {
-            background: rgba(86, 111, 255, 0.2);
-            border: 1px solid rgba(86, 111, 255, 0.4);
-            padding: 6px 12px;
-            border-radius: 999px;
-            font-size: 0.8rem;
-            color: #b7c0ff;
         }
         .studio-grid {
             display: grid;
-            grid-template-columns: 1.1fr 1.1fr 0.9fr;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 18px;
+        }
+        .flow-column {
+            display: flex;
+            flex-direction: column;
             gap: 18px;
         }
         .studio-card {
@@ -128,6 +119,75 @@
         .preview-item:last-child {
             border-bottom: none;
         }
+        .flow-list {
+            border: 1px solid rgba(86, 111, 255, 0.25);
+            border-radius: 14px;
+            background: rgba(10, 14, 24, 0.6);
+            max-height: 360px;
+            overflow: auto;
+        }
+        .flow-item {
+            padding: 12px 14px;
+            border-bottom: 1px solid rgba(120, 132, 183, 0.2);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .flow-item:hover {
+            background: rgba(86, 111, 255, 0.08);
+        }
+        .flow-item.active {
+            background: rgba(86, 111, 255, 0.18);
+            border-left: 3px solid #6f8bff;
+        }
+        .flow-item:last-child {
+            border-bottom: none;
+        }
+        .flow-item-title {
+            font-size: 0.92rem;
+            font-weight: 600;
+        }
+        .flow-item-meta {
+            font-size: 0.75rem;
+            color: #8d95b5;
+            margin-top: 4px;
+        }
+        .flow-item-summary {
+            font-size: 0.8rem;
+            color: #b9c3e6;
+            margin-top: 6px;
+            line-height: 1.4;
+        }
+        .storyboard-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 640px;
+            overflow: auto;
+        }
+        .storyboard-node {
+            background: rgba(12, 18, 32, 0.9);
+            border: 1px solid rgba(86, 111, 255, 0.2);
+            border-radius: 14px;
+            padding: 12px;
+        }
+        .storyboard-node-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+        .node-title {
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        .node-meta {
+            font-size: 0.75rem;
+            color: #9aa3c7;
+        }
+        .storyboard-node textarea {
+            min-height: 120px;
+        }
         .image-grid {
             display: grid;
             gap: 12px;
@@ -137,11 +197,22 @@
             border-radius: 12px;
             border: 1px solid rgba(86, 111, 255, 0.2);
             padding: 10px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .image-card.is-selected {
+            border-color: rgba(111, 139, 255, 0.9);
+            box-shadow: 0 0 0 1px rgba(111, 139, 255, 0.5);
         }
         .image-card img {
             width: 100%;
             border-radius: 10px;
             display: block;
+        }
+        .reference-grid {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
         }
         .file-input {
             border: 1px dashed rgba(86, 111, 255, 0.4);
@@ -155,7 +226,7 @@
         }
     </style>
 </head>
-<body>
+<body class="react-theme sidebar-compact">
     <div id="reactApp"></div>
     <nav class="sidebar-nav" id="sidebarNav">
         <div class="sidebar-nav-header">
@@ -189,10 +260,6 @@
                 <span class="sidebar-nav-icon">📜</span>
                 <span class="sidebar-nav-text">剧本生成</span>
             </a>
-            <a href="/storyboard" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🎬</span>
-                <span class="sidebar-nav-text">分镜生成</span>
-            </a>
             <a href="/storyboard-studio" class="sidebar-nav-item active">
                 <span class="sidebar-nav-icon">🧩</span>
                 <span class="sidebar-nav-text">分镜制作</span>
@@ -217,6 +284,7 @@
             <div class="sidebar-nav-user-info">
                 <div class="sidebar-nav-user-avatar">👤</div>
                 <div class="sidebar-nav-user-name">{{ user.username }}</div>
+                <a href="/logout" class="sidebar-nav-logout">登出</a>
             </div>
             <div style="margin-top: 8px;">
                 <label style="font-size: 0.85em; color: #cbd4f5;">当前项目</label>
@@ -224,18 +292,13 @@
                     <option>加载中...</option>
                 </select>
             </div>
-            <a href="/logout" class="sidebar-nav-logout">登出</a>
         </div>
     </nav>
 
     <div class="main-content">
         <div class="studio-wrap">
             <div class="studio-header">
-                <div>
-                    <div class="studio-title">分镜制作 Studio</div>
-                    <div class="studio-subtitle">参考 OIIOii.ai / topnow.ai 的高级感布局与动线</div>
-                </div>
-                <div class="studio-badge">React · 独立页面</div>
+                <div class="studio-title">🧩 分镜制作</div>
             </div>
 
             <div id="storyboardStudioRoot">
@@ -260,62 +323,183 @@
     </script>
     {% raw %}
     <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useRef } = React;
 
         function StoryboardStudio() {
-            const [scriptText, setScriptText] = useState('');
+            const [episodes, setEpisodes] = useState([]);
+            const [showEpisodePicker, setShowEpisodePicker] = useState(false);
+            const [selectedEpisodeId, setSelectedEpisodeId] = useState(null);
+            const [selectedEpisodeMeta, setSelectedEpisodeMeta] = useState(null);
+            const [selectedEpisodeText, setSelectedEpisodeText] = useState('');
             const [prompt, setPrompt] = useState('基于剧本文本生成分镜，输出清晰分镜列表，包含场景、人物动作、镜头、时长建议。');
-            const [storyboardText, setStoryboardText] = useState('');
-            const [storyboardJson, setStoryboardJson] = useState(null);
             const [progressText, setProgressText] = useState('');
-            const [images, setImages] = useState([]);
-            const [taskId, setTaskId] = useState(null);
-            const [title, setTitle] = useState('');
-            const [seriesList, setSeriesList] = useState([]);
-            const [versionList, setVersionList] = useState([]);
-            const [currentRecordId, setCurrentRecordId] = useState(null);
-            const [currentSeriesId, setCurrentSeriesId] = useState(null);
-            const [currentVersion, setCurrentVersion] = useState(null);
+            const [storyboardItems, setStoryboardItems] = useState([]);
+            const [imageMap, setImageMap] = useState({});
+            const [imageCount, setImageCount] = useState(3);
+            const [activeGenerateEpisodeId, setActiveGenerateEpisodeId] = useState(null);
             const [materialType, setMaterialType] = useState('scene');
             const [materials, setMaterials] = useState([]);
             const [uploading, setUploading] = useState(false);
+            const [showMaterialPicker, setShowMaterialPicker] = useState(false);
+            const [selectedReferences, setSelectedReferences] = useState([]);
+            const [previewRefUrl, setPreviewRefUrl] = useState(null);
+            const draftRestoredRef = useRef(false);
 
-            const previewItems = useMemo(() => {
-                if (!storyboardJson || !Array.isArray(storyboardJson.episodes)) return [];
-                return storyboardJson.episodes.flatMap(ep => {
-                    const scenes = Array.isArray(ep.scenes) ? ep.scenes : [];
-                    return scenes.map(scene => ({
-                        key: `${ep.index}-${scene.scene_index}`,
-                        text: `第${ep.index || ''}集 场${scene.scene_index || ''}｜${scene.location_time || ''}｜${scene.shot || ''}｜${scene.duration_seconds || ''}秒`
-                    }));
-                });
-            }, [storyboardJson]);
+            const getProjectId = () => document.getElementById('projectSelect')?.value || 'default';
+            const DRAFT_KEY = () => `storyboard_studio_draft_${getProjectId()}`;
 
             useEffect(() => {
-                const savedTask = localStorage.getItem('storyboard_studio_task');
-                if (savedTask) {
-                    pollTask(savedTask);
-                }
-                loadSeries();
-                loadMaterials('scene');
+                loadEpisodes();
             }, []);
 
-            const handleFileImport = async (file) => {
-                if (!file) return;
-                const text = await file.text();
-                setScriptText(text);
+            // 恢复草稿：切页返回后恢复未完成状态（仅恢复一次）
+            useEffect(() => {
+                if (episodes.length === 0 || draftRestoredRef.current) return;
+                draftRestoredRef.current = true;
+                try {
+                    const raw = localStorage.getItem(DRAFT_KEY());
+                    if (!raw) return;
+                    const draft = JSON.parse(raw);
+                    if (draft.selectedEpisodeId != null) setSelectedEpisodeId(draft.selectedEpisodeId);
+                    if (Array.isArray(draft.storyboardItems)) setStoryboardItems(draft.storyboardItems);
+                    if (draft.imageMap && typeof draft.imageMap === 'object') setImageMap(draft.imageMap);
+                    if (typeof draft.prompt === 'string') setPrompt(draft.prompt);
+                    if (Array.isArray(draft.selectedReferences)) setSelectedReferences(draft.selectedReferences);
+                    const ep = episodes.find(e => e.id === draft.selectedEpisodeId);
+                    if (ep) {
+                        setSelectedEpisodeMeta(ep);
+                        loadEpisodeContent(ep.id).then(text => setSelectedEpisodeText(text || ''));
+                    }
+                } catch (e) { /* ignore */ }
+            }, [episodes]);
+
+            // 持久化草稿：任意相关状态变化时写入 localStorage，便于切页后断点续做
+            useEffect(() => {
+                const key = DRAFT_KEY();
+                const payload = {
+                    selectedEpisodeId,
+                    storyboardItems,
+                    imageMap,
+                    prompt,
+                    selectedReferences
+                };
+                try {
+                    localStorage.setItem(key, JSON.stringify(payload));
+                } catch (e) { /* ignore */ }
+            }, [selectedEpisodeId, storyboardItems, imageMap, prompt, selectedReferences]);
+
+            const loadEpisodes = async () => {
+                const resp = await fetch('/api/script-episodes');
+                const data = await resp.json();
+                if (data.success) {
+                    setEpisodes(data.episodes || []);
+                }
             };
 
-            const generateStoryboard = async () => {
-                if (!scriptText.trim()) {
-                    alert('请先导入或粘贴剧本文本');
+            const loadEpisodeContent = async (episodeId) => {
+                const resp = await fetch(`/api/script-episodes/${episodeId}/content`);
+                if (!resp.ok) return '';
+                return await resp.text();
+            };
+
+            const loadSavedStoryboard = async (episodeId) => {
+                const resp = await fetch(`/api/storyboard-episodes?script_episode_id=${episodeId}`);
+                const data = await resp.json();
+                if (!data.success || !data.record) return null;
+                return data.record;
+            };
+
+            const buildItemsFromNodes = (nodes) => {
+                if (!Array.isArray(nodes)) return [];
+                return nodes.map((node, idx) => ({
+                    id: node.id || `node-${idx + 1}`,
+                    index: node.index || idx + 1,
+                    text: node.text || '',
+                    location_time: node.location_time || '',
+                    shot: node.shot || '',
+                    duration_seconds: node.duration_seconds || ''
+                }));
+            };
+
+            const buildItemsFromEpisodes = (json) => {
+                const items = [];
+                if (json && Array.isArray(json.episodes)) {
+                    json.episodes.forEach((ep) => {
+                        const scenes = Array.isArray(ep.scenes) ? ep.scenes : [];
+                        scenes.forEach((scene, idx) => {
+                            const index = items.length + 1;
+                            const location = scene.location_time || '';
+                            const summary = scene.summary || '';
+                            const shot = scene.shot || '';
+                            const duration = scene.duration_seconds ? `${scene.duration_seconds}秒` : '';
+                            const lines = [];
+                            if (summary) lines.push(summary);
+                            if (shot) lines.push(`镜头：${shot}`);
+                            if (duration) lines.push(`时长：${duration}`);
+                            const text = lines.join('\n') || JSON.stringify(scene, null, 2);
+                            items.push({
+                                id: `${ep.index || 1}-${scene.scene_index || idx + 1}-${index}`,
+                                index,
+                                text,
+                                location_time: location,
+                                shot,
+                                duration_seconds: scene.duration_seconds || ''
+                            });
+                        });
+                    });
+                }
+                return items;
+            };
+
+            const handleSelectEpisode = async (ep) => {
+                setSelectedEpisodeId(ep.id);
+                setSelectedEpisodeMeta(ep);
+                const text = await loadEpisodeContent(ep.id);
+                setSelectedEpisodeText(text);
+                const saved = await loadSavedStoryboard(ep.id);
+                if (saved && saved.storyboard_json) {
+                    const nodes = saved.storyboard_json.nodes;
+                    const items = nodes ? buildItemsFromNodes(nodes) : buildItemsFromEpisodes(saved.storyboard_json);
+                    setStoryboardItems(items);
+                    setImageMap(saved.images_json || {});
+                    setProgressText('已加载已保存分镜');
                     return;
                 }
+                setStoryboardItems([]);
+                setImageMap({});
+                setProgressText('');
+            };
+
+            const buildStoryboardItems = (result) => {
+                const json = result && result.storyboard_json ? result.storyboard_json : null;
+                const items = buildItemsFromEpisodes(json);
+                if (items.length > 0) return items;
+                const raw = result && result.storyboard_text ? result.storyboard_text : '';
+                if (raw) {
+                    return [{ id: 'raw-1', index: 1, text: raw, location_time: '' }];
+                }
+                return [];
+            };
+
+            const generateStoryboard = async (overrideText) => {
+                const script = (overrideText || selectedEpisodeText || '').trim();
+                if (!script) {
+                    alert('请先选择剧本分集');
+                    return;
+                }
+                if (!selectedEpisodeId) {
+                    alert('请先选择剧本分集');
+                    return;
+                }
+                const targetEpisodeId = selectedEpisodeId;
+                setActiveGenerateEpisodeId(targetEpisodeId);
                 setProgressText('生成中 0%');
+                setStoryboardItems([]);
+                setImageMap({});
                 const resp = await fetch('/api/storyboard-generate-async', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ script: scriptText, prompt })
+                    body: JSON.stringify({ script, prompt })
                 });
                 const data = await resp.json();
                 if (!data.success) {
@@ -323,12 +507,10 @@
                     alert(data.error || '生成失败');
                     return;
                 }
-                setTaskId(data.task_id);
-                localStorage.setItem('storyboard_studio_task', data.task_id);
-                pollTask(data.task_id);
+                pollTask(data.task_id, targetEpisodeId);
             };
 
-            const pollTask = async (id) => {
+            const pollTask = async (id, targetEpisodeId) => {
                 const resp = await fetch(`/api/tasks/${id}`);
                 const data = await resp.json();
                 if (!data.success || !data.task) {
@@ -340,13 +522,9 @@
                 if (task.status === 'completed') {
                     setProgressText('完成');
                     const result = task.result || {};
-                    if (result.storyboard_json) {
-                        setStoryboardJson(result.storyboard_json);
-                        setStoryboardText(JSON.stringify(result.storyboard_json, null, 2));
-                    } else {
-                        setStoryboardJson(null);
-                        setStoryboardText(result.storyboard_text || '');
-                    }
+                    const items = buildStoryboardItems(result);
+                    setStoryboardItems(items);
+                    await saveStoryboardEpisode(items, result, null, targetEpisodeId);
                     return;
                 }
                 if (task.status === 'failed') {
@@ -354,100 +532,82 @@
                     if (task.error) alert(task.error);
                     return;
                 }
-                setTimeout(() => pollTask(id), 2000);
+                setTimeout(() => pollTask(id, targetEpisodeId), 2000);
             };
 
-            const generateImages = async () => {
-                let jsonData = null;
-                try {
-                    jsonData = JSON.parse(storyboardText || '{}');
-                } catch (e) {
-                    jsonData = storyboardJson;
-                }
-                if (!jsonData || !jsonData.episodes) {
-                    alert('请先生成分镜 JSON');
-                    return;
-                }
-                const resp = await fetch('/api/storyboard-sample-images', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ storyboard: jsonData, max_images: 6 })
-                });
-                const data = await resp.json();
-                if (!data.success) {
-                    alert(data.error || '生成示例图失败');
-                    return;
-                }
-                setImages(data.images || []);
+            const updateItemText = (id, value) => {
+                setStoryboardItems(prev => prev.map(item => (
+                    item.id === id ? { ...item, text: value } : item
+                )));
             };
 
-            const saveStoryboard = async (createVersion = false) => {
+            const saveStoryboardEpisode = async (items, rawResult = null, images = null, episodeIdOverride = null) => {
+                const episodeId = episodeIdOverride || selectedEpisodeId;
+                if (!episodeId) return;
+                const nodes = items.map(item => ({
+                    id: item.id,
+                    index: item.index,
+                    text: item.text,
+                    location_time: item.location_time,
+                    shot: item.shot,
+                    duration_seconds: item.duration_seconds
+                }));
                 const payload = {
-                    id: currentRecordId,
-                    series_id: currentSeriesId,
-                    create_version: createVersion,
-                    title: title,
-                    script_text: scriptText,
+                    script_episode_id: episodeId,
                     prompt,
-                    storyboard_text: storyboardText,
-                    storyboard_json: storyboardJson || {}
+                    storyboard_json: { nodes },
+                    storyboard_text: rawResult && rawResult.storyboard_text ? rawResult.storyboard_text : '',
+                    images_json: images || imageMap
                 };
-                const resp = await fetch('/api/storyboard-saves', {
+                await fetch('/api/storyboard-episodes', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
+            };
+
+            const generateItemImages = async (item) => {
+                const maxImages = Math.max(1, Number(imageCount) || 1);
+                const storyboard = {
+                    episodes: [
+                        {
+                            index: 1,
+                            title: '',
+                            scenes: [
+                                {
+                                    scene_index: item.index,
+                                    location_time: item.location_time || '',
+                                    summary: item.text || '',
+                                    shot: item.shot || '',
+                                    duration_seconds: item.duration_seconds || ''
+                                }
+                            ]
+                        }
+                    ]
+                };
+                const resp = await fetch('/api/storyboard-sample-images', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ storyboard, max_images: maxImages })
+                });
                 const data = await resp.json();
                 if (!data.success) {
-                    alert(data.error || '保存失败');
+                    alert(data.error || '生成图片失败');
                     return;
                 }
-                await loadSeries();
-                if (createVersion && currentSeriesId) {
-                    await loadVersions(currentSeriesId);
-                }
-                setCurrentRecordId(data.id);
+                setImageMap(prev => {
+                    const next = {
+                        ...prev,
+                        [item.id]: [...(prev[item.id] || []), ...(data.images || [])]
+                    };
+                    saveStoryboardEpisode(storyboardItems, null, next, selectedEpisodeId);
+                    return next;
+                });
             };
 
-            const loadSeries = async () => {
-                const resp = await fetch('/api/storyboard-series');
-                const data = await resp.json();
-                if (data.success) {
-                    setSeriesList(data.records || []);
-                }
-            };
-
-            const loadVersions = async (seriesId) => {
-                const resp = await fetch(`/api/storyboard-series/${seriesId}/versions`);
-                const data = await resp.json();
-                if (data.success) {
-                    setVersionList(data.records || []);
-                }
-            };
-
-            const loadVersion = async (recordId) => {
-                const resp = await fetch(`/api/storyboard-saves/${recordId}`);
-                const data = await resp.json();
-                if (!data.success) {
-                    alert(data.error || '加载失败');
-                    return;
-                }
-                const record = data.record || {};
-                setCurrentRecordId(record.id);
-                setCurrentSeriesId(record.series_id);
-                setCurrentVersion(record.version);
-                setTitle(record.title || '');
-                setScriptText(record.script_text || '');
-                setPrompt(record.prompt || '');
-                if (record.storyboard_json && Object.keys(record.storyboard_json).length > 0) {
-                    setStoryboardJson(record.storyboard_json);
-                    setStoryboardText(JSON.stringify(record.storyboard_json, null, 2));
-                } else {
-                    setStoryboardJson(null);
-                    setStoryboardText(record.storyboard_text || '');
-                }
-                if (record.series_id) {
-                    loadVersions(record.series_id);
+            const generateAllImages = async () => {
+                for (const item of storyboardItems) {
+                    await generateItemImages(item);
                 }
             };
 
@@ -462,7 +622,7 @@
                 setUploading(true);
                 const formData = new FormData();
                 files.forEach(file => formData.append('file', file));
-                formData.append('category', materialType);
+                formData.append('category', 'ref');  // 分镜参考图仅上传到 OSS，不入人物库/场景库
                 const resp = await fetch('/api/upload-sample-image', {
                     method: 'POST',
                     body: formData
@@ -473,7 +633,15 @@
                     alert(data.error || '上传失败');
                     return;
                 }
-                await loadMaterials(materialType);
+                const list = data.uploaded || [];
+                if (list.length > 0) {
+                    setSelectedReferences(prev => prev.concat(list.map(u => ({
+                        id: u.key || u.url,
+                        url: u.url,
+                        filename: u.filename
+                    }))));
+                }
+                // 参考图不写入库，无需刷新人物/场景库列表
             };
 
             const loadMaterials = async (type) => {
@@ -484,166 +652,231 @@
                 }
             };
 
+            const openLibraryPicker = (type) => {
+                if (showMaterialPicker && materialType === type) {
+                    setShowMaterialPicker(false);
+                    return;
+                }
+                setMaterialType(type);
+                loadMaterials(type);
+                setShowMaterialPicker(true);
+            };
+
+            const toggleMaterial = (item) => {
+                const key = item.id || item.url;
+                setSelectedReferences(prev => {
+                    const has = prev.some(r => (r.id || r.url) === key);
+                    if (has) return prev.filter(r => (r.id || r.url) !== key);
+                    return prev.concat([{ id: item.id, url: item.url, filename: item.filename }]);
+                });
+            };
+
+            const isMaterialSelected = (item) => {
+                const key = item.id || item.url;
+                return selectedReferences.some(r => (r.id || r.url) === key);
+            };
+
+            const removeReference = (index) => {
+                setSelectedReferences(prev => prev.filter((_, i) => i !== index));
+            };
+
             return (
+                <>
                 <div className="studio-grid">
-                    <div className="studio-card">
-                        <div className="card-title">导入剧本</div>
-                        <div className="card-hint">支持粘贴文本或上传 txt 文件</div>
-                        <textarea
-                            value={scriptText}
-                            onChange={(e) => setScriptText(e.target.value)}
-                            placeholder="粘贴或导入剧本文本..."
-                        />
-                        <div className="btn-row">
-                            <label className="btn btn-secondary file-input">
-                                上传TXT
-                                <input
-                                    type="file"
-                                    accept=".txt"
-                                    style={{ display: 'none' }}
-                                    onChange={(e) => handleFileImport(e.target.files[0])}
-                                />
-                            </label>
-                            <button className="btn btn-secondary" onClick={() => setScriptText('')}>清空</button>
-                        </div>
-                        <div className="card-title" style={{ marginTop: 18 }}>分镜提示词</div>
-                        <textarea
-                            value={prompt}
-                            onChange={(e) => setPrompt(e.target.value)}
-                            placeholder="编辑分镜生成提示词..."
-                            style={{ minHeight: '140px' }}
-                        />
-                        <div className="btn-row">
-                            <button className="btn btn-primary" onClick={generateStoryboard}>生成分镜</button>
-                            <span className="progress-text">{progressText}</span>
-                        </div>
-                    </div>
-
-                    <div className="studio-card">
-                        <div className="card-title">分镜文本</div>
-                        <div className="card-hint">支持 JSON 或文本格式输出</div>
-                        <textarea
-                            value={storyboardText}
-                            onChange={(e) => setStoryboardText(e.target.value)}
-                            placeholder="分镜生成结果..."
-                        />
-                        <div className="card-title" style={{ marginTop: 16 }}>保存与版本</div>
-                        <input
-                            value={title}
-                            onChange={(e) => setTitle(e.target.value)}
-                            placeholder="保存标题（可选）"
-                        />
-                        <div className="btn-row">
-                            <button className="btn btn-primary" onClick={() => saveStoryboard(false)}>保存</button>
-                            <button className="btn btn-secondary" onClick={() => saveStoryboard(true)} disabled={!currentSeriesId}>保存新版本</button>
-                        </div>
-                        <div className="card-title" style={{ marginTop: 16 }}>结构预览</div>
-                        <div className="preview-list">
-                            {previewItems.length === 0 && <div className="card-hint">暂无结构化分镜</div>}
-                            {previewItems.map(item => (
-                                <div className="preview-item" key={item.key}>{item.text}</div>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="studio-card">
-                        <div className="card-title">分镜示例图</div>
-                        <div className="card-hint">基于分镜 JSON 生成示例图片</div>
-                        <div className="btn-row">
-                            <button className="btn btn-primary" onClick={generateImages}>生成示例图</button>
-                        </div>
-                        <div className="image-grid" style={{ marginTop: 12 }}>
-                            {images.length === 0 && <div className="card-hint">暂无示例图</div>}
-                            {images.map((img, idx) => (
-                                <div className="image-card" key={`${img.url}-${idx}`}>
-                                    <div className="card-hint">第{img.episode_index || ''}集-场{img.scene_index || ''}</div>
-                                    <img src={img.url} alt="storyboard sample" />
+                    <div className="flow-column">
+                        <div className="studio-card">
+                            <div className="card-title">Step 1 · 选择剧本</div>
+                            <div className="card-hint">点击按钮后选择分集，生成或加载已保存的分镜</div>
+                            <div className="btn-row">
+                                <button className="btn btn-secondary" onClick={() => setShowEpisodePicker(!showEpisodePicker)}>
+                                    选择剧本分集
+                                </button>
+                            </div>
+                            {showEpisodePicker && (
+                                <select
+                                    style={{ marginTop: '10px' }}
+                                    value={selectedEpisodeId || ''}
+                                    onChange={(e) => {
+                                        const id = Number(e.target.value);
+                                        const ep = episodes.find(item => item.id === id);
+                                        if (ep) handleSelectEpisode(ep);
+                                    }}
+                                >
+                                    <option value="">请选择分集</option>
+                                    {episodes.map(ep => (
+                                        <option key={ep.id} value={ep.id}>
+                                            第{ep.episode_index || '?'}集 · {ep.title || '未命名'}
+                                        </option>
+                                    ))}
+                                </select>
+                            )}
+                            {selectedEpisodeMeta && (
+                                <div className="flow-item active" style={{ marginTop: '10px' }}>
+                                    <div className="flow-item-title">第{selectedEpisodeMeta.episode_index || '?'}集 · {selectedEpisodeMeta.title || '未命名'}</div>
+                                    <div className="flow-item-meta">ID {selectedEpisodeMeta.id} · {selectedEpisodeMeta.created_at || ''}</div>
+                                    <div className="flow-item-summary">{selectedEpisodeMeta.summary || '暂无概览'}</div>
                                 </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-
-                <div className="studio-grid" style={{ marginTop: '18px' }}>
-                    <div className="studio-card">
-                        <div className="card-title">保存列表</div>
-                        <div className="card-hint">系列列表，点击查看/切换版本</div>
-                        <div className="preview-list">
-                            {seriesList.length === 0 && <div className="card-hint">暂无保存记录</div>}
-                            {seriesList.map(item => (
-                                <div className="preview-item" key={item.series_id}>
-                                    <div>{item.title || '未命名'} · v{item.version || 1}</div>
-                                    <div className="card-hint">版本数：{item.version_count || 1}</div>
-                                    <div className="btn-row">
-                                        <button className="btn btn-secondary" onClick={() => {
-                                            setCurrentSeriesId(item.series_id);
-                                            loadVersions(item.series_id);
-                                            loadVersion(item.id);
-                                        }}>查看</button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="studio-card">
-                        <div className="card-title">版本管理</div>
-                        <div className="card-hint">当前系列：{currentSeriesId || '-'}</div>
-                        <div className="preview-list">
-                            {versionList.length === 0 && <div className="card-hint">暂无版本</div>}
-                            {versionList.map(v => (
-                                <div className="preview-item" key={v.id}>
-                                    <div>v{v.version} · {v.title || '未命名'}</div>
-                                    <div className="card-hint">{v.updated_at || v.created_at || ''}</div>
-                                    <div className="btn-row">
-                                        <button className="btn btn-secondary" onClick={() => loadVersion(v.id)}>加载此版本</button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="studio-card">
-                        <div className="card-title">素材上传</div>
-                        <div className="card-hint">拖拽导入或点击上传（存入素材库）</div>
-                        <select value={materialType} onChange={(e) => {
-                            setMaterialType(e.target.value);
-                            loadMaterials(e.target.value);
-                        }}>
-                            <option value="scene">场景素材</option>
-                            <option value="person">人物素材</option>
-                        </select>
-                        <div
-                            className="preview-list"
-                            onDragOver={(e) => e.preventDefault()}
-                            onDrop={handleDrop}
-                            style={{ marginTop: '10px', textAlign: 'center' }}
-                        >
-                            {uploading ? '上传中...' : '拖拽图片到此处'}
-                            <div className="btn-row" style={{ justifyContent: 'center', marginTop: '10px' }}>
-                                <label className="btn btn-secondary file-input">
-                                    选择图片
-                                    <input
-                                        type="file"
-                                        accept="image/*"
-                                        multiple
-                                        style={{ display: 'none' }}
-                                        onChange={(e) => uploadMaterials(Array.from(e.target.files || []))}
-                                    />
-                                </label>
+                            )}
+                            <div className="card-title" style={{ marginTop: 16 }}>分镜提示词</div>
+                            <textarea
+                                value={prompt}
+                                onChange={(e) => setPrompt(e.target.value)}
+                                placeholder="编辑分镜生成提示词..."
+                                style={{ minHeight: '120px' }}
+                            />
+                            <div className="btn-row">
+                                <button className="btn btn-primary" onClick={() => generateStoryboard()}>生成分镜</button>
+                                <button className="btn btn-secondary" onClick={() => saveStoryboardEpisode(storyboardItems)}>保存分镜</button>
+                                <span className="progress-text">{progressText}</span>
                             </div>
                         </div>
-                        <div className="image-grid" style={{ marginTop: '12px' }}>
-                            {materials.length === 0 && <div className="card-hint">暂无素材</div>}
-                            {materials.map((m, idx) => (
-                                <div className="image-card" key={`${m.url || m.id}-${idx}`}>
-                                    <img src={m.url} alt={m.filename || 'asset'} />
-                                    <div className="card-hint">{m.filename || ''}</div>
+
+                        <div className="studio-card">
+                            <div className="card-title">Step 2 · 分镜列表</div>
+                            <div className="card-hint">分镜从 1 开始垂直向下排列，可编辑内容</div>
+                            <div className="storyboard-list">
+                                {storyboardItems.length === 0 && <div className="card-hint">暂无分镜，请先选择剧本分集</div>}
+                                {storyboardItems.map(item => (
+                                    <div className="storyboard-node" key={item.id}>
+                                        <div className="storyboard-node-header">
+                                            <div className="node-title">分镜 {item.index}</div>
+                                            <div className="node-meta">{item.location_time || ''}</div>
+                                        </div>
+                                        <textarea
+                                            value={item.text}
+                                            onChange={(e) => updateItemText(item.id, e.target.value)}
+                                            placeholder="编辑该分镜内容..."
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flow-column">
+                        <div className="studio-card">
+                            <div className="card-title">Step 3 · 参考图</div>
+                            <div className="card-hint">点击「人物库」或「场景库」选择参考图，选中后将显示在下方缩略图</div>
+                            <div className="btn-row">
+                                <button className="btn btn-secondary" onClick={() => openLibraryPicker('person')}>人物库</button>
+                                <button className="btn btn-secondary" onClick={() => openLibraryPicker('scene')}>场景库</button>
+                            </div>
+                            {selectedReferences.length > 0 && (
+                                <div style={{ marginTop: '12px' }}>
+                                    <div className="card-title" style={{ fontSize: '0.9rem', marginBottom: '8px' }}>已选参考图</div>
+                                    <div className="reference-grid">
+                                        {selectedReferences.map((ref, idx) => (
+                                            <div className="image-card" key={`ref-${ref.url}-${idx}`} style={{ position: 'relative', cursor: 'pointer' }} onClick={() => setPreviewRefUrl(ref.url)}>
+                                                <img src={ref.url} alt={ref.filename || '参考图'} />
+                                                <div className="card-hint">{ref.filename || ''}</div>
+                                                <button
+                                                    type="button"
+                                                    className="remove-ref-btn"
+                                                    onClick={(e) => { e.stopPropagation(); removeReference(idx); }}
+                                                    title="移除"
+                                                    style={{ position: 'absolute', top: '4px', right: '4px', width: '22px', height: '22px', borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: '14px', cursor: 'pointer', lineHeight: 1 }}
+                                                >×</button>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
-                            ))}
+                            )}
+                            {showMaterialPicker && (
+                                <>
+                                    <div className="card-title" style={{ marginTop: '16px', fontSize: '0.9rem' }}>{materialType === 'person' ? '人物库' : '场景库'} · 点击选择</div>
+                                    <div className="btn-row" style={{ marginTop: '6px' }}>
+                                        <button className="btn btn-secondary" onClick={() => setShowMaterialPicker(false)}>完成选择</button>
+                                    </div>
+                                    <div className="reference-grid" style={{ marginTop: '8px' }}>
+                                        {materials.length === 0 && <div className="card-hint">加载中或暂无素材</div>}
+                                        {materials.map((m, idx) => {
+                                            const key = m.id || m.url || idx;
+                                            const active = isMaterialSelected(m);
+                                            return (
+                                                <div
+                                                    className={`image-card ${active ? 'is-selected' : ''}`}
+                                                    key={key}
+                                                    onClick={() => toggleMaterial(m)}
+                                                >
+                                                    <img src={m.url} alt={m.filename || 'asset'} />
+                                                    <div className="card-hint">{m.filename || ''}</div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </>
+                            )}
+                            <div
+                                className="preview-list"
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={handleDrop}
+                                style={{ marginTop: '12px', textAlign: 'center' }}
+                            >
+                                {uploading ? '上传中...' : '拖拽图片到此处'}
+                                <div className="btn-row" style={{ justifyContent: 'center', marginTop: '10px' }}>
+                                    <label className="btn btn-secondary file-input">
+                                        选择图片
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            multiple
+                                            style={{ display: 'none' }}
+                                            onChange={(e) => uploadMaterials(Array.from(e.target.files || []))}
+                                        />
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="studio-card">
+                            <div className="card-title">Step 4 · 生成图片</div>
+                            <div className="card-hint">为每个分镜生成多张图片</div>
+                            <div className="btn-row">
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="8"
+                                    value={imageCount}
+                                    onChange={(e) => setImageCount(e.target.value)}
+                                    style={{ maxWidth: '120px' }}
+                                />
+                                <button className="btn btn-secondary" onClick={generateAllImages} disabled={storyboardItems.length === 0}>
+                                    批量生成
+                                </button>
+                            </div>
+                            <div className="storyboard-list" style={{ marginTop: 12 }}>
+                                {storyboardItems.length === 0 && <div className="card-hint">暂无可生成的分镜</div>}
+                                {storyboardItems.map(item => (
+                                    <div className="storyboard-node" key={`img-${item.id}`}>
+                                        <div className="storyboard-node-header">
+                                            <div className="node-title">分镜 {item.index}</div>
+                                            <button className="btn btn-secondary" onClick={() => generateItemImages(item)}>生成图片</button>
+                                        </div>
+                                        <div className="image-grid">
+                                            {(imageMap[item.id] || []).length === 0 && (
+                                                <div className="card-hint">暂无图片</div>
+                                            )}
+                                            {(imageMap[item.id] || []).map((img, idx) => (
+                                                <div className="image-card" key={`${img.url}-${idx}`}>
+                                                    <img src={img.url} alt="storyboard output" />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 </div>
+                {previewRefUrl && (
+                    <div
+                        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}
+                        onClick={() => setPreviewRefUrl(null)}
+                    >
+                        <img src={previewRefUrl} alt="预览" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '92vw', maxHeight: '92vh', objectFit: 'contain' }} />
+                    </div>
+                )}
+            </>
             );
         }
 

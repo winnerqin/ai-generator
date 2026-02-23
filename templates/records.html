@@ -32,8 +32,38 @@
         .modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(6,10,20,0.7); z-index: 2000; }
         .modal-card { width: min(980px, 92vw); max-height: 86vh; overflow: auto; padding: 16px; border-radius: 16px; }
         .modal-image { width: 100%; border-radius: 12px; }
+        .preview-fullscreen { position: fixed; inset: 0; z-index: 2100; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.92); }
+        .preview-fullscreen img { max-width: 100vw; max-height: 100vh; width: auto; height: auto; object-fit: contain; user-select: none; }
+        .preview-fullscreen .nav-btn { position: absolute; top: 50%; transform: translateY(-50%); width: 48px; height: 48px; border-radius: 50%; border: none; background: rgba(255,255,255,0.2); color: #fff; font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s; }
+        .preview-fullscreen .nav-btn:hover { background: rgba(255,255,255,0.35); }
+        .preview-fullscreen .nav-btn.prev { left: 16px; }
+        .preview-fullscreen .nav-btn.next { right: 16px; }
+        .preview-fullscreen .preview-close { position: absolute; top: 16px; right: 16px; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,0.2); color: #fff; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .preview-fullscreen .preview-close:hover { background: rgba(255,255,255,0.35); }
+        .preview-fullscreen .preview-counter { position: absolute; bottom: calc(32vh + 52px); left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; background: rgba(0,0,0,0.5); color: rgba(255,255,255,0.9); font-size: 0.9rem; }
+        .preview-fullscreen .preview-params { position: absolute; bottom: 0; left: 0; right: 0; max-height: 32vh; overflow: auto; padding: 12px 16px; background: rgba(0,0,0,0.88); color: rgba(200,210,255,0.95); font-size: 0.85rem; text-align: left; border-top: 1px solid rgba(255,255,255,0.12); }
+        .preview-fullscreen .preview-params-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; align-items: start; }
+        .preview-fullscreen .preview-params dt { margin: 0; color: rgba(255,255,255,0.6); }
+        .preview-fullscreen .preview-params dd { margin: 0; word-break: break-all; }
+        .ref-preview-overlay { position: fixed; inset: 0; z-index: 2200; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.92); }
+        .ref-preview-overlay img { max-width: 100vw; max-height: 100vh; object-fit: contain; }
+        .ref-preview-overlay .preview-close { position: absolute; top: 16px; right: 16px; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,0.2); color: #fff; font-size: 20px; cursor: pointer; }
+        .ref-preview-overlay .preview-close:hover { background: rgba(255,255,255,0.35); }
+        .records-table .ref-thumbs img { cursor: pointer; }
         .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; font-size: 0.85rem; }
         .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: rgba(86,111,255,0.2); font-size: 0.75rem; }
+        .view-toggle { display: flex; gap: 4px; }
+        .view-toggle button { padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(86,111,255,0.35); background: rgba(86,111,255,0.1); color: #c8d2ff; cursor: pointer; font-size: 0.85rem; }
+        .view-toggle button.active { background: rgba(86,111,255,0.35); border-color: rgba(86,111,255,0.5); }
+        .records-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+        .records-table th, .records-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid rgba(86,111,255,0.2); }
+        .records-table th { font-weight: 600; }
+        .records-table tr:hover { background: rgba(86,111,255,0.06); }
+        .records-table .thumb-cell { width: 72px; }
+        .records-table .thumb-cell img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; display: block; cursor: pointer; }
+        .records-table .ref-thumbs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+        .records-table .ref-thumbs img { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; vertical-align: middle; }
+        .records-table .prompt-cell { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
 </head>
 <body>
@@ -46,7 +76,7 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     {% raw %}
     <script type="text/babel">
-        const { useEffect, useMemo, useState } = React;
+        const { useEffect, useMemo, useState, useRef, useCallback } = React;
 
         const Sidebar = ({ username, projects, currentProjectId, onProjectChange }) => (
             <nav className="sidebar-nav" id="sidebarNav">
@@ -63,7 +93,6 @@
                     <a href="/video-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
                     <a href="/video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
                     <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
-                    <a href="/storyboard" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">分镜生成</span></a>
                     <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
                     <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
                 </div>
@@ -71,6 +100,7 @@
                     <div className="sidebar-nav-user-info">
                         <div className="sidebar-nav-user-avatar">👤</div>
                         <div className="sidebar-nav-user-name">{username}</div>
+                        <a href="/logout" className="sidebar-nav-logout">登出</a>
                     </div>
                     <div style={{ marginTop: '8px' }}>
                         <label style={{ fontSize: '0.85em', color: '#cbd4f5' }}>当前项目</label>
@@ -85,7 +115,6 @@
                             ))}
                         </select>
                     </div>
-                    <a href="/logout" className="sidebar-nav-logout">登出</a>
                 </div>
             </nav>
         );
@@ -100,9 +129,42 @@
             const [loading, setLoading] = useState(false);
             const [selected, setSelected] = useState([]);
             const [modalRecord, setModalRecord] = useState(null);
+            const [viewMode, setViewMode] = useState('thumb'); // 'thumb' | 'table'
+            const [previewRefUrl, setPreviewRefUrl] = useState(null);
+            const touchStartX = useRef(0);
+
+            const currentIndex = modalRecord == null ? -1 : records.findIndex(r => r.id === modalRecord.id);
+            const canPrev = currentIndex > 0;
+            const canNext = currentIndex >= 0 && currentIndex < records.length - 1;
+            const goPrev = useCallback(() => {
+                if (!canPrev) return;
+                setModalRecord(records[currentIndex - 1]);
+            }, [canPrev, currentIndex, records]);
+            const goNext = useCallback(() => {
+                if (!canNext) return;
+                setModalRecord(records[currentIndex + 1]);
+            }, [canNext, currentIndex, records]);
 
             useEffect(() => {
-                document.body.classList.add('react-theme');
+                if (!modalRecord) return;
+                const onKey = (e) => {
+                    if (e.key === 'Escape') setModalRecord(null);
+                    else if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(); }
+                    else if (e.key === 'ArrowRight') { e.preventDefault(); goNext(); }
+                };
+                window.addEventListener('keydown', onKey);
+                return () => window.removeEventListener('keydown', onKey);
+            }, [modalRecord, goPrev, goNext]);
+
+            useEffect(() => {
+                if (!previewRefUrl) return;
+                const onKey = (e) => { if (e.key === 'Escape') setPreviewRefUrl(null); };
+                window.addEventListener('keydown', onKey);
+                return () => window.removeEventListener('keydown', onKey);
+            }, [previewRefUrl]);
+
+            useEffect(() => {
+                document.body.classList.add('react-theme', 'sidebar-compact');
             }, []);
 
             useEffect(() => {
@@ -166,6 +228,28 @@
                 }
             };
 
+            // 使用与单图生成相同的参数跳转到单图生成页重新生成
+            const regenerateImage = (record) => {
+                const sampleImages = record.sample_images || [];
+                const sample_image_urls = sampleImages.map(s => (typeof s === 'string' ? s : s?.url)).filter(Boolean);
+                const data = {
+                    prompt: record.prompt || '',
+                    aspect_ratio: record.aspect_ratio || '9:16',
+                    resolution: (record.resolution || '2k').toLowerCase(),
+                    generate_mode: 'single',
+                    seed: record.seed != null ? record.seed : 0,
+                    sample_image_urls,
+                    timestamp: Date.now()
+                };
+                try {
+                    localStorage.setItem('regenerateData', JSON.stringify(data));
+                } catch (e) {
+                    alert('无法保存参数，请重试');
+                    return;
+                }
+                window.location.href = '/';
+            };
+
             const addToLibrary = async (record, type) => {
                 const url = record.image_path;
                 const filename = record.filename || 'image';
@@ -204,6 +288,18 @@
                                             onChange={(e) => setSearch(e.target.value)}
                                         />
                                         <button className="btn btn-secondary" onClick={() => { setRecords([]); setOffset(0); loadRecords(true); }}>搜索</button>
+                                        <div className="view-toggle" style={{ marginLeft: '12px' }}>
+                                            <button
+                                                className={viewMode === 'table' ? 'active' : ''}
+                                                onClick={() => setViewMode('table')}
+                                                title="表格模式"
+                                            >📋 表格</button>
+                                            <button
+                                                className={viewMode === 'thumb' ? 'active' : ''}
+                                                onClick={() => setViewMode('thumb')}
+                                                title="缩略图模式"
+                                            >🖼 缩略图</button>
+                                        </div>
                                     </div>
                                     <div className="row">
                                         <span className="pill">总数 {total}</span>
@@ -214,23 +310,82 @@
                             </div>
 
                             <div className="panel" style={{ marginTop: '16px' }}>
-                                <div className="result-grid">
-                                    {records.map(record => (
-                                        <div
-                                            key={record.id}
-                                            className={`result-card ${selected.includes(record.id) ? 'selected' : ''}`}
-                                            onClick={() => toggleSelect(record.id)}
-                                            onDoubleClick={() => setModalRecord(record)}
-                                        >
-                                            <img src={record.image_path} alt={record.filename || 'image'} />
-                                            <div className="result-info">
-                                                <div>#{record.id} · {record.filename || '-'}</div>
-                                                <div className="small-hint">{record.prompt || '-'}</div>
+                                {viewMode === 'table' ? (
+                                    <table className="records-table">
+                                        <thead>
+                                            <tr>
+                                                <th style={{ width: '44px' }}><input type="checkbox" checked={selected.length === records.length && records.length > 0} onChange={(e) => { if (e.target.checked) setSelected(records.map(r => r.id)); else setSelected([]); }} /></th>
+                                                <th className="thumb-cell">缩略图</th>
+                                                <th style={{ width: '80px' }}>ID</th>
+                                                <th>文件名</th>
+                                                <th className="prompt-cell">提示词</th>
+                                                <th>比例</th>
+                                                <th>尺寸</th>
+                                                <th>参考图</th>
+                                                <th>时间</th>
+                                                <th style={{ width: '100px' }}>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {records.map(record => (
+                                                <tr key={record.id}>
+                                                    <td><input type="checkbox" checked={selected.includes(record.id)} onChange={() => toggleSelect(record.id)} /></td>
+                                                    <td className="thumb-cell">
+                                                        <img src={record.image_path} alt="" onClick={() => setModalRecord(record)} title="点击查看" />
+                                                    </td>
+                                                    <td>#{record.id}</td>
+                                                    <td>{record.filename || '-'}</td>
+                                                    <td className="prompt-cell" title={record.prompt || ''}>{record.prompt || '-'}</td>
+                                                    <td>{record.aspect_ratio || '-'}</td>
+                                                    <td>{record.width}×{record.height}</td>
+                                                    <td>
+                                                        {(record.sample_images && record.sample_images.length > 0) ? (
+                                                            <div className="ref-thumbs" title="点击预览参考图">
+                                                                {(record.sample_images || []).slice(0, 4).map((s, i) => {
+                                                                    const url = typeof s === 'string' ? s : s?.url;
+                                                                    return url ? (
+                                                                        <img
+                                                                            key={i}
+                                                                            src={url}
+                                                                            alt=""
+                                                                            onClick={(e) => { e.stopPropagation(); setPreviewRefUrl(url); }}
+                                                                            title="点击预览"
+                                                                        />
+                                                                    ) : null;
+                                                                })}
+                                                                {(record.sample_images || []).length > 4 && <span className="small-hint">+{record.sample_images.length - 4}</span>}
+                                                            </div>
+                                                        ) : '-'}
+                                                    </td>
+                                                    <td>{record.created_at || '-'}</td>
+                                                    <td>
+                                                        <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '0.8rem' }} onClick={() => setModalRecord(record)}>详情</button>
+                                                        <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: '0.8rem', marginLeft: '4px' }} onClick={() => regenerateImage(record)}>重新生成</button>
+                                                        <button className="btn btn-danger" style={{ padding: '4px 8px', fontSize: '0.8rem', marginLeft: '4px' }} onClick={() => deleteOne(record.id)}>删除</button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                ) : (
+                                    <div className="result-grid">
+                                        {records.map(record => (
+                                            <div
+                                                key={record.id}
+                                                className={`result-card ${selected.includes(record.id) ? 'selected' : ''}`}
+                                                onClick={() => toggleSelect(record.id)}
+                                                onDoubleClick={() => setModalRecord(record)}
+                                            >
+                                                <img src={record.image_path} alt={record.filename || 'image'} />
+                                                <div className="result-info">
+                                                    <div>#{record.id} · {record.filename || '-'}</div>
+                                                    <div className="small-hint">{record.prompt || '-'}</div>
+                                                </div>
                                             </div>
-                                        </div>
-                                    ))}
-                                    {records.length === 0 && !loading && <div className="small-hint">暂无记录</div>}
-                                </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {records.length === 0 && !loading && <div className="small-hint">暂无记录</div>}
                                 <div className="row" style={{ marginTop: '12px' }}>
                                     <button className="btn btn-secondary" onClick={() => loadRecords(false)} disabled={loading}>加载更多</button>
                                 </div>
@@ -239,27 +394,56 @@
                     </div>
 
                     {modalRecord && (
-                        <div className="modal" onClick={() => setModalRecord(null)}>
-                            <div className="modal-card panel" onClick={(e) => e.stopPropagation()}>
-                                <div className="row space">
-                                    <div className="section-title">记录详情</div>
-                                    <div className="row">
-                                        <button className="btn btn-secondary" onClick={() => addToLibrary(modalRecord, 'person')}>加人物库</button>
-                                        <button className="btn btn-secondary" onClick={() => addToLibrary(modalRecord, 'scene')}>加场景库</button>
-                                        <button className="btn btn-danger" onClick={() => deleteOne(modalRecord.id)}>删除</button>
-                                    </div>
-                                </div>
-                                <img className="modal-image" src={modalRecord.image_path} alt={modalRecord.filename || 'image'} />
-                                <div className="info-grid">
-                                    <div><strong>文件名：</strong>{modalRecord.filename || '-'}</div>
-                                    <div><strong>尺寸：</strong>{modalRecord.width} × {modalRecord.height}</div>
-                                    <div><strong>比例：</strong>{modalRecord.aspect_ratio || '-'}</div>
-                                    <div><strong>分辨率：</strong>{modalRecord.resolution || '-'}</div>
-                                    <div><strong>种子：</strong>{modalRecord.seed || '-'}</div>
-                                    <div><strong>生成时间：</strong>{modalRecord.created_at || '-'}</div>
-                                    <div style={{ gridColumn: '1 / -1' }}><strong>提示词：</strong>{modalRecord.prompt || '-'}</div>
+                        <div
+                            className="preview-fullscreen"
+                            onClick={(e) => e.target === e.currentTarget && setModalRecord(null)}
+                            onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; }}
+                            onTouchEnd={(e) => {
+                                const dx = e.changedTouches[0].clientX - touchStartX.current;
+                                if (dx > 60) goPrev();
+                                else if (dx < -60) goNext();
+                            }}
+                        >
+                            <button type="button" className="preview-close" onClick={() => setModalRecord(null)} title="关闭">×</button>
+                            {canPrev && (
+                                <button type="button" className="nav-btn prev" onClick={(e) => { e.stopPropagation(); goPrev(); }} title="上一张">‹</button>
+                            )}
+                            <img
+                                src={modalRecord.image_path}
+                                alt={modalRecord.filename || 'image'}
+                                onClick={(e) => e.stopPropagation()}
+                                draggable={false}
+                            />
+                            {canNext && (
+                                <button type="button" className="nav-btn next" onClick={(e) => { e.stopPropagation(); goNext(); }} title="下一张">›</button>
+                            )}
+                            <div className="preview-counter" onClick={(e) => e.stopPropagation()}>
+                                {currentIndex + 1} / {records.length}
+                            </div>
+                            <div style={{ position: 'absolute', bottom: 'calc(32vh + 12px)', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }} onClick={(e) => e.stopPropagation()}>
+                                <button className="btn btn-secondary" onClick={() => addToLibrary(modalRecord, 'person')}>加人物库</button>
+                                <button className="btn btn-secondary" onClick={() => addToLibrary(modalRecord, 'scene')}>加场景库</button>
+                                <button className="btn btn-primary" onClick={() => { regenerateImage(modalRecord); setModalRecord(null); }}>重新生成</button>
+                                <button className="btn btn-danger" onClick={() => { deleteOne(modalRecord.id); setModalRecord(null); }}>删除</button>
+                            </div>
+                            <div className="preview-params" onClick={(e) => e.stopPropagation()}>
+                                <div className="preview-params-grid" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 16px' }}>
+                                    <span style={{ color: 'rgba(255,255,255,0.6)' }}>文件名</span><span>{modalRecord.filename || '-'}</span>
+                                    <span style={{ color: 'rgba(255,255,255,0.6)' }}>尺寸</span><span>{modalRecord.width} × {modalRecord.height}</span>
+                                    <span style={{ color: 'rgba(255,255,255,0.6)' }}>比例</span><span>{modalRecord.aspect_ratio || '-'}</span>
+                                    <span style={{ color: 'rgba(255,255,255,0.6)' }}>分辨率</span><span>{modalRecord.resolution || '-'}</span>
+                                    <span style={{ color: 'rgba(255,255,255,0.6)' }}>种子</span><span>{modalRecord.seed != null ? modalRecord.seed : '-'}</span>
+                                    <span style={{ color: 'rgba(255,255,255,0.6)' }}>生成时间</span><span>{modalRecord.created_at || '-'}</span>
+                                    <span style={{ color: 'rgba(255,255,255,0.6)', alignSelf: 'start' }}>提示词</span><span style={{ wordBreak: 'break-word' }}>{modalRecord.prompt || '-'}</span>
                                 </div>
                             </div>
+                        </div>
+                    )}
+
+                    {previewRefUrl && (
+                        <div className="ref-preview-overlay" onClick={() => setPreviewRefUrl(null)}>
+                            <img src={previewRefUrl} alt="" onClick={(e) => e.stopPropagation()} draggable={false} />
+                            <button type="button" className="preview-close" onClick={() => setPreviewRefUrl(null)} title="关闭">×</button>
                         </div>
                     )}
                 </div>

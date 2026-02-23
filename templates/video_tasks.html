@@ -54,7 +54,6 @@
                     <a href="/video-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
                     <a href="/video-tasks" className="sidebar-nav-item active"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
                     <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
-                    <a href="/storyboard" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">分镜生成</span></a>
                     <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
                     <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
                 </div>
@@ -62,6 +61,7 @@
                     <div className="sidebar-nav-user-info">
                         <div className="sidebar-nav-user-avatar">👤</div>
                         <div className="sidebar-nav-user-name">{username}</div>
+                        <a href="/logout" className="sidebar-nav-logout">登出</a>
                     </div>
                     <div style={{ marginTop: '8px' }}>
                         <label style={{ fontSize: '0.85em', color: '#cbd4f5' }}>当前项目</label>
@@ -76,7 +76,6 @@
                             ))}
                         </select>
                     </div>
-                    <a href="/logout" className="sidebar-nav-logout">登出</a>
                 </div>
             </nav>
         );
@@ -115,7 +114,7 @@
             const [modalVideo, setModalVideo] = useState('');
 
             useEffect(() => {
-                document.body.classList.add('react-theme');
+                document.body.classList.add('react-theme', 'sidebar-compact');
             }, []);
 
             useEffect(() => {

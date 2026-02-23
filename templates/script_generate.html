@@ -114,7 +114,7 @@
         }
     </style>
 </head>
-<body>
+<body class="sidebar-compact">
     <div id="reactApp"></div>
     <nav class="sidebar-nav" id="sidebarNav">
         <div class="sidebar-nav-header">
@@ -148,10 +148,6 @@
                 <span class="sidebar-nav-icon">📜</span>
                 <span class="sidebar-nav-text">剧本生成</span>
             </a>
-            <a href="/storyboard" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🎬</span>
-                <span class="sidebar-nav-text">分镜生成</span>
-            </a>
             <a href="/storyboard-studio" class="sidebar-nav-item">
                 <span class="sidebar-nav-icon">🧩</span>
                 <span class="sidebar-nav-text">分镜制作</span>
@@ -176,6 +172,7 @@
             <div class="sidebar-nav-user-info">
                 <div class="sidebar-nav-user-avatar">👤</div>
                 <div class="sidebar-nav-user-name">{{ user.username }}</div>
+                <a href="/logout" class="sidebar-nav-logout">登出</a>
             </div>
             <div style="margin-top: 8px;">
                 <label style="font-size: 0.85em; color: #666;">当前项目</label>
@@ -183,7 +180,6 @@
                     <option>加载中...</option>
                 </select>
             </div>
-            <a href="/logout" class="sidebar-nav-logout">登出</a>
         </div>
     </nav>
 
@@ -201,6 +197,8 @@
                             <button class="btn btn-secondary" onclick="loadNovelFile()">加载TXT</button>
                             <button class="btn btn-secondary" onclick="clearNovel()">清空</button>
                         </div>
+                        <div class="panel-title" style="margin-top: 12px;">实时输出</div>
+                        <textarea id="scriptStreamOutput" placeholder="生成过程中的流式输出..." style="min-height: 160px;"></textarea>
                         <div class="small-hint">支持粘贴文本或上传 txt 文件</div>
                     </div>
 
@@ -232,11 +230,35 @@
                 <div class="panel">
                     <div class="panel-title">剧本分集表格</div>
                     <div id="episodeTableWrap" class="episode-list"></div>
+                    <div class="form-row" style="margin-top: 8px; justify-content: space-between;">
+                        <div class="small-hint" id="episodePageInfo"></div>
+                        <div class="small-hint" id="episodeActionHint"></div>
+                        <div class="form-row">
+                            <button class="btn btn-secondary" onclick="changeEpisodePage(-1)">上一页</button>
+                            <button class="btn btn-secondary" onclick="changeEpisodePage(1)">下一页</button>
+                            <input type="number" id="episodePageInput" min="1" style="width: 90px;" placeholder="页码">
+                            <button class="btn btn-secondary" onclick="jumpEpisodePage()">跳页</button>
+                            <button class="btn btn-secondary" onclick="exportEpisodeTexts()">导出</button>
+                            <label class="btn btn-secondary" style="margin:0;">
+                                导入
+                                <input type="file" id="episodeImportInput" accept=".txt" multiple style="display:none" onchange="importEpisodeTexts(event)">
+                            </label>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="panel">
                     <div class="panel-title">本集内容编辑</div>
                     <div class="small-hint" id="episodeEditHint">点击表格中的“编辑”进入修改</div>
+                    <div class="form-row" style="margin-top: 8px; flex-wrap: nowrap; gap: 12px; align-items: center;">
+                        <span class="small-hint">集数：</span>
+                        <input type="number" id="episodeEditIndex" placeholder="集数" style="width: 90px;">
+                        <span class="small-hint">时长：</span>
+                        <input type="number" id="episodeEditDuration" placeholder="秒" style="width: 90px;">
+                        <span class="small-hint">秒</span>
+                        <span class="small-hint">集名：</span>
+                        <input type="text" id="episodeEditTitle" placeholder="集名" style="flex: 1;">
+                    </div>
                     <textarea id="episodeEditor" placeholder="请选择一集进行编辑..." style="min-height: 180px;"></textarea>
                     <div class="form-row" style="margin-top: 8px;">
                         <button class="btn btn-primary" onclick="saveEpisodeContent()">保存本集</button>
@@ -354,12 +376,25 @@
         let lastEpisodes = [];
         let currentEpisodeRow = null;
         let pollingTimer = null;
+        let allEpisodeRows = [];
+        let episodePage = 1;
+        const EPISODE_PAGE_SIZE = 10;
+        let selectedEpisodeIds = new Set();
+        const STREAM_OUTPUT_KEY = 'scriptStreamOutput';
 
         function updateScriptProgress(text) {
             const el = document.getElementById('scriptProgress');
             if (el) {
                 el.textContent = text || '';
             }
+        }
+
+        function updateStreamOutput(text, append = true) {
+            const el = document.getElementById('scriptStreamOutput');
+            if (!el) return;
+            el.value = append ? (el.value + text) : text;
+            localStorage.setItem(STREAM_OUTPUT_KEY, el.value);
+            el.scrollTop = el.scrollHeight;
         }
 
         async function generateScript() {
@@ -371,8 +406,9 @@
                 alert('请先输入小说文本');
                 return;
             }
-            updateScriptProgress('生成中 0%');
-            const resp = await fetch('/api/script-generate-async', {
+            updateScriptProgress('生成中...');
+            updateStreamOutput('', false);
+            const resp = await fetch('/api/script-generate-stream', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -383,18 +419,52 @@
                     script_id: currentScriptId
                 })
             });
-            const data = await resp.json();
-            if (!data.success) {
-                alert(data.error || '生成失败');
-                updateScriptProgress('');
+            if (!resp.ok || !resp.body) {
+                updateScriptProgress('生成失败');
                 return;
             }
-            const taskId = data.task_id;
-            if (taskId) {
-                const key = `script_task_${currentProjectId || 'default'}`;
-                localStorage.setItem(key, String(taskId));
-                pollScriptTask(taskId);
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let buffer = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const parts = buffer.split('\n\n');
+                buffer = parts.pop() || '';
+                parts.forEach(part => {
+                    const line = part.trim();
+                    if (!line.startsWith('data:')) return;
+                    try {
+                        const payload = JSON.parse(line.replace(/^data:\s*/, ''));
+                        if (payload.type === 'chunk') {
+                            updateStreamOutput(payload.content || '', true);
+                        } else if (payload.type === 'complete') {
+                            updateScriptProgress('完成');
+                            currentScriptId = payload.script_id || currentScriptId;
+                            loadAllEpisodeTable();
+                        } else if (payload.type === 'error') {
+                            updateScriptProgress('失败');
+                            setEpisodeActionHint(payload.error || '生成失败', true);
+                        }
+                    } catch (e) {
+                        return;
+                    }
+                });
             }
+        }
+
+        function truncateSummary(text, limit = 30) {
+            if (!text) return '-';
+            const plain = String(text);
+            return plain.length > limit ? `${plain.slice(0, limit)}...` : plain;
+        }
+
+        function setEpisodeActionHint(text, isError = false) {
+            const hint = document.getElementById('episodeActionHint');
+            if (!hint) return;
+            hint.textContent = text || '';
+            hint.style.color = isError ? '#ff9aa2' : '#9aa3c7';
         }
 
         function renderEpisodeTable(episodes) {
@@ -402,17 +472,29 @@
             if (!wrap) return;
             if (!episodes || episodes.length === 0) {
                 wrap.innerHTML = '<div class="small-hint">暂无分集记录</div>';
+                const info = document.getElementById('episodePageInfo');
+                if (info) info.textContent = '';
+                setEpisodeActionHint('');
                 return;
             }
-            const rows = episodes.map(ep => `
+            const totalPages = Math.max(1, Math.ceil(episodes.length / EPISODE_PAGE_SIZE));
+            if (episodePage > totalPages) episodePage = totalPages;
+            if (episodePage < 1) episodePage = 1;
+            const start = (episodePage - 1) * EPISODE_PAGE_SIZE;
+            const pageItems = episodes.slice(start, start + EPISODE_PAGE_SIZE);
+            const allSelected = pageItems.length > 0 && pageItems.every(ep => selectedEpisodeIds.has(ep.id));
+            const rows = pageItems.map(ep => `
                 <tr>
-                    <td style="padding:6px;">${ep.id || '-'}</td>
-                    <td style="padding:6px;">${ep.created_at || '-'}</td>
-                    <td style="padding:6px;">${ep.episode_index || '-'}</td>
-                    <td style="padding:6px;">${ep.title || '-'}</td>
-                    <td style="padding:6px;">${ep.duration_seconds || '-'}</td>
-                    <td style="padding:6px;">${ep.summary || '-'}</td>
-                    <td style="padding:6px;">
+                    <td style="padding:4px 6px; font-size: 0.85em;">
+                        <input type="checkbox" ${selectedEpisodeIds.has(ep.id) ? 'checked' : ''} onchange="toggleEpisodeSelection(${ep.id}, this.checked)">
+                    </td>
+                    <td style="padding:4px 6px; font-size: 0.85em;">${ep.id || '-'}</td>
+                    <td style="padding:4px 6px; font-size: 0.85em;">${ep.created_at || '-'}</td>
+                    <td style="padding:4px 6px; font-size: 0.85em;">${ep.episode_index || '-'}</td>
+                    <td style="padding:4px 6px; font-size: 0.85em;">${ep.title || '-'}</td>
+                    <td style="padding:4px 6px; font-size: 0.85em;">${ep.duration_seconds || '-'}</td>
+                    <td style="padding:4px 6px; font-size: 0.85em;">${truncateSummary(ep.summary)}</td>
+                    <td style="padding:4px 6px; font-size: 0.85em;">
                         <button class="btn btn-secondary" onclick="editEpisode(${ep.id}, ${ep.episode_index || 0}, ${ep.script_id || 0})">编辑</button>
                         <button class="btn btn-danger" onclick="deleteEpisode(${ep.id})">删除</button>
                     </td>
@@ -422,35 +504,58 @@
                 <table style="width: 100%; border-collapse: collapse;">
                     <thead>
                         <tr>
-                            <th style="text-align:left; padding:6px;">编号</th>
-                            <th style="text-align:left; padding:6px;">生成时间</th>
-                            <th style="text-align:left; padding:6px;">集数</th>
-                            <th style="text-align:left; padding:6px;">集名</th>
-                            <th style="text-align:left; padding:6px;">时长</th>
-                            <th style="text-align:left; padding:6px;">概览</th>
-                            <th style="text-align:left; padding:6px;">本集内容</th>
+                            <th style="text-align:left; padding:4px 6px; font-size: 0.85em;">
+                                <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="toggleEpisodeSelectAll(this.checked)">
+                            </th>
+                            <th style="text-align:left; padding:4px 6px; font-size: 0.85em;">编号</th>
+                            <th style="text-align:left; padding:4px 6px; font-size: 0.85em;">生成时间</th>
+                            <th style="text-align:left; padding:4px 6px; font-size: 0.85em;">集数</th>
+                            <th style="text-align:left; padding:4px 6px; font-size: 0.85em;">集名</th>
+                            <th style="text-align:left; padding:4px 6px; font-size: 0.85em;">时长</th>
+                            <th style="text-align:left; padding:4px 6px; font-size: 0.85em;">概览</th>
+                            <th style="text-align:left; padding:4px 6px; font-size: 0.85em;">本集内容</th>
                         </tr>
                     </thead>
                     <tbody>${rows}</tbody>
                 </table>
             `;
+            const info = document.getElementById('episodePageInfo');
+            if (info) info.textContent = `第 ${episodePage} / ${totalPages} 页，共 ${episodes.length} 条`;
         }
 
         async function loadEpisodeTable(scriptId) {
             const resp = await fetch(`/api/script-episodes?script_id=${scriptId}`);
             const data = await resp.json();
             if (!data.success) {
+                allEpisodeRows = [];
+                selectedEpisodeIds = new Set();
                 renderEpisodeTable([]);
                 return;
             }
-            renderEpisodeTable(data.episodes || []);
+            allEpisodeRows = data.episodes || [];
+            selectedEpisodeIds = new Set();
+            renderEpisodeTable(allEpisodeRows);
         }
 
         async function editEpisode(id, episodeIndex, scriptId) {
             currentEpisodeRow = { id, episodeIndex, scriptId };
             const hint = document.getElementById('episodeEditHint');
-            if (hint) {
-                hint.textContent = `正在编辑第 ${episodeIndex} 集`;
+            const idxInput = document.getElementById('episodeEditIndex');
+            const durationInput = document.getElementById('episodeEditDuration');
+            const titleInput = document.getElementById('episodeEditTitle');
+            if (idxInput) idxInput.value = episodeIndex || '';
+            if (titleInput) {
+                const ep = allEpisodeRows.find(r => r.id === id);
+                titleInput.value = ep ? (ep.title || '') : '';
+                if (durationInput) durationInput.value = ep ? (ep.duration_seconds || '') : '';
+                if (hint) {
+                    const displayIndex = ep && ep.episode_index ? ep.episode_index : episodeIndex;
+                    const displayDuration = ep && ep.duration_seconds ? ep.duration_seconds : '';
+                    const displayTitle = ep && ep.title ? ep.title : '';
+                    hint.textContent = `集数：${displayIndex || ''}，时长：${displayDuration || ''}秒，集名：${displayTitle || ''}`;
+                }
+            } else if (hint) {
+                hint.textContent = `集数：${episodeIndex || ''}，时长：秒，集名：`;
             }
             try {
                 const resp = await fetch(`/api/script-episodes/${id}/content`);
@@ -471,12 +576,20 @@
                 return;
             }
             const content = document.getElementById('episodeEditor').value || '';
+            const idxInput = document.getElementById('episodeEditIndex');
+            const durationInput = document.getElementById('episodeEditDuration');
+            const titleInput = document.getElementById('episodeEditTitle');
+            const editIndex = idxInput && idxInput.value ? Number(idxInput.value) : null;
+            const editDuration = durationInput && durationInput.value ? Number(durationInput.value) : null;
+            const editTitle = titleInput ? titleInput.value : '';
             const resp = await fetch(`/api/script-episodes/${currentEpisodeRow.id}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     script_id: currentEpisodeRow.scriptId,
-                    episode_index: currentEpisodeRow.episodeIndex,
+                    episode_index: editIndex !== null ? editIndex : currentEpisodeRow.episodeIndex,
+                    title: editTitle,
+                    duration_seconds: editDuration,
                     content
                 })
             });
@@ -503,17 +616,110 @@
             const resp = await fetch('/api/script-episodes');
             const data = await resp.json();
             if (!data.success) {
+                allEpisodeRows = [];
+                selectedEpisodeIds = new Set();
                 renderEpisodeTable([]);
                 return;
             }
-            const episodes = data.episodes || [];
-            renderEpisodeTable(episodes);
-            if (episodes.length > 0) {
-                const maxScriptId = episodes.reduce((acc, ep) => Math.max(acc, Number(ep.script_id || 0)), 0);
+            allEpisodeRows = data.episodes || [];
+            selectedEpisodeIds = new Set();
+            renderEpisodeTable(allEpisodeRows);
+            if (allEpisodeRows.length > 0) {
+                const maxScriptId = allEpisodeRows.reduce((acc, ep) => Math.max(acc, Number(ep.script_id || 0)), 0);
                 if (maxScriptId) {
                     currentScriptId = maxScriptId;
                 }
             }
+        }
+
+        function changeEpisodePage(delta) {
+            episodePage += delta;
+            renderEpisodeTable(allEpisodeRows);
+        }
+
+        function jumpEpisodePage() {
+            const input = document.getElementById('episodePageInput');
+            if (!input) return;
+            const value = Number(input.value || 1);
+            if (!value || value < 1) return;
+            episodePage = value;
+            renderEpisodeTable(allEpisodeRows);
+        }
+
+        function toggleEpisodeSelection(id, checked) {
+            if (checked) {
+                selectedEpisodeIds.add(id);
+            } else {
+                selectedEpisodeIds.delete(id);
+            }
+            renderEpisodeTable(allEpisodeRows);
+        }
+
+        function toggleEpisodeSelectAll(checked) {
+            const start = (episodePage - 1) * EPISODE_PAGE_SIZE;
+            const pageItems = allEpisodeRows.slice(start, start + EPISODE_PAGE_SIZE);
+            pageItems.forEach(ep => {
+                if (checked) {
+                    selectedEpisodeIds.add(ep.id);
+                } else {
+                    selectedEpisodeIds.delete(ep.id);
+                }
+            });
+            renderEpisodeTable(allEpisodeRows);
+        }
+
+        async function exportEpisodeTexts() {
+            if (!allEpisodeRows || allEpisodeRows.length === 0) return;
+            const selected = allEpisodeRows.filter(ep => selectedEpisodeIds.has(ep.id));
+            if (selected.length === 0) {
+                setEpisodeActionHint('请先选择要导出的分集', true);
+                return;
+            }
+            let exported = 0;
+            for (const ep of selected) {
+                try {
+                    const resp = await fetch(`/api/script-episodes/${ep.id}/content`);
+                    if (!resp.ok) continue;
+                    const text = await resp.text();
+                    const index = ep.episode_index ? `第${ep.episode_index}集` : '第?集';
+                    const title = ep.title ? `-${ep.title}` : '';
+                    const filename = `${index}${title}.txt`;
+                    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    exported += 1;
+                } catch (e) {
+                    continue;
+                }
+            }
+            setEpisodeActionHint(`导出成功：${exported} 条`);
+        }
+
+        async function importEpisodeTexts(event) {
+            const files = Array.from(event.target.files || []);
+            if (files.length === 0) return;
+            const formData = new FormData();
+            files.forEach(file => formData.append('files', file));
+            if (currentScriptId) {
+                formData.append('script_id', currentScriptId);
+            }
+            const resp = await fetch('/api/script-episodes/import', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await resp.json();
+            if (!data.success) {
+                setEpisodeActionHint(data.error || '导入失败', true);
+                return;
+            }
+            setEpisodeActionHint(`导入成功：${data.count || files.length} 条`);
+            loadAllEpisodeTable();
         }
 
         async function pollScriptTask(taskId) {
@@ -620,6 +826,10 @@
                 loadProjects();
             }
             loadAllEpisodeTable();
+            const cached = localStorage.getItem(STREAM_OUTPUT_KEY);
+            if (cached) {
+                updateStreamOutput(cached, false);
+            }
         });
     </script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
