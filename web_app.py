@@ -2637,6 +2637,142 @@ def storyboard_studio():
     """全新分镜制作页面（React）"""
     return render_template('storyboard_studio.html', user=get_current_user())
 
+
+def _get_txt2csv_prompt_path():
+    """config/txt2csv.md 路径（相对于项目根）"""
+    root = Path(__file__).resolve().parent
+    return root / 'config' / 'txt2csv.md'
+
+
+@app.route('/txt2csv')
+@login_required
+def txt2csv_page():
+    """转换工具页（含文本转表格等）"""
+    return render_template('txt2csv.html', user=get_current_user())
+
+
+@app.route('/api/txt2csv-prompt', methods=['GET'])
+@login_required
+def api_txt2csv_prompt():
+    """返回 config/txt2csv.md 的提示词内容"""
+    try:
+        path = _get_txt2csv_prompt_path()
+        if not path.exists():
+            return jsonify({'success': False, 'error': 'config/txt2csv.md 不存在'}), 404
+        content = path.read_text(encoding='utf-8')
+        return jsonify({'success': True, 'content': content})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _parse_csv_line(line):
+    """简单解析单行 CSV（支持双引号包裹的字段）"""
+    row = []
+    current = []
+    in_quote = False
+    for i, c in enumerate(line):
+        if c == '"':
+            in_quote = not in_quote
+        elif not in_quote and c == ',':
+            row.append(''.join(current).strip())
+            current = []
+        else:
+            current.append(c)
+    row.append(''.join(current).strip())
+    return row
+
+
+def _call_llm_with_timeout(client, model, user_content, timeout_sec=90):
+    """在子线程中调用 LLM（流式，与分镜一致避免超时），主线程等待 timeout_sec。"""
+    result_queue = queue.Queue()
+
+    def _run():
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": user_content}],
+                temperature=0.3,
+                stream=True,
+            )
+            content = _collect_stream_content(resp).strip()
+            print('[txt2csv] API 返回成功, 内容长度:', len(content))
+            result_queue.put((content, None))
+        except Exception as e:
+            print('[txt2csv] API 请求异常:', type(e).__name__, str(e))
+            result_queue.put((None, str(e)))
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    try:
+        content, err = result_queue.get(timeout=timeout_sec)
+        return (content, err)
+    except queue.Empty:
+        return (None, f'模型响应超时（{timeout_sec} 秒）')
+
+
+@app.route('/api/txt2csv-process', methods=['POST'])
+@login_required
+def api_txt2csv_process():
+    """按提示词处理文本，返回表格数据（表头+行）"""
+    try:
+        data = request.get_json() or {}
+        text = (data.get('text') or '').strip()
+        print('[txt2csv] 收到请求, 文本长度:', len(text), '前80字:', (text[:80] + '...') if len(text) > 80 else text)
+        if not text:
+            return jsonify({'success': False, 'error': '请输入要处理的文本'}), 400
+
+        path = _get_txt2csv_prompt_path()
+        if not path.exists():
+            return jsonify({'success': False, 'error': 'config/txt2csv.md 不存在'}), 404
+        prompt_md = path.read_text(encoding='utf-8')
+
+        api_key = os.environ.get('QWEN_API_KEY')
+        base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
+        if not api_key:
+            return jsonify({'success': False, 'error': '未配置 QWEN_API_KEY'}), 500
+
+        model = os.environ.get('TXT2CSV_MODEL') or os.environ.get('SCRIPT_GENERATE_MODEL', 'qwen3.5-plus')
+        user_content = prompt_md.rstrip() + "\n\n" + text
+        request_url = (base_url.rstrip('/') + '/chat/completions')
+        print('[txt2csv] 请求地址:', request_url)
+        print('[txt2csv] 请求模型:', model, '总内容长度:', len(user_content))
+        # 禁用重试，首次失败即返回真实错误
+        client = OpenAI(api_key=api_key, base_url=base_url, timeout=300.0, max_retries=0)
+        content, llm_error = _call_llm_with_timeout(client, model, user_content, timeout_sec=600)
+        if llm_error:
+            print('[txt2csv] 模型调用失败:', llm_error)
+            err_msg = str(llm_error)
+            if 'timed out' in err_msg.lower() or 'timeout' in err_msg.lower():
+                err_msg = '模型服务响应超时。请检查：1) 网络或 VPN 能否访问 ' + (base_url or '') + ' 2) .env 中 QWEN_BASE_URL 是否需代理 3) 稍后重试。'
+            return jsonify({'success': False, 'error': err_msg}), 500
+        print('[txt2csv] 收到模型响应, 内容长度:', len(content))
+        # 去掉可能的 markdown 代码块
+        if '```' in content:
+            for sep in ('```csv', '```CSV', '```'):
+                if sep in content:
+                    parts = content.split(sep, 1)
+                    if len(parts) > 1:
+                        content = parts[1].split('```')[0].strip()
+                    break
+        # 输出内容中的逗号统一为半角（便于 CSV 解析与导出）
+        content = content.replace('\uff0c', ',')
+        lines = [ln for ln in content.splitlines() if ln.strip()]
+        if not lines:
+            return jsonify({'success': False, 'error': '模型未返回有效 CSV'}), 400
+        headers = _parse_csv_line(lines[0])
+        rows = [_parse_csv_line(ln) for ln in lines[1:]]
+        n = len(headers)
+        for r in rows:
+            while len(r) < n:
+                r.append('')
+            del r[n:]
+        print('[txt2csv] 解析成功, 表头列数:', n, '行数:', len(rows))
+        return jsonify({'success': True, 'headers': headers, 'rows': rows, 'model_output': content})
+    except Exception as e:
+        print('[txt2csv] 异常:', type(e).__name__, str(e))
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/batch-generate', methods=['POST'])
 @login_required
 def batch_generate():

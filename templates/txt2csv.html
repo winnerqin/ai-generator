@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>转换工具 - Ai创作工具</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .app-shell { display: flex; min-height: 100vh; }
+        .main-content { padding: 0; }
+        .page-wrap { padding: 20px 24px 36px; }
+        .page-title { font-size: 1.4rem; font-weight: 600; }
+        .panel { border-radius: 16px; padding: 16px; }
+        .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .row.space { justify-content: space-between; }
+        .model-output-box { max-height: 240px; overflow: auto; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 12px; font-size: 0.85rem; white-space: pre-wrap; border: 1px solid rgba(86,111,255,0.25); font-family: inherit; }
+        .txt2csv-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+        .txt2csv-table th, .txt2csv-table td { padding: 8px 10px; border: 1px solid rgba(86,111,255,0.25); text-align: left; }
+        .txt2csv-table th { background: rgba(86,111,255,0.15); font-weight: 600; }
+        .txt2csv-table th.col-wide, .txt2csv-table td.col-wide { min-width: 200px; width: auto; }
+        .txt2csv-table th:not(.col-wide), .txt2csv-table td:not(.col-wide) { width: 1%; white-space: nowrap; }
+        .txt2csv-table td.col-wide input, .txt2csv-table td.col-wide textarea { white-space: normal; }
+        .txt2csv-table input, .txt2csv-table textarea { width: 100%; min-width: 60px; border: none; background: transparent; padding: 4px; font-size: inherit; outline: none; }
+        .txt2csv-table textarea { min-height: 24px; resize: vertical; }
+        .table-wrap { overflow-x: auto; margin-top: 12px; }
+    </style>
+</head>
+<body>
+    <div id="reactApp"></div>
+    <script>
+        window.__APP_CONTEXT__ = { username: "{{ user.username }}" };
+    </script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    {% raw %}
+    <script type="text/babel">
+        const { useEffect, useState } = React;
+
+        const Sidebar = ({ username, projects, currentProjectId, onProjectChange }) => (
+            <nav className="sidebar-nav" id="sidebarNav">
+                <div className="sidebar-nav-header">
+                    <div className="sidebar-nav-title">Ai创作工具</div>
+                    <button className="sidebar-nav-toggle" onClick={() => toggleSidebar()} title="收缩/展开">
+                        <span id="toggleIcon">‹</span>
+                    </button>
+                </div>
+                <div className="sidebar-nav-menu">
+                    <a href="/" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎨</span><span className="sidebar-nav-text">单图生成</span></a>
+                    <a href="/batch" className="sidebar-nav-item"><span className="sidebar-nav-icon">📦</span><span className="sidebar-nav-text">批量生成</span></a>
+                    <a href="/records" className="sidebar-nav-item"><span className="sidebar-nav-icon">📊</span><span className="sidebar-nav-text">生图任务</span></a>
+                    <a href="/video-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
+                    <a href="/video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
+                    <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
+                    <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
+                    <a href="/txt2csv" className="sidebar-nav-item active"><span className="sidebar-nav-icon">📋</span><span className="sidebar-nav-text">转换工具</span></a>
+                    <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
+                </div>
+                <div className="sidebar-nav-user">
+                    <div className="sidebar-nav-user-info">
+                        <div className="sidebar-nav-user-avatar">👤</div>
+                        <div className="sidebar-nav-user-name">{username}</div>
+                        <a href="/logout" className="sidebar-nav-logout">登出</a>
+                    </div>
+                    <div style={{ marginTop: '8px' }}>
+                        <label style={{ fontSize: '0.85em', color: '#cbd4f5' }}>当前项目</label>
+                        <select
+                            style={{ width: '100%', padding: '6px', borderRadius: '6px' }}
+                            value={currentProjectId || ''}
+                            onChange={(e) => onProjectChange(e.target.value)}
+                        >
+                            {projects.length === 0 && <option>加载中...</option>}
+                            {projects.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+            </nav>
+        );
+
+        const DRAFT_KEY = 'txt2csv_draft';
+
+        function App() {
+            const [projects, setProjects] = useState([]);
+            const [currentProjectId, setCurrentProjectId] = useState('');
+            const [inputText, setInputText] = useState('');
+            const [modelOutput, setModelOutput] = useState('');
+            const [headers, setHeaders] = useState([]);
+            const [rows, setRows] = useState([]);
+            const [processing, setProcessing] = useState(false);
+            const [processError, setProcessError] = useState('');
+
+            useEffect(() => {
+                document.body.classList.add('react-theme', 'sidebar-compact');
+            }, []);
+
+            useEffect(() => {
+                fetch('/api/projects').then(res => res.json()).then(data => {
+                    if (data.success) {
+                        setProjects(data.projects || []);
+                        setCurrentProjectId(String(data.current_project_id || ''));
+                    }
+                });
+            }, []);
+
+            useEffect(() => {
+                try {
+                    const raw = localStorage.getItem(DRAFT_KEY);
+                    if (raw) {
+                        const { headers: h, rows: r } = JSON.parse(raw);
+                        if (Array.isArray(h) && Array.isArray(r)) {
+                            setHeaders(h);
+                            setRows(r);
+                        }
+                    }
+                } catch (e) {}
+            }, []);
+
+            const handleProcess = async () => {
+                if (!inputText.trim()) {
+                    setProcessError('请输入要处理的文本');
+                    return;
+                }
+                setProcessError('');
+                setProcessing(true);
+                try {
+                    const res = await fetch('/api/txt2csv-process', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: inputText })
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (data.success) {
+                        setModelOutput(data.model_output ?? '');
+                        setHeaders(data.headers || []);
+                        setRows(data.rows || []);
+                    } else {
+                        setProcessError(data.error || res.statusText || '处理失败');
+                    }
+                } catch (e) {
+                    setProcessError(e.message || '请求失败');
+                } finally {
+                    setProcessing(false);
+                }
+            };
+
+            const saveDraft = () => {
+                try {
+                    localStorage.setItem(DRAFT_KEY, JSON.stringify({ headers, rows }));
+                    alert('已保存到本地');
+                } catch (e) {
+                    alert('保存失败');
+                }
+            };
+
+            const updateCell = (rowIndex, colIndex, value) => {
+                setRows(prev => {
+                    const next = prev.map((r, i) => i === rowIndex ? r.slice() : r);
+                    if (!next[rowIndex]) return prev;
+                    while (next[rowIndex].length <= colIndex) next[rowIndex].push('');
+                    next[rowIndex][colIndex] = value;
+                    return next;
+                });
+            };
+
+            const escapeCsvCell = (v) => {
+                const s = String(v ?? '');
+                if (s.includes(',') || s.includes('"') || s.includes('\n')) return '"' + s.replace(/"/g, '""') + '"';
+                return s;
+            };
+            const exportCsv = () => {
+                const lines = [headers.map(escapeCsvCell).join(',')];
+                rows.forEach(r => lines.push(headers.map((_, i) => escapeCsvCell(r[i])).join(',')));
+                const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'txt2csv_export.csv';
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+            const exportModelOutputCsv = () => {
+                const text = (modelOutput || '').trim();
+                if (!text) return;
+                const blob = new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'txt2csv_output.csv';
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            return (
+                <div className="app-shell">
+                    <Sidebar
+                        username={window.__APP_CONTEXT__?.username || 'user'}
+                        projects={projects}
+                        currentProjectId={currentProjectId}
+                        onProjectChange={async (pid) => {
+                            const resp = await fetch('/api/projects/switch', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ project_id: pid })
+                            });
+                            const data = await resp.json();
+                            if (data.success) window.location.reload();
+                        }}
+                    />
+                    <div className="main-content">
+                        <div className="page-wrap">
+                            <div className="page-title">🔧 转换工具</div>
+                            <div className="panel" style={{ marginTop: '16px' }}>
+                                <label style={{ display: 'block', marginBottom: 6 }}>输入文本</label>
+                                <textarea
+                                    value={inputText}
+                                    onChange={(e) => setInputText(e.target.value)}
+                                    placeholder="粘贴待处理的剧本或文本…"
+                                    style={{ width: '100%', minHeight: 120, padding: 12, borderRadius: 12, border: '1px solid rgba(86,111,255,0.25)', background: 'rgba(11,15,26,0.5)', color: '#e6ebff', resize: 'vertical' }}
+                                />
+                                <div className="row" style={{ marginTop: 12 }}>
+                                    <button className="btn btn-primary" onClick={handleProcess} disabled={processing}>
+                                        {processing ? '处理中…' : '按提示词处理'}
+                                    </button>
+                                </div>
+                                {processError && <div className="small-hint" style={{ color: '#ff9aa2', marginTop: 8 }}>{processError}</div>}
+                            </div>
+
+                            <div className="panel" style={{ marginTop: '16px' }}>
+                                <div className="row space" style={{ marginBottom: 8 }}>
+                                    <div style={{ fontWeight: 600 }}>大模型输出内容</div>
+                                    <button className="btn btn-secondary" onClick={exportModelOutputCsv} disabled={!modelOutput.trim()}>导出为 CSV</button>
+                                </div>
+                                <div className="model-output-box">{modelOutput || '（处理成功后显示大模型原始输出）'}</div>
+                            </div>
+
+                            <div className="panel" style={{ marginTop: '16px' }}>
+                                <div className="row space">
+                                    <div style={{ fontWeight: 600 }}>表格（可编辑）</div>
+                                    <div className="row">
+                                        <button className="btn btn-secondary" onClick={saveDraft}>保存</button>
+                                        <button className="btn btn-primary" onClick={exportCsv} disabled={!headers.length}>导出 CSV</button>
+                                    </div>
+                                </div>
+                                <div className="table-wrap">
+                                    {headers.length > 0 ? (
+                                        <table className="txt2csv-table">
+                                            <thead>
+                                                <tr>
+                                                    {headers.map((h, i) => <th key={i} className={['中文台词','说话人','描述','场景/时间'].includes(h) ? 'col-wide' : ''}>{h}</th>)}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {rows.map((row, ri) => (
+                                                    <tr key={ri}>
+                                                        {headers.map((_, ci) => (
+                                                            <td key={ci} className={['中文台词','说话人','描述','场景/时间'].includes(headers[ci]) ? 'col-wide' : ''}>
+                                                                <input
+                                                                    value={row[ci] ?? ''}
+                                                                    onChange={(e) => updateCell(ri, ci, e.target.value)}
+                                                                />
+                                                            </td>
+                                                        ))}
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    ) : (
+                                        <div className="small-hint">暂无数据，请在上方输入文本并点击「按提示词处理」</div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('reactApp')).render(<App />);
+    </script>
+    {% endraw %}
+    <script src="/static/sidebar-nav.js"></script>
+</body>
+</html>
