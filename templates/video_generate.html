@@ -33,6 +33,25 @@
         .dropzone { border: 2px dashed rgba(86,111,255,0.5); border-radius: 12px; padding: 14px; text-align: center; cursor: pointer; }
         .panel textarea { min-height: 96px; height: 96px; resize: vertical; box-sizing: border-box; }
         .panel select, .panel input[type="number"], .panel input[type="text"] { height: 32px; box-sizing: border-box; }
+        .prompt-row { display: flex; gap: 12px; align-items: flex-start; }
+        .prompt-row textarea { flex: 1; min-width: 0; }
+        .video-btn-generate { flex-shrink: 0; font-size: 1.1rem; padding: 10px 20px; white-space: nowrap; }
+        .task-list-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+        .task-list-table th, .task-list-table td { padding: 8px 10px; border-bottom: 1px solid rgba(86,111,255,0.2); text-align: left; }
+        .task-list-table th { font-weight: 600; }
+        .task-list-table tr:hover { background: rgba(86,111,255,0.06); }
+        .status-badge { padding: 3px 8px; border-radius: 999px; font-size: 0.75rem; }
+        .status-queued { background: rgba(86,111,255,0.2); }
+        .status-running { background: rgba(255,193,7,0.2); }
+        .status-succeeded { background: rgba(40,167,69,0.2); }
+        .status-failed { background: rgba(220,53,69,0.2); }
+        .status-cancelled { background: rgba(108,117,125,0.2); }
+        .video-play-fullscreen { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.95); }
+        .video-play-fullscreen video { width: 100vw; height: 100vh; object-fit: contain; cursor: pointer; }
+        .video-play-fullscreen .video-close { position: absolute; top: 16px; right: 16px; z-index: 10; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,0.2); color: #fff; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .video-play-fullscreen .video-close:hover { background: rgba(255,255,255,0.35); }
+        .frame-thumbs { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+        .frame-thumbs img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; border: 1px solid rgba(86,111,255,0.25); cursor: pointer; }
     </style>
 </head>
 <body>
@@ -45,7 +64,7 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     {% raw %}
     <script type="text/babel">
-        const { useEffect, useMemo, useState } = React;
+        const { useEffect, useMemo, useState, useRef } = React;
 
         const Sidebar = ({ username, projects, currentProjectId, onProjectChange }) => (
             <nav className="sidebar-nav" id="sidebarNav">
@@ -94,7 +113,7 @@
             const [generateType, setGenerateType] = useState('text');
             const [prompt, setPrompt] = useState('');
             const [resolution, setResolution] = useState('1080p');
-            const [ratio, setRatio] = useState('16:9');
+            const [ratio, setRatio] = useState('9:16');
             const [duration, setDuration] = useState(5);
             const [seed, setSeed] = useState(-1);
             const [cameraFixed, setCameraFixed] = useState('false');
@@ -112,6 +131,123 @@
             const [modalType, setModalType] = useState('first');
             const [libraryType, setLibraryType] = useState('person');
             const [libraryAssets, setLibraryAssets] = useState([]);
+            const [taskListTasks, setTaskListTasks] = useState([]);
+            const [taskListPage, setTaskListPage] = useState(1);
+            const [taskListTotalPages, setTaskListTotalPages] = useState(1);
+            const [taskListPageSize, setTaskListPageSize] = useState(10);
+            const [taskIdSearch, setTaskIdSearch] = useState('');
+            const [statusFilter, setStatusFilter] = useState('');
+            const [taskListAutoRefresh, setTaskListAutoRefresh] = useState(false);
+            const [modalVideo, setModalVideo] = useState('');
+            const videoRef = useRef(null);
+
+            function statusBadge(status) {
+                const map = {
+                    queued: { text: '排队中', cls: 'status-queued' },
+                    running: { text: '运行中', cls: 'status-running' },
+                    succeeded: { text: '成功', cls: 'status-succeeded' },
+                    failed: { text: '失败', cls: 'status-failed' },
+                    cancelled: { text: '已取消', cls: 'status-cancelled' }
+                };
+                const info = map[status] || { text: status, cls: 'status-queued' };
+                return <span className={`status-badge ${info.cls}`}>{info.text}</span>;
+            }
+
+            const loadTasks = async (page) => {
+                const p = page ?? taskListPage;
+                let url = `/api/video-tasks?page=${p}&page_size=${taskListPageSize}`;
+                if (taskIdSearch) url += `&task_id=${encodeURIComponent(taskIdSearch)}`;
+                if (statusFilter) url += `&status=${encodeURIComponent(statusFilter)}`;
+                const resp = await fetch(url);
+                const data = await resp.json();
+                if (!data.success) {
+                    setTaskListTasks([]);
+                    return;
+                }
+                const items = data.items || data.tasks || [];
+                setTaskListTasks(items);
+                const total = data.total || items.length;
+                setTaskListTotalPages(Math.max(1, Math.ceil(total / taskListPageSize)));
+                setTaskListPage(p);
+            };
+
+            const playVideo = (url) => {
+                if (!url || url === '-') return;
+                setModalVideo(url);
+            };
+
+            const downloadVideo = (url, taskId) => {
+                if (!url || url === '-') return;
+                const downloadUrl = `/api/download-file?url=${encodeURIComponent(url)}`;
+                const link = document.createElement('a');
+                link.href = downloadUrl;
+                link.download = `video_${taskId}.mp4`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const deleteTaskFromList = async (taskId) => {
+                if (!confirm('确定删除任务吗？')) return;
+                const resp = await fetch(`/api/video-tasks/${taskId}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (data.success) loadTasks(1);
+                else alert(data.error || '删除失败');
+            };
+
+            const regenerateFromTask = (task) => {
+                if (!task) return;
+                const params = new URLSearchParams();
+                if (task.prompt) params.append('prompt', task.prompt);
+                const content = task.content || {};
+                let generateType = 'text';
+                let referenceImageCount = 0;
+                let hasFirstFromContent = false, hasLastFromContent = false;
+                const contentArray = Array.isArray(content) ? content : (Array.isArray(content.content) ? content.content : []);
+                contentArray.forEach(item => {
+                    if (item.type === 'image_url' && item.role === 'reference_image') {
+                        params.append(`reference_image_url_${referenceImageCount}`, item.image_url?.url || '');
+                        referenceImageCount += 1;
+                    } else if (item.type === 'image_url' && item.role === 'first_frame') {
+                        generateType = 'first_last_frame';
+                        params.append('first_frame_url', item.image_url?.url || '');
+                        hasFirstFromContent = true;
+                    } else if (item.type === 'image_url' && item.role === 'last_frame') {
+                        generateType = 'first_last_frame';
+                        params.append('last_frame_url', item.image_url?.url || '');
+                        hasLastFromContent = true;
+                    } else if (item.type === 'image_url' && !item.role) {
+                        generateType = 'first_frame';
+                        params.append('first_frame_url', item.image_url?.url || '');
+                        hasFirstFromContent = true;
+                    }
+                });
+                if (!hasFirstFromContent && (task.first_frame_url || (content && content.first_frame_url))) {
+                    const url = task.first_frame_url || content.first_frame_url;
+                    params.set('first_frame_url', url);
+                    if (!generateType || generateType === 'text') generateType = 'first_frame';
+                    if (task.last_frame_url || (content && content.last_frame_url)) generateType = 'first_last_frame';
+                }
+                if (!hasLastFromContent && (task.last_frame_url || (content && content.last_frame_url))) {
+                    const url = task.last_frame_url || content.last_frame_url;
+                    params.set('last_frame_url', url);
+                    generateType = 'first_last_frame';
+                }
+                if (referenceImageCount > 0) {
+                    generateType = 'reference_image';
+                    params.append('reference_image_count', referenceImageCount);
+                }
+                params.append('generate_type', generateType);
+                if (task.resolution) params.append('resolution', task.resolution);
+                if (task.ratio) params.append('ratio', task.ratio);
+                if (task.duration) params.append('duration', task.duration);
+                if (task.seed !== undefined) params.append('seed', task.seed);
+                if (task.camera_fixed !== undefined) params.append('camera_fixed', task.camera_fixed);
+                if (task.watermark !== undefined) params.append('watermark', task.watermark);
+                if (task.generate_audio !== undefined) params.append('generate_audio', task.generate_audio);
+                if (task.return_last_frame !== undefined) params.append('return_last_frame', task.return_last_frame);
+                window.location.href = `/video-generate?${params.toString()}`;
+            };
 
             useEffect(() => {
                 document.body.classList.add('react-theme', 'sidebar-compact');
@@ -125,6 +261,15 @@
                     }
                 });
             }, []);
+
+            useEffect(() => { loadTasks(1); }, []);
+            useEffect(() => { loadTasks(1); }, [currentProjectId]);
+
+            useEffect(() => {
+                if (!taskListAutoRefresh) return;
+                const timer = setInterval(() => loadTasks(taskListPage), 5000);
+                return () => clearInterval(timer);
+            }, [taskListAutoRefresh, taskListPage, taskListPageSize, taskIdSearch, statusFilter]);
 
             useEffect(() => {
                 if (!modalOpen) return;
@@ -269,6 +414,7 @@
                     if (data.success) {
                         setTaskId(data.task_id || '');
                         setSuccess('视频生成任务创建成功！');
+                        loadTasks(1);
                     } else {
                         setError(data.error || '创建任务失败');
                     }
@@ -302,7 +448,12 @@
                                 <div className="panel">
                                     <div className="section-title">生成参数</div>
                                     <div className="form-row">
-                                        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="描述你想要生成的视频内容..." />
+                                        <div className="prompt-row">
+                                            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="描述你想要生成的视频内容..." />
+                                            <button className="btn btn-primary video-btn-generate" onClick={handleSubmit} disabled={loading}>
+                                                {loading ? '生成中...' : '开始生成'}
+                                            </button>
+                                        </div>
                                         <div className="form-row three">
                                             <div>
                                                 <label>分辨率</label>
@@ -314,8 +465,8 @@
                                             <div>
                                                 <label>比例</label>
                                                 <select value={ratio} onChange={(e) => setRatio(e.target.value)}>
-                                                    <option value="16:9">16:9</option>
                                                     <option value="9:16">9:16</option>
+                                                    <option value="16:9">16:9</option>
                                                     <option value="1:1">1:1</option>
                                                 </select>
                                             </div>
@@ -452,13 +603,97 @@
                                     )}
 
                                     <div className="row" style={{ marginTop: '12px' }}>
-                                        <button className="btn btn-primary" onClick={handleSubmit} disabled={loading}>
-                                            {loading ? '生成中...' : '开始生成'}
-                                        </button>
                                         {taskId && <a className="btn btn-secondary" href="/video-tasks">查看任务管理</a>}
                                     </div>
                                     {error && <div className="small-hint" style={{ color: '#ff9aa2' }}>{error}</div>}
                                     {success && <div className="small-hint" style={{ color: '#89f7c0' }}>{success} 任务ID：{taskId}</div>}
+                                </div>
+                            </div>
+
+                            <div className="panel" style={{ marginTop: '24px' }}>
+                                <div className="section-title">视频任务列表</div>
+                                <div className="row space" style={{ marginBottom: '12px' }}>
+                                    <div className="row">
+                                        <input placeholder="任务ID（可选）" value={taskIdSearch} onChange={(e) => setTaskIdSearch(e.target.value)} style={{ width: '140px' }} />
+                                        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ width: '100px' }}>
+                                            <option value="">全部状态</option>
+                                            <option value="queued">排队中</option>
+                                            <option value="running">运行中</option>
+                                            <option value="succeeded">成功</option>
+                                            <option value="failed">失败</option>
+                                            <option value="cancelled">已取消</option>
+                                        </select>
+                                        <input type="number" min="1" max="50" value={taskListPageSize} onChange={(e) => setTaskListPageSize(Number(e.target.value))} style={{ width: '56px' }} title="每页条数" />
+                                        <button className="btn btn-primary" onClick={() => loadTasks(1)}>查询</button>
+                                        <button className="btn btn-secondary" onClick={() => loadTasks(taskListPage)}>刷新</button>
+                                    </div>
+                                    <label className="row" style={{ gap: '6px', margin: 0 }}>
+                                        <input type="checkbox" checked={taskListAutoRefresh} onChange={(e) => setTaskListAutoRefresh(e.target.checked)} />
+                                        <span className="small-hint">自动刷新</span>
+                                    </label>
+                                </div>
+                                <div style={{ overflowX: 'auto' }}>
+                                    <table className="task-list-table">
+                                        <thead>
+                                            <tr>
+                                                <th>任务ID</th>
+                                                <th>状态</th>
+                                                <th>提示词</th>
+                                                <th>首尾帧</th>
+                                                <th>分辨率</th>
+                                                <th>比例</th>
+                                                <th>时长</th>
+                                                <th>种子</th>
+                                                <th>镜头</th>
+                                                <th>水印</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {taskListTasks.map(task => {
+                                                const taskId = task.id || task.task_id || '-';
+                                                const videoUrl = task.video_url || (task.content && task.content.video_url) || '-';
+                                                const firstFrame = task.first_frame_url || (task.content && task.content.first_frame_url) || '-';
+                                                const lastFrame = task.last_frame_url || (task.content && task.content.last_frame_url) || '-';
+                                                return (
+                                                    <tr key={taskId}>
+                                                        <td>{taskId}</td>
+                                                        <td>{statusBadge(task.status)}</td>
+                                                        <td style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={task.prompt || ''}>{task.prompt || '-'}</td>
+                                                        <td>
+                                                            <div className="frame-thumbs">
+                                                                {firstFrame !== '-' && <img src={firstFrame} alt="首帧" title="首帧" onClick={() => window.open(firstFrame, '_blank')} />}
+                                                                {lastFrame !== '-' && <img src={lastFrame} alt="尾帧" title="尾帧" onClick={() => window.open(lastFrame, '_blank')} />}
+                                                                {firstFrame === '-' && lastFrame === '-' && '-'}
+                                                            </div>
+                                                        </td>
+                                                        <td>{task.resolution || '-'}</td>
+                                                        <td>{task.ratio || '-'}</td>
+                                                        <td>{task.duration || '-'}</td>
+                                                        <td>{task.seed ?? '-'}</td>
+                                                        <td>{String(task.camera_fixed) || '-'}</td>
+                                                        <td>{String(task.watermark) || '-'}</td>
+                                                        <td>
+                                                            {videoUrl !== '-' && <button className="btn btn-secondary" onClick={() => playVideo(videoUrl)}>播放</button>}
+                                                            {videoUrl !== '-' && <button className="btn btn-secondary" onClick={() => downloadVideo(videoUrl, taskId)}>下载</button>}
+                                                            <button className="btn btn-secondary" onClick={() => regenerateFromTask(task)}>重生成</button>
+                                                            <button className="btn btn-danger" onClick={() => deleteTaskFromList(taskId)}>删除</button>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                            {taskListTasks.length === 0 && (
+                                                <tr>
+                                                    <td colSpan="11"><div className="small-hint">暂无任务</div></td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div className="row space" style={{ marginTop: '12px' }}>
+                                    <button className="btn btn-secondary" onClick={() => loadTasks(Math.max(1, taskListPage - 1))}>上一页</button>
+                                    <span className="small-hint">第 {taskListPage} 页 / 共 {taskListTotalPages} 页</span>
+                                    <button className="btn btn-secondary" onClick={() => loadTasks(Math.min(taskListTotalPages, taskListPage + 1))}>下一页</button>
                                 </div>
                             </div>
                         </div>
@@ -493,6 +728,18 @@
                                     ))}
                                 </div>
                             </div>
+                        </div>
+                    )}
+
+                    {modalVideo && (
+                        <div className="video-play-fullscreen" onClick={(e) => { if (e.target === e.currentTarget) setModalVideo(''); }}>
+                            <button type="button" className="video-close" onClick={() => setModalVideo('')} title="关闭">×</button>
+                            <video
+                                ref={videoRef}
+                                src={modalVideo}
+                                onClick={(e) => { e.stopPropagation(); const v = videoRef.current; if (v) { if (v.paused) v.play(); else v.pause(); } }}
+                                style={{ pointerEvents: 'auto' }}
+                            />
                         </div>
                     )}
                 </div>

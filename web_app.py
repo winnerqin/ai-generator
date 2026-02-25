@@ -3597,11 +3597,28 @@ def convert_api_task_to_unified_format(api_task, user_id):
         'error_message': api_task.get('error_message')
     }
     
-    # 如果数据库中有记录，使用数据库中的生成参数和提示词
+    # 从 API content 中推断首尾帧等（供数据库为空时或回填使用）
+    inferred_first_frame = None
+    inferred_last_frame = None
+    if isinstance(server_content, dict) and 'content' in server_content:
+        content_array = server_content.get('content', [])
+        if isinstance(content_array, list):
+            for item in content_array:
+                if isinstance(item, dict) and item.get('type') == 'image_url':
+                    image_url = item.get('image_url', {}).get('url') if isinstance(item.get('image_url'), dict) else item.get('image_url')
+                    role = item.get('role', '')
+                    if role == 'first_frame':
+                        inferred_first_frame = image_url
+                    elif role == 'last_frame':
+                        inferred_last_frame = image_url
+                    elif role == 'reference_image':
+                        if not unified_task['reference_image_urls']:
+                            unified_task['reference_image_urls'] = []
+                        unified_task['reference_image_urls'].append(image_url)
+
+    # 如果数据库中有记录，使用数据库中的生成参数和提示词（空时用 API 推断回填）
     if db_task:
-        # 优先使用数据库中的提示词
-        if db_task.get('prompt'):
-            unified_task['prompt'] = db_task.get('prompt')
+        unified_task['prompt'] = db_task.get('prompt') or prompt_text or ''
         unified_task['generate_type'] = db_task.get('generate_type')
         unified_task['resolution'] = db_task.get('resolution')
         unified_task['ratio'] = db_task.get('ratio')
@@ -3611,9 +3628,9 @@ def convert_api_task_to_unified_format(api_task, user_id):
         unified_task['watermark'] = bool(db_task.get('watermark', 0))
         unified_task['generate_audio'] = bool(db_task.get('generate_audio', 0))
         unified_task['return_last_frame'] = bool(db_task.get('return_last_frame', 0))
-        unified_task['first_frame_url'] = db_task.get('first_frame_url')
-        unified_task['last_frame_url'] = db_task.get('last_frame_url')
-        unified_task['reference_image_urls'] = db_task.get('reference_image_urls', [])
+        unified_task['first_frame_url'] = db_task.get('first_frame_url') or inferred_first_frame
+        unified_task['last_frame_url'] = db_task.get('last_frame_url') or inferred_last_frame
+        unified_task['reference_image_urls'] = db_task.get('reference_image_urls') or unified_task.get('reference_image_urls', [])
         # 如果数据库中已有OSS或持久化链接，优先使用
         if db_task.get('video_url'):
             unified_task['video_url'] = db_task.get('video_url')
@@ -3621,26 +3638,15 @@ def convert_api_task_to_unified_format(api_task, user_id):
             unified_task['last_frame_image_url'] = db_task.get('last_frame_image_url')
     else:
         # 从API任务中推断生成参数
-        if isinstance(server_content, dict) and 'content' in server_content:
-            content_array = server_content.get('content', [])
-            if isinstance(content_array, list):
-                for item in content_array:
-                    if isinstance(item, dict) and item.get('type') == 'image_url':
-                        image_url = item.get('image_url', {}).get('url') if isinstance(item.get('image_url'), dict) else item.get('image_url')
-                        role = item.get('role', '')
-                        if role == 'first_frame':
-                            unified_task['first_frame_url'] = image_url
-                            unified_task['generate_type'] = 'first_frame'
-                        elif role == 'last_frame':
-                            unified_task['last_frame_url'] = image_url
-                            unified_task['generate_type'] = 'first_last_frame'
-                        elif role == 'reference_image':
-                            if not unified_task['reference_image_urls']:
-                                unified_task['reference_image_urls'] = []
-                            unified_task['reference_image_urls'].append(image_url)
-                            unified_task['generate_type'] = 'reference_image'
-        
-        # 从API任务中获取其他参数
+        unified_task['first_frame_url'] = inferred_first_frame
+        unified_task['last_frame_url'] = inferred_last_frame
+        if inferred_first_frame:
+            unified_task['generate_type'] = 'first_frame' if not inferred_last_frame else 'first_last_frame'
+        elif inferred_last_frame:
+            unified_task['generate_type'] = 'first_last_frame'
+        elif unified_task.get('reference_image_urls'):
+            unified_task['generate_type'] = 'reference_image'
+
         unified_task['resolution'] = api_task.get('resolution')
         unified_task['ratio'] = api_task.get('ratio')
         unified_task['duration'] = api_task.get('duration')
@@ -3649,16 +3655,20 @@ def convert_api_task_to_unified_format(api_task, user_id):
         unified_task['watermark'] = api_task.get('watermark', False)
         unified_task['generate_audio'] = api_task.get('generate_audio', False)
         unified_task['return_last_frame'] = api_task.get('return_last_frame', False)
-        
-        if not unified_task['generate_type']:
+
+        if not unified_task.get('generate_type'):
             unified_task['generate_type'] = 'text'
-    
-    # 设置content中的video_url（用于前端兼容）
+
+    # 设置 content 中的 video_url、首尾帧（用于前端兼容）
     if isinstance(unified_task.get('content'), dict):
         if unified_task.get('video_url'):
             unified_task['content']['video_url'] = unified_task.get('video_url')
         if unified_task.get('last_frame_image_url'):
             unified_task['content']['last_frame_image_url'] = unified_task.get('last_frame_image_url')
+        if unified_task.get('first_frame_url'):
+            unified_task['content']['first_frame_url'] = unified_task.get('first_frame_url')
+        if unified_task.get('last_frame_url'):
+            unified_task['content']['last_frame_url'] = unified_task.get('last_frame_url')
     
     return unified_task
 
@@ -3841,15 +3851,18 @@ def convert_db_task_to_api_format(db_task):
         'reference_image_urls': db_task.get('reference_image_urls', [])
     }
     
-    # 设置content中的video_url
-    content = task.get('content', {})
-    if isinstance(content, dict):
-        if db_task.get('video_url'):
-            content['video_url'] = db_task.get('video_url')
-        if db_task.get('last_frame_image_url'):
-            content['last_frame_image_url'] = db_task.get('last_frame_image_url')
-        task['content'] = content
-    
+    # 设置 content 中的 video_url、首尾帧（便于前端统一从 content 或顶层读取）
+    content = task.get('content', {}) if isinstance(task.get('content'), dict) else {}
+    if db_task.get('video_url'):
+        content['video_url'] = db_task.get('video_url')
+    if db_task.get('last_frame_image_url'):
+        content['last_frame_image_url'] = db_task.get('last_frame_image_url')
+    if db_task.get('first_frame_url'):
+        content['first_frame_url'] = db_task.get('first_frame_url')
+    if db_task.get('last_frame_url'):
+        content['last_frame_url'] = db_task.get('last_frame_url')
+    task['content'] = content
+
     return task
 
 @app.route('/api/video-tasks/<task_id>', methods=['DELETE'])

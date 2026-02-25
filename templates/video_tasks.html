@@ -25,6 +25,12 @@
         .modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(6,10,20,0.7); z-index: 2000; }
         .modal-card { width: min(980px, 92vw); max-height: 86vh; overflow: auto; padding: 16px; border-radius: 16px; }
         video { width: 100%; border-radius: 12px; }
+        .video-play-fullscreen { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.95); }
+        .video-play-fullscreen video { width: 100vw; height: 100vh; object-fit: contain; cursor: pointer; }
+        .video-play-fullscreen .video-close { position: absolute; top: 16px; right: 16px; z-index: 10; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,0.2); color: #fff; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .video-play-fullscreen .video-close:hover { background: rgba(255,255,255,0.35); }
+        .frame-thumbs { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+        .frame-thumbs img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; border: 1px solid rgba(86,111,255,0.25); cursor: pointer; }
     </style>
 </head>
 <body>
@@ -37,7 +43,7 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     {% raw %}
     <script type="text/babel">
-        const { useEffect, useMemo, useState } = React;
+        const { useEffect, useMemo, useState, useRef } = React;
 
         const Sidebar = ({ username, projects, currentProjectId, onProjectChange }) => (
             <nav className="sidebar-nav" id="sidebarNav">
@@ -112,6 +118,7 @@
             const [error, setError] = useState('');
             const [autoRefresh, setAutoRefresh] = useState(false);
             const [modalVideo, setModalVideo] = useState('');
+            const videoRef = useRef(null);
 
             useEffect(() => {
                 document.body.classList.add('react-theme', 'sidebar-compact');
@@ -194,6 +201,7 @@
                 const content = task.content || {};
                 let generateType = 'text';
                 let referenceImageCount = 0;
+                let hasFirstFromContent = false, hasLastFromContent = false;
                 const contentArray = Array.isArray(content) ? content : (Array.isArray(content.content) ? content.content : []);
                 contentArray.forEach(item => {
                     if (item.type === 'image_url' && item.role === 'reference_image') {
@@ -202,14 +210,28 @@
                     } else if (item.type === 'image_url' && item.role === 'first_frame') {
                         generateType = 'first_last_frame';
                         params.append('first_frame_url', item.image_url?.url || '');
+                        hasFirstFromContent = true;
                     } else if (item.type === 'image_url' && item.role === 'last_frame') {
                         generateType = 'first_last_frame';
                         params.append('last_frame_url', item.image_url?.url || '');
+                        hasLastFromContent = true;
                     } else if (item.type === 'image_url' && !item.role) {
                         generateType = 'first_frame';
                         params.append('first_frame_url', item.image_url?.url || '');
+                        hasFirstFromContent = true;
                     }
                 });
+                if (!hasFirstFromContent && (task.first_frame_url || (content && content.first_frame_url))) {
+                    const url = task.first_frame_url || content.first_frame_url;
+                    params.set('first_frame_url', url);
+                    if (!generateType || generateType === 'text') generateType = 'first_frame';
+                    if (task.last_frame_url || (content && content.last_frame_url)) generateType = 'first_last_frame';
+                }
+                if (!hasLastFromContent && (task.last_frame_url || (content && content.last_frame_url))) {
+                    const url = task.last_frame_url || content.last_frame_url;
+                    params.set('last_frame_url', url);
+                    generateType = 'first_last_frame';
+                }
                 if (referenceImageCount > 0) {
                     generateType = 'reference_image';
                     params.append('reference_image_count', referenceImageCount);
@@ -298,10 +320,13 @@
                                                 <tr key={taskId}>
                                                     <td>{taskId}</td>
                                                     <td>{statusBadge(task.status)}</td>
-                                                    <td>{task.prompt || '-'}</td>
+                                                    <td className="prompt-cell" title={task.prompt || ''}>{task.prompt || '-'}</td>
                                                     <td>
-                                                        {firstFrame !== '-' ? '首帧' : ''}
-                                                        {lastFrame !== '-' ? ' / 尾帧' : ''}
+                                                        <div className="frame-thumbs">
+                                                            {firstFrame !== '-' && <img src={firstFrame} alt="首帧" title="首帧" onClick={() => window.open(firstFrame, '_blank')} />}
+                                                            {lastFrame !== '-' && <img src={lastFrame} alt="尾帧" title="尾帧" onClick={() => window.open(lastFrame, '_blank')} />}
+                                                            {firstFrame === '-' && lastFrame === '-' && '-'}
+                                                        </div>
                                                     </td>
                                                     <td>{task.resolution || '-'}</td>
                                                     <td>{task.ratio || '-'}</td>
@@ -335,14 +360,14 @@
                     </div>
 
                     {modalVideo && (
-                        <div className="modal" onClick={() => setModalVideo('')}>
-                            <div className="modal-card panel" onClick={(e) => e.stopPropagation()}>
-                                <div className="row space">
-                                    <div className="section-title">视频播放</div>
-                                    <button className="btn btn-secondary" onClick={() => setModalVideo('')}>关闭</button>
-                                </div>
-                                <video controls src={modalVideo}></video>
-                            </div>
+                        <div className="video-play-fullscreen" onClick={(e) => { if (e.target === e.currentTarget) setModalVideo(''); }}>
+                            <button type="button" className="video-close" onClick={() => setModalVideo('')} title="关闭">×</button>
+                            <video
+                                ref={videoRef}
+                                src={modalVideo}
+                                onClick={(e) => { e.stopPropagation(); const v = videoRef.current; if (v) { if (v.paused) v.play(); else v.pause(); } }}
+                                style={{ pointerEvents: 'auto' }}
+                            />
                         </div>
                     )}
                 </div>

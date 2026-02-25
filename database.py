@@ -666,7 +666,7 @@ def save_video_task(data):
              duration, seed, camera_fixed, watermark, generate_audio, return_last_frame,
              first_frame_url, last_frame_url, reference_image_urls, video_url, last_frame_image_url,
              token, usage, content, error_message)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             data.get('user_id'),
             data.get('task_id'),

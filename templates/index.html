@@ -9,12 +9,19 @@
         .app-shell {
             display: flex;
             min-height: 100vh;
+            overflow-x: hidden;
         }
         .main-content {
             padding: 0;
+            flex: 1;
+            min-width: 0;
+            max-width: 100%;
+            overflow-x: hidden;
         }
         .page-wrap {
             padding: 20px 24px 36px;
+            max-width: 100%;
+            min-width: 0;
         }
         .page-header {
             display: flex;
@@ -31,6 +38,9 @@
             grid-template-columns: 1.1fr 0.9fr;
             gap: 18px;
         }
+        .grid > .panel {
+            min-width: 0;
+        }
         .panel {
             border-radius: 16px;
         }
@@ -41,6 +51,33 @@
         .panel-body label {
             display: inline-block;
             margin-bottom: 0.6em;
+        }
+        .prompt-row {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+        .prompt-row textarea {
+            flex: 1;
+            min-width: 0;
+        }
+        .btn-generate {
+            flex-shrink: 0;
+            background: linear-gradient(135deg, #7eb8ff 0%, #5a9cf5 100%);
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .btn-generate:hover:not(:disabled) {
+            background: linear-gradient(135deg, #8fc5ff 0%, #6aa8f7 100%);
+        }
+        .btn-generate:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
         }
         .panel-body select,
         .panel-body input[type="text"],
@@ -118,6 +155,8 @@
             grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
             gap: 10px;
             margin-top: 8px;
+            max-width: 100%;
+            min-width: 0;
         }
         .upload-ref-thumb {
             position: relative;
@@ -196,10 +235,57 @@
             background: rgba(6, 10, 20, 0.7);
             z-index: 2000;
         }
-        .modal img {
+        .modal-inner {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-inner img {
             max-width: 90vw;
             max-height: 85vh;
             border-radius: 12px;
+            display: block;
+        }
+        .modal-nav {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: none;
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            font-size: 28px;
+            line-height: 1;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+            z-index: 10;
+        }
+        .modal-nav:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.35);
+        }
+        .modal-nav:disabled {
+            opacity: 0.3;
+            cursor: default;
+        }
+        .modal-nav-prev {
+            left: 16px;
+        }
+        .modal-nav-next {
+            right: 16px;
+        }
+        .modal-counter {
+            position: absolute;
+            bottom: -32px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.95rem;
         }
     </style>
 </head>
@@ -290,10 +376,35 @@
             const [progressText, setProgressText] = useState('');
             const [error, setError] = useState('');
             const [modalImage, setModalImage] = useState(null);
+            const [modalResultIndex, setModalResultIndex] = useState(null);
 
             useEffect(() => {
                 document.body.classList.add('react-theme');
             }, []);
+
+            useEffect(() => {
+                if (!modalImage) return;
+                const onKey = (e) => {
+                    if (e.key === 'Escape') {
+                        setModalImage(null);
+                        setModalResultIndex(null);
+                    } else if (modalResultIndex != null && results.length > 0) {
+                        if (e.key === 'ArrowLeft' && modalResultIndex > 0) {
+                            e.preventDefault();
+                            const idx = modalResultIndex - 1;
+                            setModalImage(results[idx].url);
+                            setModalResultIndex(idx);
+                        } else if (e.key === 'ArrowRight' && modalResultIndex < results.length - 1) {
+                            e.preventDefault();
+                            const idx = modalResultIndex + 1;
+                            setModalImage(results[idx].url);
+                            setModalResultIndex(idx);
+                        }
+                    }
+                };
+                window.addEventListener('keydown', onKey);
+                return () => window.removeEventListener('keydown', onKey);
+            }, [modalImage, modalResultIndex, results]);
 
             useEffect(() => {
                 fetch('/api/projects').then(res => res.json()).then(data => {
@@ -494,7 +605,12 @@
                                 <div className="panel">
                                     <div className="panel-title">生成参数</div>
                                     <div className="panel-body">
-                                        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="输入提示词..." />
+                                        <div className="prompt-row">
+                                            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="输入提示词..." />
+                                            <button className="btn btn-generate" onClick={handleGenerate} disabled={loading}>
+                                                {loading ? '生成中...' : '开始生成'}
+                                            </button>
+                                        </div>
                                         <div className="form-row two">
                                             <div>
                                                 <label>图片比例</label>
@@ -551,7 +667,7 @@
                                                     <div
                                                         key={url}
                                                         className="upload-ref-thumb"
-                                                        onClick={() => setModalImage(url)}
+                                                        onClick={() => { setModalImage(url); setModalResultIndex(null); }}
                                                     >
                                                         <img src={url} alt="示例图" />
                                                         <button
@@ -566,7 +682,7 @@
                                                     <div
                                                         key={`upload-${idx}`}
                                                         className="upload-ref-thumb"
-                                                        onClick={() => setModalImage(item.preview)}
+                                                        onClick={() => { setModalImage(item.preview); setModalResultIndex(null); }}
                                                     >
                                                         <img src={item.preview} alt={item.file.name} />
                                                         <button
@@ -582,9 +698,6 @@
                                             <label style={{ marginTop: '12px', display: 'block' }}>上传参考图（最多 4 张）</label>
                                             <input type="file" accept="image/*" multiple onChange={(e) => handleUploadFiles(e.target.files)} />
                                         </div>
-                                        <button className="btn btn-primary" onClick={handleGenerate} disabled={loading}>
-                                            {loading ? '生成中...' : '开始生成'}
-                                        </button>
                                         {progressText && <div className="small-hint">{progressText}</div>}
                                         {error && <div className="small-hint" style={{ color: '#ff9aa2' }}>{error}</div>}
                                     </div>
@@ -625,7 +738,7 @@
                                             key={idx}
                                             className={`result-card ${selectedResults.includes(idx) ? 'selected' : ''}`}
                                             onClick={() => toggleResult(idx)}
-                                            onDoubleClick={() => setModalImage(item.url)}
+                                            onDoubleClick={() => { setModalImage(item.url); setModalResultIndex(idx); }}
                                         >
                                             <img src={item.url} alt={item.filename || 'result'} />
                                         </div>
@@ -635,8 +748,43 @@
                         </div>
                     </div>
                     {modalImage && (
-                        <div className="modal" onClick={() => setModalImage(null)}>
-                            <img src={modalImage} alt="preview" onClick={(e) => e.stopPropagation()} />
+                        <div className="modal" onClick={() => { setModalImage(null); setModalResultIndex(null); }}>
+                            <div className="modal-inner" onClick={(e) => e.stopPropagation()}>
+                                {modalResultIndex != null && results.length > 1 && (
+                                    <>
+                                        <button
+                                            type="button"
+                                            className="modal-nav modal-nav-prev"
+                                            title="上一张"
+                                            disabled={modalResultIndex <= 0}
+                                            onClick={() => {
+                                                if (modalResultIndex > 0) {
+                                                    const idx = modalResultIndex - 1;
+                                                    setModalImage(results[idx].url);
+                                                    setModalResultIndex(idx);
+                                                }
+                                            }}
+                                        >‹</button>
+                                        <button
+                                            type="button"
+                                            className="modal-nav modal-nav-next"
+                                            title="下一张"
+                                            disabled={modalResultIndex >= results.length - 1}
+                                            onClick={() => {
+                                                if (modalResultIndex < results.length - 1) {
+                                                    const idx = modalResultIndex + 1;
+                                                    setModalImage(results[idx].url);
+                                                    setModalResultIndex(idx);
+                                                }
+                                            }}
+                                        >›</button>
+                                    </>
+                                )}
+                                <img src={modalImage} alt="preview" />
+                                {modalResultIndex != null && results.length > 1 && (
+                                    <div className="modal-counter">{modalResultIndex + 1} / {results.length}</div>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>
