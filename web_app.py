@@ -7,7 +7,7 @@ import threading
 import queue
 import logging
 import string
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, send_from_directory, session, redirect, url_for, flash, Response, stream_with_context
@@ -372,6 +372,8 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['OUTPUT_FOLDER'] = 'output'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production-' + str(uuid.uuid4()))
+# 登录状态持久化：Cookie 有效期，刷新或关闭浏览器后仍保持登录
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 
 # 确保文件夹存在
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -523,6 +525,7 @@ def login():
         if user:
             session['user_id'] = user['id']
             session['username'] = user['username']
+            session.permanent = True  # 使用 PERMANENT_SESSION_LIFETIME，刷新/关闭浏览器后仍保持登录
             ensure_session_project(user['id'])
             log_operation('用户登录成功', f'用户名: {username}, 用户ID: {user["id"]}')
             return redirect(url_for('index'))
@@ -1026,6 +1029,109 @@ def api_script_generate_stream():
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('剧本生成流式失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _load_txt2csv_format():
+    """读取 config/txt2csv.md 格式要求"""
+    config_path = Path(__file__).parent / 'config' / 'txt2csv.md'
+    try:
+        return config_path.read_text(encoding='utf-8').strip()
+    except Exception:
+        return ''
+
+
+def _csv_ensure_halfwidth_punctuation(s):
+    """将 CSV 文本中的全角标点替换为英文半角，确保逗号等不影响 CSV 解析。maketrans 的键和值都必须为单字符。"""
+    if not s:
+        return s
+    # 全角 -> 半角 映射（每个键、值均为单字符，使用 Unicode 码点避免编码问题）
+    full_to_half = str.maketrans({
+        '\uff0c': ',',   # FULLWIDTH COMMA ，
+        '\u3002': '.',   # IDEOGRAPHIC FULL STOP 。
+        '\uff0e': '.',   # FULLWIDTH FULL STOP ．
+        '\uff1a': ':',   # FULLWIDTH COLON ：
+        '\uff1b': ';',   # FULLWIDTH SEMICOLON ；
+        '\uff01': '!',   # FULLWIDTH EXCLAMATION ！
+        '\uff1f': '?',   # FULLWIDTH QUESTION ？
+        '\uff08': '(',   # FULLWIDTH LEFT PARENTHESIS （
+        '\uff09': ')',   # FULLWIDTH RIGHT PARENTHESIS ）
+        '\u201c': '"',   # LEFT DOUBLE QUOTE "
+        '\u201d': '"',   # RIGHT DOUBLE QUOTE "
+        '\u2018': '\'',  # LEFT SINGLE QUOTE -> half-width '
+        '\u2019': '\'',  # RIGHT SINGLE QUOTE -> half-width '
+        '\u3000': ' ',   # IDEOGRAPHIC SPACE 　
+    })
+    return s.translate(full_to_half)
+
+
+@app.route('/api/txt2csv-stream', methods=['POST'])
+@login_required
+def api_txt2csv_stream():
+    """文本转 CSV 流式接口：按 config/txt2csv.md 规则，使用 qwen3.5-plus 流式输出"""
+    try:
+        data = request.get_json() or {}
+        text = (data.get('text') or '').strip()
+        if not text:
+            return jsonify({'success': False, 'error': '请输入文本内容'}), 400
+
+        api_key = os.environ.get('QWEN_API_KEY')
+        base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
+        if not api_key:
+            return jsonify({'success': False, 'error': 'QWEN_API_KEY 未配置'}), 500
+
+        format_md = _load_txt2csv_format()
+        if not format_md:
+            return jsonify({'success': False, 'error': 'config/txt2csv.md 不存在或为空'}), 500
+
+        halfwidth_rule = (
+            "\n\n### ⚠️ 标点符号强制要求\n"
+            "**输出 CSV 时，所有标点符号必须使用英文半角（ASCII），不得使用中文全角标点。**\n"
+            "- 逗号必须为半角逗号 `,`，严禁使用全角逗号 `，`，否则会导致 CSV 列错位。\n"
+            "- 引号、括号、句号等也一律使用英文半角字符。"
+        )
+        system_prompt = format_md + halfwidth_rule
+        user_prompt = "现在，请处理以下剧本内容：\n\n" + text
+
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        model = os.environ.get('TXT2CSV_MODEL', os.environ.get('SCRIPT_GENERATE_MODEL', 'qwen3.5-plus'))
+
+        def generate_stream():
+            full_text = ''
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.3,
+                    stream=True
+                )
+                for chunk in response:
+                    try:
+                        delta = chunk.choices[0].delta
+                        content = getattr(delta, 'content', None)
+                    except Exception:
+                        content = None
+                    if content:
+                        full_text += content
+                        # 流式输出时对当前片段做半角替换，避免全角逗号等影响显示
+                        content_safe = _csv_ensure_halfwidth_punctuation(content)
+                        yield format_sse_event({'type': 'chunk', 'content': content_safe})
+                # 最终完整 CSV 再做一次半角替换，确保表格解析正确
+                full_text = _csv_ensure_halfwidth_punctuation(full_text)
+                yield format_sse_event({'type': 'complete', 'csv': full_text})
+            except Exception as e:
+                log_operation('txt2csv 流式失败', str(e), 'WARNING')
+                yield format_sse_event({'type': 'error', 'error': str(e)})
+
+        return Response(
+            stream_with_context(generate_stream()),
+            mimetype='text/event-stream',
+            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+        )
+    except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -2636,6 +2742,12 @@ def storyboard_generate():
 def storyboard_studio():
     """全新分镜制作页面（React）"""
     return render_template('storyboard_studio.html', user=get_current_user())
+
+@app.route('/txt2csv')
+@login_required
+def txt2csv_page():
+    """文本转 CSV 转换工具页面"""
+    return render_template('txt2csv.html', user=get_current_user())
 
 @app.route('/api/batch-generate', methods=['POST'])
 @login_required
