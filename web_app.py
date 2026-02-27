@@ -1391,10 +1391,12 @@ def api_get_task(task_id):
 @app.route('/api/script-saves', methods=['GET', 'POST'])
 @login_required
 def api_script_saves():
-    """剧本保存与列表"""
+    """剧本保存与列表（按当前项目隔离）"""
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if request.method == 'GET':
+        if not project_id:
+            return jsonify({'success': True, 'records': []})
         records = database.list_script_records(user_id, project_id)
         return jsonify({'success': True, 'records': records})
     data = request.get_json() or {}
@@ -1428,6 +1430,8 @@ def api_script_saves():
 def api_script_save_detail(record_id):
     user_id = session.get('user_id')
     project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请先选择项目'}), 400
     record = database.get_script_record(user_id, project_id, record_id)
     if not record:
         return jsonify({'success': False, 'error': '记录不存在'}), 404
@@ -1444,9 +1448,11 @@ def api_script_save_detail(record_id):
 @app.route('/api/script-episodes', methods=['GET'])
 @login_required
 def api_script_episodes():
-    """获取剧本分集表格数据"""
+    """获取剧本分集表格数据（按当前项目隔离）"""
     user_id = session.get('user_id')
     project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': True, 'episodes': []})
     script_id = request.args.get('script_id')
     if not script_id:
         episodes = database.list_all_script_episodes(user_id, project_id)
@@ -1578,10 +1584,12 @@ def api_delete_script_episode(episode_id):
 @app.route('/api/storyboard-saves', methods=['GET', 'POST'])
 @login_required
 def api_storyboard_saves():
-    """分镜保存与列表"""
+    """分镜保存与列表（按当前项目隔离）"""
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if request.method == 'GET':
+        if not project_id:
+            return jsonify({'success': True, 'records': []})
         records = database.list_storyboard_records(user_id, project_id)
         return jsonify({'success': True, 'records': records})
     data = request.get_json() or {}
@@ -1621,6 +1629,8 @@ def api_storyboard_saves():
 def api_storyboard_save_detail(record_id):
     user_id = session.get('user_id')
     project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请先选择项目'}), 400
     record = database.get_storyboard_record(user_id, project_id, record_id)
     if not record:
         return jsonify({'success': False, 'error': '记录不存在'}), 404
@@ -1637,9 +1647,11 @@ def api_storyboard_save_detail(record_id):
 @app.route('/api/storyboard-series', methods=['GET'])
 @login_required
 def api_storyboard_series():
-    """分镜系列列表（最新版本）"""
+    """分镜系列列表（按当前项目隔离，最新版本）"""
     user_id = session.get('user_id')
     project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': True, 'records': []})
     records = database.list_storyboard_series(user_id, project_id)
     return jsonify({'success': True, 'records': records})
 
@@ -1647,9 +1659,11 @@ def api_storyboard_series():
 @app.route('/api/storyboard-series/<int:series_id>/versions', methods=['GET'])
 @login_required
 def api_storyboard_versions(series_id):
-    """分镜系列版本列表"""
+    """分镜系列版本列表（按当前项目隔离）"""
     user_id = session.get('user_id')
     project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': True, 'records': []})
     records = database.list_storyboard_versions(user_id, project_id, series_id)
     return jsonify({'success': True, 'records': records})
 
@@ -1766,6 +1780,8 @@ def api_storyboard_episodes():
 def api_script_templates_list():
     user_id = session.get('user_id')
     project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': True, 'templates': []})
     templates = database.get_script_templates(user_id, project_id)
     return jsonify({'success': True, 'templates': templates})
 
@@ -1775,6 +1791,8 @@ def api_script_templates_list():
 def api_script_templates_create():
     user_id = session.get('user_id')
     project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请先选择项目'}), 400
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
     prompt = (data.get('prompt') or '').strip()
@@ -1791,7 +1809,10 @@ def api_script_templates_create():
 @login_required
 def api_script_templates_delete(template_id):
     user_id = session.get('user_id')
-    database.delete_script_template(user_id, template_id)
+    project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请先选择项目'}), 400
+    database.delete_script_template(user_id, template_id, project_id)
     return jsonify({'success': True})
 
 # ==================== 主页路由 ====================
@@ -2545,10 +2566,12 @@ def generate_stream_resume():
 @app.route('/api/sample-images')
 @login_required
 def get_sample_images():
-    """获取 OSS 中的示例图列表（用户隔离）"""
+    """获取 OSS 中的示例图列表（按用户+项目隔离）"""
     try:
         user_id = session.get('user_id')
         project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': True, 'images': []})
         category = request.args.get('category')
         log_request('GET', '/api/sample-images', user_id, f'类别: {category or "全部"}')
         print(f"[API] /api/sample-images 请求 - 用户ID: {user_id}, 类别: {category}")
@@ -2646,15 +2669,14 @@ def get_image_styles():
 @app.route('/api/recent-images')
 @login_required
 def get_recent_images():
-    """获取最近生成的图片列表（用作参考图）"""
+    """获取最近生成的图片列表（按当前项目隔离，用作参考图）"""
     try:
         user_id = session.get('user_id')
         project_id = get_current_project_id()
-        limit = int(request.args.get('limit', 50))  # 默认获取最近50张
-        
+        if not project_id:
+            return jsonify({'success': True, 'images': []})
+        limit = int(request.args.get('limit', 50))
         log_request('GET', '/api/recent-images', user_id, f'数量: {limit}')
-        
-        # 从数据库获取最近生成的图片记录
         records = database.get_all_records(user_id, project_id, limit=limit, offset=0)
         
         # 提取图片信息，只返回OSS URL的图片（API可以访问的）
@@ -2989,17 +3011,21 @@ def batch_generate():
 @app.route('/api/video-tasks', methods=['GET'])
 @login_required
 def api_video_tasks_list():
-    """查询视频任务列表 - 从服务器获取最新信息"""
+    """查询视频任务列表（按当前项目隔离）- 从服务器获取最新信息"""
     try:
         user_id = session.get('user_id')
         project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({
+                'success': True, 'items': [], 'tasks': [], 'total': 0,
+                'page': int(request.args.get('page', 1)), 'page_size': int(request.args.get('page_size', 10))
+            })
         page = int(request.args.get('page', 1))
         page_size = int(request.args.get('page_size', 10))
         task_id = request.args.get('task_id', '').strip()
         status = request.args.get('status', '').strip() or None
         start_date = request.args.get('start_date', '').strip() or None
         end_date = request.args.get('end_date', '').strip() or None
-        
         log_request('GET', '/api/video-tasks', user_id, 
                    f'任务ID: {task_id}, 页码: {page}, 每页: {page_size}, 状态: {status}, 开始日期: {start_date}, 结束日期: {end_date}')
         
@@ -3353,9 +3379,10 @@ def sync_task_to_database(api_task, user_id, project_id=None):
                         import tempfile
                         import os
                         
-                        # 下载视频
+                        # 下载视频（带 User-Agent 减少部分 CDN 403）
+                        headers = {'User-Agent': 'Mozilla/5.0 (compatible; VideoSync/1.0)'}
                         log_operation('开始下载视频', f'用户ID: {user_id}, 任务ID: {task_id_str}, URL: {server_video_url}')
-                        response = requests.get(server_video_url, timeout=300, stream=True)
+                        response = requests.get(server_video_url, timeout=300, stream=True, headers=headers)
                         if response.status_code == 200:
                             # 创建临时文件
                             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
@@ -3405,7 +3432,10 @@ def sync_task_to_database(api_task, user_id, project_id=None):
                             except Exception:
                                 pass
                         else:
-                            log_operation('下载视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP状态码: {response.status_code}', 'WARNING')
+                            if response.status_code == 403:
+                                log_operation('下载视频失败（链接可能已过期或无权访问）', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP 403', 'WARNING')
+                            else:
+                                log_operation('下载视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP状态码: {response.status_code}', 'WARNING')
                     except Exception as e:
                         log_operation('下载并上传视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
                         import traceback
@@ -3416,7 +3446,7 @@ def sync_task_to_database(api_task, user_id, project_id=None):
                 thread.daemon = True
                 thread.start()
     else:
-        # 数据库已有记录，更新服务器最新信息；若已有 OSS 视频地址则保留，避免被临时服务器 URL 覆盖导致过期后无法播放
+        # 数据库已有记录，更新服务器最新信息；保留原 project_id，不随当前请求改写（避免切换项目时把别项目的任务移入当前项目）
         current_video_url = db_task.get('video_url')
         if current_video_url and is_oss_url(current_video_url):
             video_url_to_save = current_video_url
@@ -3433,7 +3463,7 @@ def sync_task_to_database(api_task, user_id, project_id=None):
             'error_message': api_task.get('error_message')
         }
         try:
-            update_data['project_id'] = project_id
+            update_data['project_id'] = db_task.get('project_id')  # 保留任务所属项目
             database.save_video_task(update_data)
         except Exception as e:
             log_operation('更新任务到数据库失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
@@ -3450,8 +3480,9 @@ def sync_task_to_database(api_task, user_id, project_id=None):
             if last_frame_url_from_api:
                 upload_image_url_to_oss_async(last_frame_url_from_api, 'last_frame_url')
     
-    # 如果视频状态为succeeded且有video_url，自动下载并上传到OSS，保存到video_library
-    if server_status == 'succeeded' and server_video_url:
+    # 仅对「已有记录且属于当前项目」的任务在此处触发下载（新任务已在上面 if not db_task 分支内处理，避免重复与跨项目下载）
+    task_belongs_to_current_project = (db_task is not None) and (project_id is not None and db_task.get('project_id') == project_id)
+    if server_status == 'succeeded' and server_video_url and task_belongs_to_current_project:
         log_operation('检测到视频生成成功', f'用户ID: {user_id}, 任务ID: {task_id_str}, 视频URL: {server_video_url}')
         # 检查视频库中是否已存在该任务ID的视频
         existing_video = database.get_video_by_task_id(user_id, task_id_str, project_id)
@@ -3464,10 +3495,9 @@ def sync_task_to_database(api_task, user_id, project_id=None):
                     import requests
                     import tempfile
                     import os
-                    
-                    # 下载视频
+                    headers = {'User-Agent': 'Mozilla/5.0 (compatible; VideoSync/1.0)'}
                     log_operation('开始下载视频', f'用户ID: {user_id}, 任务ID: {task_id_str}, URL: {server_video_url}')
-                    response = requests.get(server_video_url, timeout=300, stream=True)
+                    response = requests.get(server_video_url, timeout=300, stream=True, headers=headers)
                     if response.status_code == 200:
                         # 创建临时文件
                         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
@@ -3523,7 +3553,10 @@ def sync_task_to_database(api_task, user_id, project_id=None):
                         except Exception:
                             pass
                     else:
-                        log_operation('下载视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP状态码: {response.status_code}', 'WARNING')
+                        if response.status_code == 403:
+                            log_operation('下载视频失败（链接可能已过期或无权访问）', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP 403', 'WARNING')
+                        else:
+                            log_operation('下载视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP状态码: {response.status_code}', 'WARNING')
                 except Exception as e:
                     log_operation('下载并上传视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
                     import traceback
@@ -4004,13 +4037,16 @@ def convert_db_task_to_api_format(db_task, user_id=None):
 @app.route('/api/video-tasks/<task_id>', methods=['DELETE'])
 @login_required
 def api_video_task_delete(task_id):
-    """删除视频生成任务"""
+    """删除视频生成任务（仅允许删除当前项目内的任务）"""
     try:
         user_id = session.get('user_id')
         project_id = get_current_project_id()
-        
+        if not project_id:
+            return jsonify({'success': False, 'error': '请先选择项目'}), 400
+        db_task = database.get_video_task_by_id(task_id)
+        if not db_task or db_task.get('user_id') != user_id or db_task.get('project_id') != project_id:
+            return jsonify({'success': False, 'error': '任务不存在或不属于当前项目'}), 403
         log_request('DELETE', f'/api/video-tasks/{task_id}', user_id)
-        
         # 检查是否配置了 ARK_API_KEY
         ark_api_key = os.environ.get('ARK_API_KEY')
         if not ark_api_key:
@@ -4340,10 +4376,10 @@ def api_content_library():
     try:
         user_id = session.get('user_id')
         project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': True, 'assets': [], 'type': request.args.get('type', 'person')})
         library_type = request.args.get('type', 'person')  # person, scene, image, video
-        
         log_request('GET', '/api/content-library', user_id, f'类型: {library_type}')
-        
         assets = []
         if library_type == 'person':
             assets = database.get_person_assets(user_id, project_id)
@@ -4402,25 +4438,23 @@ def api_content_library():
 @app.route('/api/delete-image-asset', methods=['POST'])
 @login_required
 def delete_image_asset():
-    """删除图片库资源"""
+    """删除图片库资源（按当前项目隔离，仅能删当前项目内资源）"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': False, 'error': '请先选择项目'}), 400
         data = request.get_json()
         asset_id = data.get('id')
-        
         if not asset_id:
             return jsonify({'success': False, 'error': '缺少资源ID'}), 400
-        
-        # 如果是record_开头的ID，从生成记录中删除
         if asset_id.startswith('record_'):
             record_id = asset_id.replace('record_', '')
-            database.delete_record(int(record_id))
+            database.delete_record(int(record_id), user_id, project_id)
         else:
-            database.delete_image_asset(int(asset_id))
-        
-        log_operation('删除图片资源', f'用户ID: {user_id}, 资源ID: {asset_id}')
+            database.delete_image_asset(int(asset_id), user_id, project_id)
+        log_operation('删除图片资源', f'用户ID: {user_id}, 项目ID: {project_id}, 资源ID: {asset_id}')
         return jsonify({'success': True})
-    
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('删除图片资源失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
@@ -4429,20 +4463,19 @@ def delete_image_asset():
 @app.route('/api/delete-video-asset', methods=['POST'])
 @login_required
 def delete_video_asset():
-    """删除视频库资源"""
+    """删除视频库资源（按当前项目隔离，仅能删当前项目内资源）"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': False, 'error': '请先选择项目'}), 400
         data = request.get_json()
         asset_id = data.get('id')
-        
         if not asset_id:
             return jsonify({'success': False, 'error': '缺少资源ID'}), 400
-        
-        database.delete_video_asset(int(asset_id))
-        
-        log_operation('删除视频资源', f'用户ID: {user_id}, 资源ID: {asset_id}')
+        database.delete_video_asset(int(asset_id), user_id, project_id)
+        log_operation('删除视频资源', f'用户ID: {user_id}, 项目ID: {project_id}, 资源ID: {asset_id}')
         return jsonify({'success': True})
-    
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('删除视频资源失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
@@ -4451,16 +4484,16 @@ def delete_video_asset():
 @app.route('/api/records')
 @login_required
 def get_records():
-    """获取生成记录"""
+    """获取生成记录（按当前项目隔离）"""
     try:
         user_id = session.get('user_id')
         project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': True, 'records': [], 'total': 0})
         limit = int(request.args.get('limit', 20))
         offset = int(request.args.get('offset', 0))
         search = request.args.get('search', '')
-        
         log_request('GET', '/api/records', user_id, f'limit={limit}, offset={offset}, search={search[:20]}' if search else f'limit={limit}, offset={offset}')
-        
         records = database.get_all_records(user_id, project_id, limit, offset)
         
         # 如果有搜索条件，过滤结果
@@ -4489,12 +4522,15 @@ def get_records():
 @app.route('/api/records/<int:record_id>', methods=['DELETE'])
 @login_required
 def delete_record(record_id):
-    """删除记录"""
+    """删除生成记录（按当前项目隔离，仅能删当前项目内记录）"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': False, 'error': '请先选择项目'}), 400
         log_request('DELETE', f'/api/records/{record_id}', user_id)
-        database.delete_record(record_id)
-        log_operation('删除记录', f'用户ID: {user_id}, 记录ID: {record_id}')
+        database.delete_record(record_id, user_id, project_id)
+        log_operation('删除记录', f'用户ID: {user_id}, 项目ID: {project_id}, 记录ID: {record_id}')
         return jsonify({'success': True})
     except Exception as e:
         user_id = session.get('user_id')
@@ -4504,34 +4540,29 @@ def delete_record(record_id):
 @app.route('/api/batch-delete', methods=['POST'])
 @login_required
 def batch_delete_records():
-    """批量删除记录"""
+    """批量删除记录（按当前项目隔离，仅能删当前项目内记录）"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': False, 'message': '请先选择项目'}), 400
         data = request.get_json()
         record_ids = data.get('ids', [])
         log_request('POST', '/api/batch-delete', user_id, f'记录数: {len(record_ids)}')
-        
         if not record_ids:
             log_operation('批量删除记录', f'用户ID: {user_id}, 未选择记录', 'WARNING')
             return jsonify({'success': False, 'message': '未选择要删除的记录'})
-        
         deleted_count = 0
         failed_count = 0
-        
         for record_id in record_ids:
             try:
-                database.delete_record(record_id)
+                database.delete_record(record_id, user_id, project_id)
                 deleted_count += 1
             except Exception as e:
                 log_operation('删除单条记录失败', f'用户ID: {user_id}, 记录ID: {record_id}, 错误: {str(e)}', 'WARNING')
                 failed_count += 1
-        
-        log_operation('批量删除记录', f'用户ID: {user_id}, 成功: {deleted_count}, 失败: {failed_count}')
-        return jsonify({
-            'success': True,
-            'deleted': deleted_count,
-            'failed': failed_count
-        })
+        log_operation('批量删除记录', f'用户ID: {user_id}, 项目ID: {project_id}, 成功: {deleted_count}, 失败: {failed_count}')
+        return jsonify({'success': True, 'deleted': deleted_count, 'failed': failed_count})
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('批量删除记录失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
@@ -4749,38 +4780,33 @@ def delete_sample_image():
 @app.route('/api/delete-library-asset', methods=['POST'])
 @login_required
 def delete_library_asset():
-    """删除数据库中人物/场景库的条目（key 格式: db_person_<id> 或 db_scene_<id>）"""
+    """删除数据库中人物/场景库的条目（按当前项目隔离，仅能删当前项目内资源；key 格式: db_person_<id> 或 db_scene_<id>）"""
     try:
         data = request.get_json() or {}
         key = data.get('key')
         user_id = session.get('user_id')
         project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': False, 'error': '请先选择项目'}), 400
         log_request('POST', '/api/delete-library-asset', user_id, f'key: {key}')
-
         if not key:
             log_operation('删除库资源失败', f'用户ID: {user_id}, 错误: 缺少key', 'WARNING')
             return jsonify({'success': False, 'error': '缺少 key'}), 400
-
         if key.startswith('db_person_'):
             aid = int(key.split('_')[-1])
-            # 删除数据库记录
-            try:
-                # 若存在本地文件路径，尝试删除
-                conn_asset = database.get_person_assets(user_id, project_id)
-            except Exception:
-                conn_asset = []
-
-            database.delete_person_asset(aid)
-            log_operation('删除人物库资源', f'用户ID: {user_id}, 资源ID: {aid}')
+            conn_asset = database.get_person_assets(user_id, project_id)
+            if not any(a.get('id') == aid for a in conn_asset):
+                return jsonify({'success': False, 'error': '该资源不属于当前项目或不存在'}), 403
+            database.delete_person_asset(aid, user_id, project_id)
+            log_operation('删除人物库资源', f'用户ID: {user_id}, 项目ID: {project_id}, 资源ID: {aid}')
             return jsonify({'success': True})
         elif key.startswith('db_scene_'):
             aid = int(key.split('_')[-1])
-            try:
-                conn_asset = database.get_scene_assets(user_id, project_id)
-            except Exception:
-                conn_asset = []
-            database.delete_scene_asset(aid)
-            log_operation('删除场景库资源', f'用户ID: {user_id}, 资源ID: {aid}')
+            conn_asset = database.get_scene_assets(user_id, project_id)
+            if not any(a.get('id') == aid for a in conn_asset):
+                return jsonify({'success': False, 'error': '该资源不属于当前项目或不存在'}), 403
+            database.delete_scene_asset(aid, user_id, project_id)
+            log_operation('删除场景库资源', f'用户ID: {user_id}, 项目ID: {project_id}, 资源ID: {aid}')
             return jsonify({'success': True})
         else:
             log_operation('删除库资源失败', f'用户ID: {user_id}, 错误: 不支持的key类型 {key}', 'WARNING')

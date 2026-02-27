@@ -443,19 +443,22 @@
                 }
             }, []);
 
+            // 随当前项目与分类重新拉取示例图/最近图，URL 带 project_id 并禁用缓存，避免切换项目后显示相同内容
             useEffect(() => {
+                const projectParam = currentProjectId ? `&project_id=${currentProjectId}` : '';
+                const opts = { cache: 'no-store' };
                 if (sampleCategory === 'recent') {
-                    fetch('/api/recent-images?limit=50').then(res => res.json()).then(data => {
+                    fetch(`/api/recent-images?limit=50${projectParam}`, opts).then(res => res.json()).then(data => {
                         if (data.success) setSampleImages(data.images || []);
                         else setSampleImages([]);
                     });
                     return;
                 }
-                fetch(`/api/sample-images?category=${sampleCategory}`).then(res => res.json()).then(data => {
+                fetch(`/api/sample-images?category=${sampleCategory}${projectParam}`, opts).then(res => res.json()).then(data => {
                     if (data.success) setSampleImages(data.images || []);
                     else setSampleImages([]);
                 });
-            }, [sampleCategory]);
+            }, [sampleCategory, currentProjectId]);
 
             const referenceChips = useMemo(() => {
                 return selectedSample.map(url => ({ type: 'sample', url }))

@@ -518,18 +518,36 @@ def get_scene_assets(user_id, project_id=None, limit=500):
     return assets
 
 
-def delete_person_asset(asset_id):
+def delete_person_asset(asset_id, user_id=None, project_id=None):
+    """删除人物库资源。传入 user_id、project_id 时仅当资源属于该用户且属于该项目时删除（项目隔离）。"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM person_library WHERE id = ?', (asset_id,))
+    if user_id is not None and project_id is not None:
+        cursor.execute(
+            'DELETE FROM person_library WHERE id = ? AND user_id = ? AND (project_id = ? OR (project_id IS NULL AND ? IS NULL))',
+            (asset_id, user_id, project_id, project_id)
+        )
+    elif user_id is not None:
+        cursor.execute('DELETE FROM person_library WHERE id = ? AND user_id = ?', (asset_id, user_id))
+    else:
+        cursor.execute('DELETE FROM person_library WHERE id = ?', (asset_id,))
     conn.commit()
     conn.close()
 
 
-def delete_scene_asset(asset_id):
+def delete_scene_asset(asset_id, user_id=None, project_id=None):
+    """删除场景库资源。传入 user_id、project_id 时仅当资源属于该用户且属于该项目时删除（项目隔离）。"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM scene_library WHERE id = ?', (asset_id,))
+    if user_id is not None and project_id is not None:
+        cursor.execute(
+            'DELETE FROM scene_library WHERE id = ? AND user_id = ? AND (project_id = ? OR (project_id IS NULL AND ? IS NULL))',
+            (asset_id, user_id, project_id, project_id)
+        )
+    elif user_id is not None:
+        cursor.execute('DELETE FROM scene_library WHERE id = ? AND user_id = ?', (asset_id, user_id))
+    else:
+        cursor.execute('DELETE FROM scene_library WHERE id = ?', (asset_id,))
     conn.commit()
     conn.close()
 
@@ -806,19 +824,35 @@ def get_video_task_by_id(task_id):
     conn.close()
     return None
 
-def delete_image_asset(asset_id):
-    """删除图片库资源"""
+def delete_image_asset(asset_id, user_id=None, project_id=None):
+    """删除图片库资源。传入 user_id、project_id 时仅当资源属于该用户且属于该项目时删除（项目隔离）。"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM image_library WHERE id = ?', (asset_id,))
+    if user_id is not None and project_id is not None:
+        cursor.execute(
+            'DELETE FROM image_library WHERE id = ? AND user_id = ? AND (project_id = ? OR (project_id IS NULL AND ? IS NULL))',
+            (asset_id, user_id, project_id, project_id)
+        )
+    elif user_id is not None:
+        cursor.execute('DELETE FROM image_library WHERE id = ? AND user_id = ?', (asset_id, user_id))
+    else:
+        cursor.execute('DELETE FROM image_library WHERE id = ?', (asset_id,))
     conn.commit()
     conn.close()
 
-def delete_video_asset(asset_id):
-    """删除视频库资源"""
+def delete_video_asset(asset_id, user_id=None, project_id=None):
+    """删除视频库资源。传入 user_id、project_id 时仅当资源属于该用户且属于该项目时删除（项目隔离）。"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM video_library WHERE id = ?', (asset_id,))
+    if user_id is not None and project_id is not None:
+        cursor.execute(
+            'DELETE FROM video_library WHERE id = ? AND user_id = ? AND (project_id = ? OR (project_id IS NULL AND ? IS NULL))',
+            (asset_id, user_id, project_id, project_id)
+        )
+    elif user_id is not None:
+        cursor.execute('DELETE FROM video_library WHERE id = ? AND user_id = ?', (asset_id, user_id))
+    else:
+        cursor.execute('DELETE FROM video_library WHERE id = ?', (asset_id,))
     conn.commit()
     conn.close()
 
@@ -904,11 +938,19 @@ def get_record_by_id(record_id):
     conn.close()
     return None
 
-def delete_record(record_id):
-    """删除记录"""
+def delete_record(record_id, user_id=None, project_id=None):
+    """删除生成记录。传入 user_id、project_id 时仅当记录属于该用户且属于该项目时删除（项目隔离）。"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM generation_records WHERE id = ?', (record_id,))
+    if user_id is not None and project_id is not None:
+        cursor.execute(
+            'DELETE FROM generation_records WHERE id = ? AND user_id = ? AND (project_id = ? OR (project_id IS NULL AND ? IS NULL))',
+            (record_id, user_id, project_id, project_id)
+        )
+    elif user_id is not None:
+        cursor.execute('DELETE FROM generation_records WHERE id = ? AND user_id = ?', (record_id, user_id))
+    else:
+        cursor.execute('DELETE FROM generation_records WHERE id = ?', (record_id,))
     conn.commit()
     conn.close()
 
@@ -1150,11 +1192,17 @@ def create_script_template(user_id, project_id, name, prompt):
     return template_id
 
 
-def delete_script_template(user_id, template_id):
-    """删除剧本提示词模板"""
+def delete_script_template(user_id, template_id, project_id=None):
+    """删除剧本提示词模板。传入 project_id 时仅删除该项目下的模板（项目隔离）。"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM script_templates WHERE id = ? AND user_id = ?', (template_id, user_id))
+    if project_id is not None:
+        cursor.execute(
+            'DELETE FROM script_templates WHERE id = ? AND user_id = ? AND (project_id = ? OR (project_id IS NULL AND ? IS NULL))',
+            (template_id, user_id, project_id, project_id)
+        )
+    else:
+        cursor.execute('DELETE FROM script_templates WHERE id = ? AND user_id = ?', (template_id, user_id))
     conn.commit()
     conn.close()
 

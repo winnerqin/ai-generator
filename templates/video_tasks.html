@@ -137,11 +137,12 @@
             const loadTasks = async (page = currentPage) => {
                 setError('');
                 let url = `/api/video-tasks?page=${page}&page_size=${pageSize}`;
+                if (currentProjectId) url += `&project_id=${encodeURIComponent(currentProjectId)}`;
                 if (taskIdSearch) url += `&task_id=${encodeURIComponent(taskIdSearch)}`;
                 if (statusFilter) url += `&status=${encodeURIComponent(statusFilter)}`;
                 if (startDate) url += `&start_date=${encodeURIComponent(startDate)}`;
                 if (endDate) url += `&end_date=${encodeURIComponent(endDate)}`;
-                const resp = await fetch(url);
+                const resp = await fetch(url, { cache: 'no-store' });
                 const data = await resp.json();
                 if (!data.success) {
                     setError(data.error || '查询失败');
@@ -158,9 +159,10 @@
                 }
             };
 
+            // 初始加载与切换项目后重新拉取（依赖 currentProjectId 避免缓存导致列表相同）
             useEffect(() => {
                 loadTasks(1);
-            }, []);
+            }, [currentProjectId]);
 
             useEffect(() => {
                 if (!autoRefresh) return;
