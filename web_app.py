@@ -3054,7 +3054,7 @@ def api_video_tasks_list():
                 # 如果API查询失败，尝试从数据库查询
                 db_task = database.get_video_task_by_id(task_id)
                 if db_task and db_task.get('user_id') == user_id and (project_id is None or db_task.get('project_id') == project_id):
-                    result_task = convert_db_task_to_api_format(db_task)
+                    result_task = convert_db_task_to_api_format(db_task, user_id)
                     return jsonify({
                         'success': True,
                         'items': [result_task],
@@ -3201,7 +3201,7 @@ def api_video_tasks_list():
             tasks = []
             for t in db_tasks:
                 try:
-                    converted_task = convert_db_task_to_api_format(t)
+                    converted_task = convert_db_task_to_api_format(t, user_id)
                     if converted_task:
                         tasks.append(converted_task)
                 except Exception as e:
@@ -3416,13 +3416,18 @@ def sync_task_to_database(api_task, user_id, project_id=None):
                 thread.daemon = True
                 thread.start()
     else:
-        # 数据库已有记录，更新服务器最新信息（任务ID、状态、token、URL）
+        # 数据库已有记录，更新服务器最新信息；若已有 OSS 视频地址则保留，避免被临时服务器 URL 覆盖导致过期后无法播放
+        current_video_url = db_task.get('video_url')
+        if current_video_url and is_oss_url(current_video_url):
+            video_url_to_save = current_video_url
+        else:
+            video_url_to_save = server_video_url
         update_data = {
             'task_id': task_id_str,
-            'status': server_status,  # 使用服务器状态
-            'video_url': server_video_url,  # 使用服务器URL
+            'status': server_status,
+            'video_url': video_url_to_save,
             'last_frame_image_url': server_last_frame_url,
-            'token': server_token,  # 使用服务器token
+            'token': server_token,
             'usage': server_usage,
             'content': server_content,
             'error_message': api_task.get('error_message')
@@ -3743,9 +3748,17 @@ def convert_api_task_to_unified_format(api_task, user_id):
         unified_task['first_frame_url'] = db_task.get('first_frame_url') or inferred_first_frame
         unified_task['last_frame_url'] = db_task.get('last_frame_url') or inferred_last_frame
         unified_task['reference_image_urls'] = db_task.get('reference_image_urls') or unified_task.get('reference_image_urls', [])
-        # 如果数据库中已有OSS或持久化链接，优先使用
-        if db_task.get('video_url'):
-            unified_task['video_url'] = db_task.get('video_url')
+        # 播放/下载优先使用 OSS 地址，避免临时链接过期后无法使用
+        display_video_url = db_task.get('video_url')
+        if display_video_url:
+            _, oss_ep = get_oss_bucket()
+            def _is_oss(u):
+                return bool(oss_ep) and isinstance(u, str) and u.startswith(f"https://{oss_ep}/")
+            if not _is_oss(display_video_url):
+                asset = database.get_video_by_task_id(user_id, task_id_str, db_task.get('project_id'))
+                if asset and isinstance(asset.get('url'), str) and _is_oss(asset['url']):
+                    display_video_url = asset['url']
+            unified_task['video_url'] = display_video_url
         if db_task.get('last_frame_image_url'):
             unified_task['last_frame_image_url'] = db_task.get('last_frame_image_url')
     else:
@@ -3932,10 +3945,21 @@ def convert_api_task_to_db_format(api_task, user_id):
     
     return task_data
 
-def convert_db_task_to_api_format(db_task):
-    """将数据库任务格式转换为API格式"""
+def convert_db_task_to_api_format(db_task, user_id=None):
+    """将数据库任务格式转换为API格式。传入 user_id 时会对 video_url 做 OSS 回退（优先返回 OSS 地址）。"""
     if not db_task:
         return None
+    
+    # 播放/下载地址优先用 OSS；若 DB 中为临时链接且已过期，尝试从 video_library 取 OSS 地址
+    display_video_url = db_task.get('video_url')
+    if display_video_url and user_id is not None:
+        _, oss_ep = get_oss_bucket()
+        def _is_oss(u):
+            return bool(oss_ep) and isinstance(u, str) and u.startswith(f"https://{oss_ep}/")
+        if not _is_oss(display_video_url):
+            asset = database.get_video_by_task_id(user_id, db_task.get('task_id'), db_task.get('project_id'))
+            if asset and isinstance(asset.get('url'), str) and _is_oss(asset['url']):
+                display_video_url = asset['url']
     
     # 构建API格式的任务对象
     task = {
@@ -3965,8 +3989,8 @@ def convert_db_task_to_api_format(db_task):
     
     # 设置 content 中的 video_url、首尾帧（便于前端统一从 content 或顶层读取）
     content = task.get('content', {}) if isinstance(task.get('content'), dict) else {}
-    if db_task.get('video_url'):
-        content['video_url'] = db_task.get('video_url')
+    if display_video_url:
+        content['video_url'] = display_video_url
     if db_task.get('last_frame_image_url'):
         content['last_frame_image_url'] = db_task.get('last_frame_image_url')
     if db_task.get('first_frame_url'):
