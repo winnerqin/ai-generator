@@ -3,14 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>文本转CSV - Ai创作工具</title>
+    <title>转换工具 - Ai创作工具</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
     <style>
         .app-shell { display: flex; min-height: 100vh; }
         .main-content { padding: 0; flex: 1; min-width: 0; }
         .page-wrap { padding: 20px 24px 36px; }
         .page-title { font-size: 1.4rem; font-weight: 600; margin-bottom: 16px; }
         .panel { border-radius: 16px; padding: 16px; margin-bottom: 16px; }
+        .txt2csv-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+        .txt2csv-tab { padding: 10px 20px; border-radius: 10px; font-weight: 600; cursor: pointer; border: 1px solid rgba(86,111,255,0.3); background: rgba(11,15,26,0.5); color: #c8d2ff; }
+        .txt2csv-tab:hover { background: rgba(86,111,255,0.12); }
+        .txt2csv-tab.active { background: linear-gradient(135deg, #5a9cf5 0%, #4a8ae5 100%); color: #fff; border-color: transparent; }
         .txt2csv-row { display: flex; gap: 12px; margin-bottom: 12px; }
         .txt2csv-row label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; }
         .txt2csv-input, .txt2csv-output { width: 100%; min-height: 180px; padding: 12px; border-radius: 10px; border: 1px solid rgba(86,111,255,0.3); background: rgba(11,15,26,0.6); color: #e6ebff; font-size: 0.9rem; resize: vertical; font-family: inherit; }
@@ -26,6 +33,25 @@
         .btn-export { padding: 8px 16px; border-radius: 8px; font-size: 0.9rem; cursor: pointer; border: 1px solid rgba(86,111,255,0.4); background: rgba(86,111,255,0.15); color: #c8d2ff; }
         .btn-export:hover:not(:disabled) { background: rgba(86,111,255,0.25); }
         .btn-export:disabled { opacity: 0.5; cursor: not-allowed; }
+        .storyboard-md-wrap { min-height: 120px; padding: 12px; border-radius: 10px; border: 1px solid rgba(86,111,255,0.3); background: rgba(11,15,26,0.6); color: #e6ebff; font-size: 0.9rem; line-height: 1.6; }
+        .storyboard-md-wrap h1,.storyboard-md-wrap h2,.storyboard-md-wrap h3 { margin-top: 1em; margin-bottom: 0.5em; color: #b8c8ff; }
+        .storyboard-md-wrap table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+        .storyboard-md-wrap th, .storyboard-md-wrap td { border: 1px solid rgba(86,111,255,0.35); padding: 6px 10px; text-align: left; }
+        .storyboard-md-wrap th { background: rgba(86,111,255,0.2); }
+        .storyboard-md-wrap p { margin: 0.5em 0; }
+        .storyboard-md-wrap ul { margin: 0.5em 0; padding-left: 1.5em; }
+        #promptEditorContainer .toastui-editor-defaultUI { border-radius: 10px; overflow: hidden; }
+        #promptEditorContainer .toastui-editor-defaultUI-toolbar { background: #f0f2f5; border-color: #ddd; }
+        #promptEditorContainer .toastui-editor-md-container,
+        #promptEditorContainer .toastui-editor-ww-container { background: #fff; }
+        #promptEditorContainer .toastui-editor-md-preview,
+        #promptEditorContainer .toastui-editor-contents,
+        #promptEditorContainer .toastui-editor-ww-container .toastui-editor-contents { background: #fff !important; color: #333 !important; }
+        #promptEditorContainer .ProseMirror { color: #333; }
+        #promptEditorContainer .toastui-editor-md-editor .CodeMirror-line { color: #333; }
+        #promptEditorContainer .toastui-editor-md-editor .CodeMirror-cursor { border-left-color: #333; }
+        #promptEditorContainer .CodeMirror { background: #fff !important; color: #333 !important; }
+        #promptEditorContainer .CodeMirror-line { color: #333; }
     </style>
 </head>
 <body>
@@ -85,15 +111,29 @@
 
         function parseCSVLine(line) {
             const out = [];
-            let s = '';
-            let inQ = false;
+            let field = '';
+            let inQuoted = false;
             for (let i = 0; i < line.length; i++) {
                 const c = line[i];
-                if (c === '"') inQ = !inQ;
-                else if (c === ',' && !inQ) { out.push(s.trim()); s = ''; }
-                else s += c;
+                if (inQuoted) {
+                    if (c === '"') {
+                        if (line[i + 1] === '"') { field += '"'; i++; }
+                        else inQuoted = false;
+                    } else {
+                        field += c;
+                    }
+                } else {
+                    if (c === '"') {
+                        inQuoted = true;
+                    } else if (c === ',') {
+                        out.push(field.trim());
+                        field = '';
+                    } else {
+                        field += c;
+                    }
+                }
             }
-            out.push(s.trim());
+            out.push(field.trim());
             return out;
         }
 
@@ -110,12 +150,27 @@
         function App() {
             const [projects, setProjects] = useState([]);
             const [currentProjectId, setCurrentProjectId] = useState('');
+            const [activeTab, setActiveTab] = useState('txt2csv');
             const [inputText, setInputText] = useState('');
             const [outputText, setOutputText] = useState('');
             const [tableData, setTableData] = useState({ headers: [], rows: [] });
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState('');
             const outputEndRef = useRef(null);
+            const [storyboardInput, setStoryboardInput] = useState('');
+            const [storyboardMarkdown, setStoryboardMarkdown] = useState('');
+            const [storyboardCsv, setStoryboardCsv] = useState('');
+            const [storyboardTableData, setStoryboardTableData] = useState({ headers: [], rows: [] });
+            const [storyboardLoading, setStoryboardLoading] = useState(false);
+            const [storyboardError, setStoryboardError] = useState('');
+            const [promptFiles, setPromptFiles] = useState([]);
+            const [promptCurrentFile, setPromptCurrentFile] = useState('');
+            const [promptContent, setPromptContent] = useState('');
+            const [promptNewFilename, setPromptNewFilename] = useState('');
+            const [promptSaveLoading, setPromptSaveLoading] = useState(false);
+            const [promptError, setPromptError] = useState('');
+            const promptEditorRef = useRef(null);
+            const promptEditorContainerRef = useRef(null);
 
             useEffect(() => {
                 document.body.classList.add('react-theme', 'sidebar-compact');
@@ -133,6 +188,130 @@
             useEffect(() => {
                 if (outputEndRef.current) outputEndRef.current.scrollIntoView({ behavior: 'smooth' });
             }, [outputText]);
+
+            useEffect(() => {
+                if (activeTab === 'prompts') {
+                    fetch('/api/config-prompts').then(r => r.json()).then(d => {
+                        if (d.success) setPromptFiles(d.files || []);
+                    });
+                }
+            }, [activeTab]);
+
+            useEffect(() => {
+                if (activeTab !== 'prompts') {
+                    if (promptEditorRef.current) {
+                        try {
+                            const md = promptEditorRef.current.getMarkdown();
+                            setPromptContent(md);
+                        } catch (e) {}
+                        try { promptEditorRef.current.destroy(); } catch (e) {}
+                        promptEditorRef.current = null;
+                    }
+                    return;
+                }
+                const el = promptEditorContainerRef.current;
+                const EditorClass = window.Editor || (window.toastui && window.toastui.Editor);
+                if (!el || !EditorClass) return;
+                const timer = setTimeout(() => {
+                    if (!el.isConnected) return;
+                    try {
+                        const ed = new EditorClass({
+                            el,
+                            height: '320px',
+                            initialEditType: 'wysiwyg',
+                            initialValue: promptContent,
+                            previewStyle: 'vertical',
+                            hideModeSwitch: false
+                        });
+                        promptEditorRef.current = ed;
+                    } catch (e) { console.warn('Toast UI Editor init', e); }
+                }, 100);
+                return () => {
+                    clearTimeout(timer);
+                    if (promptEditorRef.current) {
+                        try {
+                            const md = promptEditorRef.current.getMarkdown();
+                            setPromptContent(md);
+                        } catch (e) {}
+                        try { promptEditorRef.current.destroy(); } catch (e) {}
+                        promptEditorRef.current = null;
+                    }
+                    if (el && el.firstChild) {
+                        while (el.firstChild) el.removeChild(el.firstChild);
+                    }
+                };
+            }, [activeTab]);
+
+            const loadPromptFile = (filename) => {
+                if (!filename) {
+                    setPromptContent('');
+                    setPromptCurrentFile('');
+                    setPromptNewFilename('');
+                    if (promptEditorRef.current && typeof promptEditorRef.current.setMarkdown === 'function') {
+                        promptEditorRef.current.setMarkdown('');
+                    }
+                    return;
+                }
+                setPromptError('');
+                fetch('/api/config-prompts/' + encodeURIComponent(filename)).then(r => r.json()).then(d => {
+                    if (d.success) {
+                        const content = d.content || '';
+                        setPromptContent(content);
+                        setPromptCurrentFile(d.filename || filename);
+                        setPromptNewFilename('');
+                        if (promptEditorRef.current && typeof promptEditorRef.current.setMarkdown === 'function') {
+                            promptEditorRef.current.setMarkdown(content);
+                        }
+                    } else setPromptError(d.error || '加载失败');
+                });
+            };
+
+            const handleSavePrompt = async () => {
+                const filename = (promptNewFilename || promptCurrentFile || '').trim();
+                if (!filename) { setPromptError('请填写文件名（如 xxx.md）'); return; }
+                if (!filename.endsWith('.md')) { setPromptError('文件名必须以 .md 结尾'); return; }
+                const content = (promptEditorRef.current && typeof promptEditorRef.current.getMarkdown === 'function')
+                    ? promptEditorRef.current.getMarkdown() : promptContent;
+                setPromptError('');
+                setPromptSaveLoading(true);
+                try {
+                    const res = await fetch('/api/config-prompts', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ filename, content })
+                    });
+                    const data = await res.json();
+                    if (!data.success) throw new Error(data.error || '保存失败');
+                    if (!promptFiles.includes(filename)) setPromptFiles([...promptFiles, filename].sort());
+                    setPromptCurrentFile(filename);
+                    setPromptNewFilename('');
+                } catch (e) {
+                    setPromptError(e.message || '保存失败');
+                } finally {
+                    setPromptSaveLoading(false);
+                }
+            };
+
+            const handleDeletePrompt = async () => {
+                const filename = promptCurrentFile || promptNewFilename.trim();
+                if (!filename) return;
+                if (!confirm('确定删除 ' + filename + ' 吗？')) return;
+                setPromptError('');
+                try {
+                    const res = await fetch('/api/config-prompts/' + encodeURIComponent(filename), { method: 'DELETE' });
+                    const data = await res.json();
+                    if (!data.success) throw new Error(data.error || '删除失败');
+                    setPromptFiles(promptFiles.filter(f => f !== filename));
+                    setPromptCurrentFile('');
+                    setPromptNewFilename('');
+                    setPromptContent('');
+                    if (promptEditorRef.current && typeof promptEditorRef.current.setMarkdown === 'function') {
+                        promptEditorRef.current.setMarkdown('');
+                    }
+                } catch (e) {
+                    setPromptError(e.message || '删除失败');
+                }
+            };
 
             const handleConvert = async () => {
                 const text = (inputText || '').trim();
@@ -211,6 +390,72 @@
                 }
             };
 
+            const handleStoryboardGenerate = async () => {
+                const text = (storyboardInput || '').trim();
+                if (!text) {
+                    setStoryboardError('请输入剧本内容');
+                    return;
+                }
+                setStoryboardError('');
+                setStoryboardMarkdown('');
+                setStoryboardCsv('');
+                setStoryboardTableData({ headers: [], rows: [] });
+                setStoryboardLoading(true);
+                try {
+                    const res = await fetch('/api/storyboard-from-script', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text })
+                    });
+                    const data = await res.json();
+                    if (!data.success) throw new Error(data.error || '生成失败');
+                    setStoryboardMarkdown(data.markdown || '');
+                    setStoryboardCsv(data.csv || '');
+                    setStoryboardTableData(csvToRows(data.csv || ''));
+                } catch (e) {
+                    setStoryboardError(e.message || '请求失败');
+                } finally {
+                    setStoryboardLoading(false);
+                }
+            };
+
+            const exportMarkdown = () => {
+                if (!storyboardMarkdown) return;
+                const blob = new Blob([storyboardMarkdown], { type: 'text/markdown;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'storyboard_' + new Date().toISOString().slice(0,10) + '.md';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            const exportStoryboardCsv = () => {
+                if (!storyboardCsv) return;
+                const bom = '\uFEFF';
+                const blob = new Blob([bom + storyboardCsv], { type: 'text/csv;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'storyboard_' + new Date().toISOString().slice(0,10) + '.csv';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            const renderMarkdown = (md) => {
+                if (!md) return '';
+                const m = typeof marked !== 'undefined' ? marked : (window && window.marked);
+                if (!m) return md;
+                try {
+                    if (m.setOptions) m.setOptions({ gfm: true, breaks: true });
+                    return (m.parse || m)(md);
+                } catch (_) { return md; }
+            };
+
             return (
                 <div className="app-shell">
                     <Sidebar
@@ -229,7 +474,14 @@
                     />
                     <div className="main-content">
                         <div className="page-wrap">
-                            <div className="page-title">🔄 文本转 CSV</div>
+                            <div className="page-title">🔄 转换工具</div>
+                            <div className="txt2csv-tabs">
+                                <button className={`txt2csv-tab ${activeTab === 'txt2csv' ? 'active' : ''}`} onClick={() => setActiveTab('txt2csv')}>文本转 CSV</button>
+                                <button className={`txt2csv-tab ${activeTab === 'storyboard' ? 'active' : ''}`} onClick={() => setActiveTab('storyboard')}>生成分镜</button>
+                                <button className={`txt2csv-tab ${activeTab === 'prompts' ? 'active' : ''}`} onClick={() => setActiveTab('prompts')}>提示词管理</button>
+                            </div>
+
+                            {activeTab === 'txt2csv' && (
                             <div className="panel">
                                 <div className="txt2csv-row">
                                     <div style={{ flex: 1 }}>
@@ -253,10 +505,7 @@
                                     <div style={{ flex: 1 }}>
                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                                             <label style={{ marginBottom: 0 }}>输出内容（CSV）</label>
-                                            <button
-                                                type="button"
-                                                className="btn-export"
-                                                disabled={!outputText.trim()}
+                                            <button type="button" className="btn-export" disabled={!outputText.trim()}
                                                 onClick={() => {
                                                     if (!outputText.trim()) return;
                                                     const bom = '\uFEFF';
@@ -270,17 +519,10 @@
                                                     document.body.removeChild(a);
                                                     URL.revokeObjectURL(url);
                                                 }}
-                                            >
-                                                导出为 CSV
-                                            </button>
+                                            >导出为 CSV</button>
                                         </div>
                                         <div style={{ position: 'relative' }}>
-                                            <textarea
-                                                className="txt2csv-output"
-                                                readOnly
-                                                value={outputText}
-                                                placeholder="转换结果将在此实时显示..."
-                                            />
+                                            <textarea className="txt2csv-output" readOnly value={outputText} placeholder="转换结果将在此实时显示..." />
                                             <div ref={outputEndRef} />
                                         </div>
                                     </div>
@@ -291,16 +533,10 @@
                                         <div className="txt2csv-table-wrap">
                                             {tableData.headers.length > 0 ? (
                                                 <table className="txt2csv-table">
-                                                    <thead>
-                                                        <tr>
-                                                            {tableData.headers.map((h, i) => <th key={i}>{h}</th>)}
-                                                        </tr>
-                                                    </thead>
+                                                    <thead><tr>{tableData.headers.map((h, i) => <th key={i}>{h}</th>)}</tr></thead>
                                                     <tbody>
                                                         {tableData.rows.map((row, i) => (
-                                                            <tr key={i}>
-                                                                {row.map((cell, j) => <td key={j}>{cell}</td>)}
-                                                            </tr>
+                                                            <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>
                                                         ))}
                                                     </tbody>
                                                 </table>
@@ -311,6 +547,116 @@
                                     </div>
                                 </div>
                             </div>
+                            )}
+
+                            {activeTab === 'storyboard' && (
+                            <div className="panel">
+                                <div className="txt2csv-row">
+                                    <div style={{ flex: 1 }}>
+                                        <label>输入剧本</label>
+                                        <textarea
+                                            className="txt2csv-input"
+                                            placeholder="在此粘贴或输入剧本内容，将按 config/storyboard.md 要求生成分镜 Markdown 与 CSV 表格..."
+                                            value={storyboardInput}
+                                            onChange={(e) => setStoryboardInput(e.target.value)}
+                                            disabled={storyboardLoading}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="txt2csv-row" style={{ alignItems: 'flex-end' }}>
+                                    <button className="btn-convert" onClick={handleStoryboardGenerate} disabled={storyboardLoading}>
+                                        {storyboardLoading ? '生成中...' : '生成分镜'}
+                                    </button>
+                                </div>
+                                {storyboardError && <div className="small-hint" style={{ color: '#ff9aa2', marginTop: 8 }}>{storyboardError}</div>}
+                                <div className="txt2csv-row" style={{ marginTop: 16 }}>
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                                            <label style={{ marginBottom: 0 }}>分镜文本（Markdown）</label>
+                                            <button type="button" className="btn-export" disabled={!storyboardMarkdown.trim()} onClick={exportMarkdown}>导出为 .md</button>
+                                        </div>
+                                        <div className="storyboard-md-wrap" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                                            {storyboardMarkdown ? (
+                                                <div dangerouslySetInnerHTML={{ __html: renderMarkdown(storyboardMarkdown) }} />
+                                            ) : (
+                                                <div className="small-hint">生成后将以 Markdown 格式显示分镜文本</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="txt2csv-row" style={{ marginTop: 16 }}>
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                                            <label style={{ marginBottom: 0 }}>分镜表格（CSV 预览）</label>
+                                            <button type="button" className="btn-export" disabled={!storyboardCsv.trim()} onClick={exportStoryboardCsv}>导出为 CSV</button>
+                                        </div>
+                                        <div className="txt2csv-table-wrap">
+                                            {storyboardTableData.headers.length > 0 ? (
+                                                <table className="txt2csv-table">
+                                                    <thead><tr>{storyboardTableData.headers.map((h, i) => <th key={i}>{h}</th>)}</tr></thead>
+                                                    <tbody>
+                                                        {storyboardTableData.rows.map((row, i) => (
+                                                            <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            ) : (
+                                                <div className="small-hint">生成后将在此以表格形式预览 CSV</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            )}
+
+                            {activeTab === 'prompts' && (
+                            <div className="panel">
+                                <div className="txt2csv-row">
+                                    <div style={{ flex: 1 }}>
+                                        <label>选择或新建文件（config 目录下 .md）</label>
+                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                                            <select
+                                                value={promptCurrentFile}
+                                                onChange={(e) => { setPromptNewFilename(''); loadPromptFile(e.target.value); }}
+                                                style={{ minWidth: 180, padding: 8, borderRadius: 8, background: 'rgba(11,15,26,0.6)', color: '#e6ebff', border: '1px solid rgba(86,111,255,0.3)' }}
+                                            >
+                                                <option value="">— 新建文件 —</option>
+                                                {promptFiles.map(f => <option key={f} value={f}>{f}</option>)}
+                                            </select>
+                                            {!promptCurrentFile && (
+                                                <input
+                                                    type="text"
+                                                    placeholder="新文件名，如 my_prompt.md"
+                                                    value={promptNewFilename}
+                                                    onChange={(e) => setPromptNewFilename(e.target.value)}
+                                                    style={{ minWidth: 200, padding: 8, borderRadius: 8, background: 'rgba(11,15,26,0.6)', color: '#e6ebff', border: '1px solid rgba(86,111,255,0.3)' }}
+                                                />
+                                            )}
+                                            {promptCurrentFile && (
+                                                <span className="small-hint" style={{ color: '#b8c8ff' }}>当前：{promptCurrentFile}</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="txt2csv-row">
+                                    <div style={{ flex: 1 }}>
+                                        <label>内容（所见即所得编辑，可切换 Markdown / 预览）</label>
+                                        <div id="promptEditorContainer" ref={promptEditorContainerRef} style={{ minHeight: 320 }} />
+                                    </div>
+                                </div>
+                                <div className="txt2csv-row" style={{ alignItems: 'center', gap: 12 }}>
+                                    <button className="btn-convert" onClick={handleSavePrompt} disabled={promptSaveLoading || (!promptCurrentFile && !promptNewFilename.trim())}>
+                                        {promptSaveLoading ? '保存中...' : (promptCurrentFile ? '保存' : '新建并保存')}
+                                    </button>
+                                    {promptCurrentFile && (
+                                        <button type="button" className="btn-export" onClick={handleDeletePrompt} style={{ color: '#ff9aa2', borderColor: 'rgba(255,120,120,0.5)' }}>
+                                            删除当前文件
+                                        </button>
+                                    )}
+                                </div>
+                                {promptError && <div className="small-hint" style={{ color: '#ff9aa2', marginTop: 8 }}>{promptError}</div>}
+                            </div>
+                            )}
                         </div>
                     </div>
                 </div>

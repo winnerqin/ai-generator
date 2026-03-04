@@ -1041,6 +1041,15 @@ def _load_txt2csv_format():
         return ''
 
 
+def _load_storyboard_format():
+    """读取 config/storyboard.md 分镜格式要求"""
+    config_path = Path(__file__).parent / 'config' / 'storyboard.md'
+    try:
+        return config_path.read_text(encoding='utf-8').strip()
+    except Exception:
+        return ''
+
+
 def _csv_ensure_halfwidth_punctuation(s):
     """将 CSV 文本中的全角标点替换为英文半角，确保逗号等不影响 CSV 解析。maketrans 的键和值都必须为单字符。"""
     if not s:
@@ -1132,6 +1141,77 @@ def api_txt2csv_stream():
             headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
         )
     except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# 生成分镜 API 使用的分隔符，用于从模型输出中拆分 Markdown 与 CSV
+STORYBOARD_CSV_DELIMITER = '\n\n===CSV===\n\n'
+
+
+@app.route('/api/storyboard-from-script', methods=['POST'])
+@login_required
+def api_storyboard_from_script():
+    """根据剧本按 config/storyboard.md 要求生成分镜：返回 Markdown 文本 + CSV 表格"""
+    try:
+        data = request.get_json() or {}
+        script = (data.get('text') or data.get('script') or '').strip()
+        if not script:
+            return jsonify({'success': False, 'error': '请输入剧本内容'}), 400
+
+        api_key = os.environ.get('QWEN_API_KEY')
+        base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
+        if not api_key:
+            return jsonify({'success': False, 'error': 'QWEN_API_KEY 未配置'}), 500
+
+        format_md = _load_storyboard_format()
+        if not format_md:
+            return jsonify({'success': False, 'error': 'config/storyboard.md 不存在或为空'}), 500
+
+        system_prompt = (
+            format_md
+            + "\n\n【重要】请严格按以下两点执行：\n"
+            + "1. 分镜文本：只输出 Markdown 格式的纯文本（标题、列表、段落等），不要使用 Markdown 表格语法。分镜的表格形式仅在后面的 CSV 部分体现。\n"
+            + "2. CSV 表格：在单独一行输出 " + repr(STORYBOARD_CSV_DELIMITER.strip()) + " 后，输出表头：分镜号,中文台词,说话人,情绪,描述,场景/时间。"
+            + "每个单元格若内容中包含逗号或双引号，必须用双引号包裹整个单元格；单元格内的双引号写成两个连续双引号 \"\"。"
+            + "描述列内容通常较长且含逗号，请务必用双引号包裹该列每个单元格。CSV 每行一条记录，单元格内不要换行，可用空格或<br>代替。"
+        )
+        user_prompt = "请根据以下剧本生成分镜（Markdown + CSV）：\n\n" + script
+
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        model = os.environ.get('STORYBOARD_GENERATE_MODEL', os.environ.get('SCRIPT_GENERATE_MODEL', 'qwen3.5-plus'))
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.3,
+            stream=False
+        )
+        content = (response.choices[0].message.content or '').strip()
+
+        if STORYBOARD_CSV_DELIMITER in content:
+            parts = content.split(STORYBOARD_CSV_DELIMITER, 1)
+            markdown_part = parts[0].strip()
+            csv_part = parts[1].strip() if len(parts) > 1 else ''
+        else:
+            markdown_part = content
+            csv_part = ''
+            for sep in ['\n\n===CSV===\n\n', '\n===CSV===\n', '===CSV===']:
+                if sep in content:
+                    parts = content.split(sep, 1)
+                    markdown_part = parts[0].strip()
+                    csv_part = (parts[1].strip() if len(parts) > 1 else '')
+                    break
+
+        csv_part = _csv_ensure_halfwidth_punctuation(csv_part)
+        return jsonify({
+            'success': True,
+            'markdown': markdown_part,
+            'csv': csv_part
+        })
+    except Exception as e:
+        log_operation('生成分镜失败', str(e), 'WARNING')
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -2770,6 +2850,87 @@ def storyboard_studio():
 def txt2csv_page():
     """文本转 CSV 转换工具页面"""
     return render_template('txt2csv.html', user=get_current_user())
+
+
+# 提示词管理：config 目录下的 .md 文件（仅允许 .md，禁止路径穿越）
+CONFIG_DIR = Path(__file__).parent / 'config'
+
+
+def _config_md_filename_safe(name):
+    """只允许纯文件名且以 .md 结尾，禁止 / \\ .. 等"""
+    if not name or not isinstance(name, str):
+        return False
+    name = name.strip()
+    if not name.endswith('.md'):
+        return False
+    if '..' in name or '/' in name or '\\' in name or '\n' in name:
+        return False
+    return name == os.path.basename(name) and len(name) <= 128
+
+
+@app.route('/api/config-prompts', methods=['GET'])
+@login_required
+def api_config_prompts_list():
+    """列出 config 目录下所有 .md 文件"""
+    try:
+        if not CONFIG_DIR.exists():
+            return jsonify({'success': True, 'files': []})
+        files = [f.name for f in CONFIG_DIR.iterdir() if f.is_file() and f.suffix.lower() == '.md']
+        files.sort()
+        return jsonify({'success': True, 'files': files})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config-prompts/<path:filename>', methods=['GET'])
+@login_required
+def api_config_prompts_get(filename):
+    """获取指定 .md 文件内容"""
+    try:
+        if not _config_md_filename_safe(filename):
+            return jsonify({'success': False, 'error': '文件名不合法'}), 400
+        path = CONFIG_DIR / filename
+        if not path.exists() or not path.is_file():
+            return jsonify({'success': False, 'error': '文件不存在'}), 404
+        content = path.read_text(encoding='utf-8')
+        return jsonify({'success': True, 'filename': filename, 'content': content})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config-prompts', methods=['POST'])
+@login_required
+def api_config_prompts_save():
+    """新增或覆盖保存 config 下的 .md 文件"""
+    try:
+        data = request.get_json() or {}
+        filename = (data.get('filename') or '').strip()
+        content = data.get('content') or ''
+        if not _config_md_filename_safe(filename):
+            return jsonify({'success': False, 'error': '文件名须为 xxx.md 且不含路径'}), 400
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        path = CONFIG_DIR / filename
+        path.write_text(content, encoding='utf-8')
+        return jsonify({'success': True, 'filename': filename})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config-prompts/<path:filename>', methods=['DELETE'])
+@login_required
+def api_config_prompts_delete(filename):
+    """删除 config 下的 .md 文件"""
+    try:
+        if not _config_md_filename_safe(filename):
+            return jsonify({'success': False, 'error': '文件名不合法'}), 400
+        path = CONFIG_DIR / filename
+        if not path.exists() or not path.is_file():
+            return jsonify({'success': False, 'error': '文件不存在'}), 404
+        path.unlink()
+        return jsonify({'success': True, 'filename': filename})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/batch-generate', methods=['POST'])
 @login_required
