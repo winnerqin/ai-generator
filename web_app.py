@@ -1050,6 +1050,19 @@ def _load_storyboard_format():
         return ''
 
 
+def _load_config_md(filename):
+    """从 config 目录读取指定 .md 文件内容，文件名须通过 _config_md_filename_safe 校验"""
+    if not filename or not _config_md_filename_safe(filename):
+        return None
+    path = CONFIG_DIR / filename
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        return path.read_text(encoding='utf-8').strip()
+    except Exception:
+        return None
+
+
 def _csv_ensure_halfwidth_punctuation(s):
     """将 CSV 文本中的全角标点替换为英文半角，确保逗号等不影响 CSV 解析。maketrans 的键和值都必须为单字符。"""
     if not s:
@@ -1151,31 +1164,62 @@ STORYBOARD_CSV_DELIMITER = '\n\n===CSV===\n\n'
 @app.route('/api/storyboard-from-script', methods=['POST'])
 @login_required
 def api_storyboard_from_script():
-    """根据剧本按 config/storyboard.md 要求生成分镜：返回 Markdown 文本 + CSV 表格"""
+    """根据剧本按 config/storyboard.md 要求生成分镜：可仅返回 Markdown、仅返回 CSV、或两者"""
     try:
         data = request.get_json() or {}
         script = (data.get('text') or data.get('script') or '').strip()
-        if not script:
+        output_mode = (data.get('output') or '').strip().lower() or 'both'  # 'markdown' | 'csv' | 'both'
+        markdown_ref = (data.get('markdown') or '').strip()  # 生成 CSV 时传入的已有分镜文本（可编辑或粘贴）
+
+        if output_mode != 'csv' and not script:
             return jsonify({'success': False, 'error': '请输入剧本内容'}), 400
+        if output_mode == 'csv' and not markdown_ref:
+            return jsonify({'success': False, 'error': '请先填写或粘贴分镜文本（Markdown）后再点「生成 CSV 表格」'}), 400
 
         api_key = os.environ.get('QWEN_API_KEY')
         base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
         if not api_key:
             return jsonify({'success': False, 'error': 'QWEN_API_KEY 未配置'}), 500
 
-        format_md = _load_storyboard_format()
+        prompt_file = (data.get('prompt_file') or data.get('format_file') or 'storyboard.md').strip()
+        format_md = _load_config_md(prompt_file) if prompt_file else None
         if not format_md:
-            return jsonify({'success': False, 'error': 'config/storyboard.md 不存在或为空'}), 500
+            format_md = _load_storyboard_format()
+        if not format_md:
+            return jsonify({'success': False, 'error': f'config 下提示词文件不存在或为空（当前选择: {prompt_file or "storyboard.md"}）'}), 500
 
-        system_prompt = (
-            format_md
-            + "\n\n【重要】请严格按以下两点执行：\n"
-            + "1. 分镜文本：只输出 Markdown 格式的纯文本（标题、列表、段落等），不要使用 Markdown 表格语法。分镜的表格形式仅在后面的 CSV 部分体现。\n"
-            + "2. CSV 表格：在单独一行输出 " + repr(STORYBOARD_CSV_DELIMITER.strip()) + " 后，输出表头：分镜号,中文台词,说话人,情绪,描述,场景/时间。"
-            + "每个单元格若内容中包含逗号或双引号，必须用双引号包裹整个单元格；单元格内的双引号写成两个连续双引号 \"\"。"
-            + "描述列内容通常较长且含逗号，请务必用双引号包裹该列每个单元格。CSV 每行一条记录，单元格内不要换行，可用空格或<br>代替。"
+        csv_rule = (
+            "表头：分镜号,中文台词,说话人,情绪,描述,场景/时间。"
+            "【列含义】说话人：仅填角色名/称呼（2～6 字简短名词，如：小明、小红、旁白、咖啡师），绝不能填一句完整台词；中文台词：该角色说出的完整台词内容，必须填在「中文台词」列。若把台词误填到说话人列会导致整表错位。"
+            "每个单元格若内容中包含逗号或双引号，必须用双引号包裹整个单元格；单元格内的双引号写成两个连续双引号 \"\"。"
+            "描述列内容通常较长且含逗号，请务必用双引号包裹该列每个单元格。CSV 每行一条记录，单元格内不要换行，可用空格或<br>代替。"
         )
-        user_prompt = "请根据以下剧本生成分镜（Markdown + CSV）：\n\n" + script
+
+        if output_mode == 'markdown':
+            system_prompt = (
+                format_md
+                + "\n\n【重要】请只输出分镜的 Markdown 文本（标题、列表、段落等），不要输出任何 CSV 或表格，不要使用 "
+                + repr(STORYBOARD_CSV_DELIMITER.strip()) + "。"
+            )
+            user_prompt = "请根据以下剧本生成分镜文本（仅 Markdown）：\n\n" + script
+        elif output_mode == 'csv':
+            system_prompt = (
+                format_md
+                + "\n\n【重要】请根据用户提供的分镜 Markdown 文本（及剧本若提供）生成对应的 CSV 表格。只输出 CSV 内容，不要输出 Markdown。"
+                + csv_rule
+            )
+            if script:
+                user_prompt = "剧本：\n\n" + script + "\n\n---\n\n分镜文本（供参考）：\n\n" + markdown_ref
+            else:
+                user_prompt = "请根据以下分镜文本生成 CSV 表格：\n\n" + markdown_ref
+        else:
+            system_prompt = (
+                format_md
+                + "\n\n【重要】请严格按以下两点执行：\n"
+                + "1. 分镜文本：只输出 Markdown 格式的纯文本（标题、列表、段落等），不要使用 Markdown 表格语法。分镜的表格形式仅在后面的 CSV 部分体现。\n"
+                + "2. CSV 表格：在单独一行输出 " + repr(STORYBOARD_CSV_DELIMITER.strip()) + " 后，输出" + csv_rule
+            )
+            user_prompt = "请根据以下剧本生成分镜（Markdown + CSV）：\n\n" + script
 
         client = OpenAI(api_key=api_key, base_url=base_url)
         model = os.environ.get('STORYBOARD_GENERATE_MODEL', os.environ.get('SCRIPT_GENERATE_MODEL', 'qwen3.5-plus'))
@@ -1189,6 +1233,12 @@ def api_storyboard_from_script():
             stream=False
         )
         content = (response.choices[0].message.content or '').strip()
+
+        if output_mode == 'markdown':
+            return jsonify({'success': True, 'markdown': content})
+        if output_mode == 'csv':
+            csv_part = _csv_ensure_halfwidth_punctuation(content)
+            return jsonify({'success': True, 'csv': csv_part})
 
         if STORYBOARD_CSV_DELIMITER in content:
             parts = content.split(STORYBOARD_CSV_DELIMITER, 1)
@@ -1213,6 +1263,218 @@ def api_storyboard_from_script():
     except Exception as e:
         log_operation('生成分镜失败', str(e), 'WARNING')
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _run_storyboard_generate_both(script, prompt_file):
+    """内部：根据剧本和提示词文件生成分镜 Markdown + CSV，返回 (markdown, csv)。"""
+    format_md = _load_config_md(prompt_file) if prompt_file else None
+    if not format_md:
+        format_md = _load_storyboard_format()
+    if not format_md:
+        raise ValueError(f'config 下提示词文件不存在或为空: {prompt_file or "storyboard.md"}')
+    csv_rule = (
+        "表头：分镜号,中文台词,说话人,情绪,描述,场景/时间。"
+        "【列含义】说话人：仅填角色名/称呼（2～6 字简短名词，如：小明、小红、旁白、咖啡师），绝不能填一句完整台词；中文台词：该角色说出的完整台词内容，必须填在「中文台词」列。若把台词误填到说话人列会导致整表错位。"
+        "每个单元格若内容中包含逗号或双引号，必须用双引号包裹整个单元格；单元格内的双引号写成两个连续双引号 \"\"。"
+        "描述列内容通常较长且含逗号，请务必用双引号包裹该列每个单元格。CSV 每行一条记录，单元格内不要换行，可用空格或<br>代替。"
+    )
+    system_prompt = (
+        format_md
+        + "\n\n【重要】请严格按以下两点执行：\n"
+        + "1. 分镜文本：只输出 Markdown 格式的纯文本（标题、列表、段落等），不要使用 Markdown 表格语法。分镜的表格形式仅在后面的 CSV 部分体现。\n"
+        + "2. CSV 表格：在单独一行输出 " + repr(STORYBOARD_CSV_DELIMITER.strip()) + " 后，输出" + csv_rule
+    )
+    user_prompt = "请根据以下剧本生成分镜（Markdown + CSV）：\n\n" + script
+    api_key = os.environ.get('QWEN_API_KEY')
+    base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
+    if not api_key:
+        raise RuntimeError('QWEN_API_KEY 未配置')
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    model = os.environ.get('STORYBOARD_GENERATE_MODEL', os.environ.get('SCRIPT_GENERATE_MODEL', 'qwen3.5-plus'))
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=0.3,
+        stream=False
+    )
+    content = (response.choices[0].message.content or '').strip()
+    if STORYBOARD_CSV_DELIMITER in content:
+        parts = content.split(STORYBOARD_CSV_DELIMITER, 1)
+        markdown_part = parts[0].strip()
+        csv_part = parts[1].strip() if len(parts) > 1 else ''
+    else:
+        markdown_part = content
+        csv_part = ''
+        for sep in ['\n\n===CSV===\n\n', '\n===CSV===\n', '===CSV===']:
+            if sep in content:
+                parts = content.split(sep, 1)
+                markdown_part = parts[0].strip()
+                csv_part = (parts[1].strip() if len(parts) > 1 else '')
+                break
+    csv_part = _csv_ensure_halfwidth_punctuation(csv_part)
+    return markdown_part, csv_part
+
+
+def _get_storyboard_queue_path(user_id, project_id):
+    folder = get_user_output_folder(user_id, project_id)
+    return os.path.join(folder, '_storyboard_queue.json')
+
+
+def _load_storyboard_queue(user_id, project_id):
+    path = _get_storyboard_queue_path(user_id, project_id)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data.get('tasks') or []
+    except Exception:
+        return []
+
+
+def _save_storyboard_queue(user_id, project_id, tasks):
+    path = _get_storyboard_queue_path(user_id, project_id)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump({'tasks': tasks}, f, ensure_ascii=False, indent=2)
+
+
+@app.route('/api/storyboard-queue', methods=['GET'])
+@login_required
+def api_storyboard_queue_list():
+    """分镜队列任务列表（按用户、项目隔离）"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请选择当前项目'}), 400
+    tasks = _load_storyboard_queue(user_id, project_id)
+    return jsonify({'success': True, 'tasks': tasks})
+
+
+@app.route('/api/storyboard-queue/upload', methods=['POST'])
+@login_required
+def api_storyboard_queue_upload():
+    """批量上传剧本文件加入队列"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请选择当前项目'}), 400
+    prompt_file = (request.form.get('prompt_file') or 'storyboard.md').strip()
+    if 'files[]' in request.files:
+        files = request.files.getlist('files[]')
+    else:
+        files = [request.files.get('file')] if request.files.get('file') else []
+    files = [f for f in files if f and f.filename]
+    if not files:
+        return jsonify({'success': False, 'error': '请选择至少一个文件'}), 400
+    tasks = _load_storyboard_queue(user_id, project_id)
+    for f in files:
+        try:
+            raw = f.read()
+            if isinstance(raw, bytes):
+                raw = raw.decode('utf-8', errors='replace')
+            script = (raw or '').strip()
+        except Exception:
+            script = ''
+        name = secure_filename(f.filename) or f.filename or 'script.txt'
+        task_id = uuid.uuid4().hex[:12]
+        tasks.append({
+            'id': task_id,
+            'status': 'pending',
+            'filename': name,
+            'prompt_file': prompt_file,
+            'created_at': datetime.now().isoformat(),
+            'started_at': None,
+            'completed_at': None,
+            'output_md': None,
+            'output_csv': None,
+            'markdown_preview': None,
+            'csv_preview': None,
+            'error': None,
+            'script': script[:50000],
+        })
+    _save_storyboard_queue(user_id, project_id, tasks)
+    return jsonify({'success': True, 'tasks': tasks, 'added': len(files)})
+
+
+@app.route('/api/storyboard-queue/<task_id>', methods=['DELETE'])
+@login_required
+def api_storyboard_queue_delete(task_id):
+    """删除队列中的任务（仅从列表移除，不删输出文件）"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请选择当前项目'}), 400
+    tasks = _load_storyboard_queue(user_id, project_id)
+    tasks = [t for t in tasks if t.get('id') != task_id]
+    _save_storyboard_queue(user_id, project_id, tasks)
+    return jsonify({'success': True, 'tasks': tasks})
+
+
+@app.route('/api/storyboard-queue/process-one', methods=['POST'])
+@login_required
+def api_storyboard_queue_process_one():
+    """处理队列中第一个等待中的任务：生成分镜并写入 output 目录"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请选择当前项目'}), 400
+    tasks = _load_storyboard_queue(user_id, project_id)
+    pending = [t for t in tasks if t.get('status') == 'pending']
+    if not pending:
+        return jsonify({'success': True, 'processed': False, 'tasks': tasks, 'message': '暂无等待中的任务'})
+    task = pending[0]
+    task_id = task.get('id')
+    task['status'] = 'running'
+    task['started_at'] = datetime.now().isoformat()
+    _save_storyboard_queue(user_id, project_id, tasks)
+    script = (task.get('script') or '').strip()
+    if not script:
+        task['status'] = 'failed'
+        task['completed_at'] = datetime.now().isoformat()
+        task['error'] = '文件内容为空'
+        _save_storyboard_queue(user_id, project_id, tasks)
+        return jsonify({'success': True, 'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
+    try:
+        markdown_part, csv_part = _run_storyboard_generate_both(script, task.get('prompt_file') or 'storyboard.md')
+    except Exception as e:
+        task['status'] = 'failed'
+        task['completed_at'] = datetime.now().isoformat()
+        task['error'] = str(e)
+        _save_storyboard_queue(user_id, project_id, tasks)
+        return jsonify({'success': True, 'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
+    out_dir = get_user_output_folder(user_id, project_id)
+    base = Path(task.get('filename', 'script')).stem
+    safe_base = "".join(c for c in base if c.isalnum() or c in (' ', '-', '_'))[:80].strip() or 'storyboard'
+    md_name = f"{safe_base}.md"
+    csv_name = f"{safe_base}.csv"
+    md_path = os.path.join(out_dir, md_name)
+    csv_path = os.path.join(out_dir, csv_name)
+    try:
+        with open(md_path, 'w', encoding='utf-8') as f:
+            f.write(markdown_part)
+        with open(csv_path, 'w', encoding='utf-8-sig') as f:
+            f.write(csv_part)
+    except Exception as e:
+        task['status'] = 'failed'
+        task['completed_at'] = datetime.now().isoformat()
+        task['error'] = f'写入文件失败: {e}'
+        _save_storyboard_queue(user_id, project_id, tasks)
+        return jsonify({'success': True, 'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
+    task['status'] = 'completed'
+    task['completed_at'] = datetime.now().isoformat()
+    task['output_md'] = md_name
+    task['output_csv'] = csv_name
+    task['markdown_preview'] = markdown_part[:2000] if markdown_part else ''
+    lines = csv_part.strip().split('\n')[:11]
+    task['csv_preview'] = '\n'.join(lines)
+    task['error'] = None
+    if 'script' in task:
+        del task['script']
+    _save_storyboard_queue(user_id, project_id, tasks)
+    return jsonify({'success': True, 'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
 
 
 def _generate_storyboard_content(script, prompt):

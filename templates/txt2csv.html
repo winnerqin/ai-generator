@@ -35,11 +35,11 @@
         .btn-export:disabled { opacity: 0.5; cursor: not-allowed; }
         .storyboard-md-wrap { min-height: 120px; padding: 12px; border-radius: 10px; border: 1px solid rgba(86,111,255,0.3); background: rgba(11,15,26,0.6); color: #e6ebff; font-size: 0.9rem; line-height: 1.6; }
         .storyboard-md-wrap h1,.storyboard-md-wrap h2,.storyboard-md-wrap h3 { margin-top: 1em; margin-bottom: 0.5em; color: #b8c8ff; }
-        .storyboard-md-wrap table { border-collapse: collapse; width: 100%; margin: 8px 0; }
-        .storyboard-md-wrap th, .storyboard-md-wrap td { border: 1px solid rgba(86,111,255,0.35); padding: 6px 10px; text-align: left; }
-        .storyboard-md-wrap th { background: rgba(86,111,255,0.2); }
         .storyboard-md-wrap p { margin: 0.5em 0; }
         .storyboard-md-wrap ul { margin: 0.5em 0; padding-left: 1.5em; }
+        .storyboard-md-wrap table { display: block; margin: 8px 0; }
+        .storyboard-md-wrap th, .storyboard-md-wrap td { display: block; border: none; padding: 4px 0; border-bottom: 1px solid rgba(86,111,255,0.2); }
+        .storyboard-md-wrap th { background: transparent; color: #b8c8ff; }
         #promptEditorContainer .toastui-editor-defaultUI { border-radius: 10px; overflow: hidden; }
         #promptEditorContainer .toastui-editor-defaultUI-toolbar { background: #f0f2f5; border-color: #ddd; }
         #promptEditorContainer .toastui-editor-md-container,
@@ -52,12 +52,32 @@
         #promptEditorContainer .toastui-editor-md-editor .CodeMirror-cursor { border-left-color: #333; }
         #promptEditorContainer .CodeMirror { background: #fff !important; color: #333 !important; }
         #promptEditorContainer .CodeMirror-line { color: #333; }
+        .prompt-editor-resize-wrap { resize: vertical; overflow: hidden; min-height: 320px; height: 400px; border: 1px solid rgba(86,111,255,0.3); border-radius: 10px; }
+        .prompt-editor-resize-wrap .prompt-editor-inner { height: 100%; min-height: 300px; }
+        .storyboard-with-queue { display: flex; gap: 20px; align-items: flex-start; }
+        .storyboard-main { flex: 1; min-width: 0; }
+        .storyboard-queue-panel { width: 380px; flex-shrink: 0; border-radius: 12px; border: 1px solid rgba(86,111,255,0.3); background: rgba(11,15,26,0.7); padding: 12px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; }
+        .storyboard-queue-panel h3 { margin: 0 0 10px 0; font-size: 1rem; }
+        .storyboard-queue-list { flex: 1; overflow-y: auto; }
+        .storyboard-queue-item { border: 1px solid rgba(86,111,255,0.2); border-radius: 8px; padding: 10px; margin-bottom: 8px; font-size: 0.8rem; }
+        .storyboard-queue-item .row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+        .storyboard-queue-item .status { font-weight: 600; }
+        .storyboard-queue-item .status.pending { color: #9aa; }
+        .storyboard-queue-item .status.running { color: #7eb8ff; }
+        .storyboard-queue-item .status.completed { color: #7ed49c; }
+        .storyboard-queue-item .status.failed { color: #ff9aa2; }
+        .storyboard-queue-preview { max-height: 120px; overflow-y: auto; margin-top: 6px; font-size: 0.75rem; color: #9aa; white-space: pre-wrap; word-break: break-all; }
+        .storyboard-queue-preview.md { margin-top: 4px; }
+        .storyboard-queue-preview.md div { line-height: 1.4; }
+        .storyboard-queue-table-wrap { max-height: 100px; overflow: auto; margin-top: 4px; }
+        .storyboard-queue-table-wrap table { width: 100%; border-collapse: collapse; font-size: 0.7rem; }
+        .storyboard-queue-table-wrap th, .storyboard-queue-table-wrap td { border: 1px solid rgba(86,111,255,0.2); padding: 2px 4px; }
     </style>
 </head>
 <body>
     <div id="reactApp"></div>
     <script>
-        window.__APP_CONTEXT__ = { username: "{{ user.username }}" };
+        window.__APP_CONTEXT__ = { username: "{{ user.username }}", user_id: "{{ user.id or '' }}" };
     </script>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -162,7 +182,16 @@
             const [storyboardCsv, setStoryboardCsv] = useState('');
             const [storyboardTableData, setStoryboardTableData] = useState({ headers: [], rows: [] });
             const [storyboardLoading, setStoryboardLoading] = useState(false);
+            const [storyboardCsvLoading, setStoryboardCsvLoading] = useState(false);
             const [storyboardError, setStoryboardError] = useState('');
+            const [storyboardMdView, setStoryboardMdView] = useState('preview'); // 'edit' | 'preview'
+            const [storyboardPromptFiles, setStoryboardPromptFiles] = useState([]);
+            const [storyboardPromptFile, setStoryboardPromptFile] = useState('storyboard.md');
+            const [queueTasks, setQueueTasks] = useState([]);
+            const [queueLoading, setQueueLoading] = useState(false);
+            const [queueProcessing, setQueueProcessing] = useState(false);
+            const [queueSelectedFileNames, setQueueSelectedFileNames] = useState([]);
+            const storyboardFileInputRef = useRef(null);
             const [promptFiles, setPromptFiles] = useState([]);
             const [promptCurrentFile, setPromptCurrentFile] = useState('');
             const [promptContent, setPromptContent] = useState('');
@@ -171,6 +200,7 @@
             const [promptError, setPromptError] = useState('');
             const promptEditorRef = useRef(null);
             const promptEditorContainerRef = useRef(null);
+            const promptPasteHandlerRef = useRef(null);
 
             useEffect(() => {
                 document.body.classList.add('react-theme', 'sidebar-compact');
@@ -195,7 +225,21 @@
                         if (d.success) setPromptFiles(d.files || []);
                     });
                 }
+                if (activeTab === 'storyboard') {
+                    fetch('/api/config-prompts').then(r => r.json()).then(d => {
+                        if (d.success) setStoryboardPromptFiles(d.files || []);
+                    });
+                    fetch('/api/storyboard-queue').then(r => r.json()).then(d => {
+                        if (d.success) setQueueTasks(d.tasks || []);
+                    });
+                }
             }, [activeTab]);
+
+            const fetchStoryboardQueue = () => {
+                fetch('/api/storyboard-queue').then(r => r.json()).then(d => {
+                    if (d.success) setQueueTasks(d.tasks || []);
+                });
+            };
 
             useEffect(() => {
                 if (activeTab !== 'prompts') {
@@ -217,17 +261,38 @@
                     try {
                         const ed = new EditorClass({
                             el,
-                            height: '320px',
+                            height: '100%',
                             initialEditType: 'wysiwyg',
                             initialValue: promptContent,
                             previewStyle: 'vertical',
                             hideModeSwitch: false
                         });
                         promptEditorRef.current = ed;
+                        const markedFn = typeof marked !== 'undefined' ? marked : (window && window.marked);
+                        const looksLikeMarkdown = (text) => /#+\s|\*\*[^*]+\*\*|^\s*[-*+]\s|^\s*\d+\.\s|\[.+\]\(.+\)|^>\s|^```|`[^`]+`/.test(text.trim());
+                        promptPasteHandlerRef.current = function(ev) {
+                            if (!ev.clipboardData || !el.contains(ev.target)) return;
+                            const text = ev.clipboardData.getData('text/plain');
+                            if (!text || !text.trim()) return;
+                            if (!looksLikeMarkdown(text)) return;
+                            if (!markedFn) return;
+                            try {
+                                if (markedFn.setOptions) markedFn.setOptions({ gfm: true, breaks: true });
+                                const html = (markedFn.parse || markedFn)(text);
+                                ev.preventDefault();
+                                ev.stopPropagation();
+                                document.execCommand('insertHTML', false, html);
+                            } catch (_) {}
+                        };
+                        el.addEventListener('paste', promptPasteHandlerRef.current, true);
                     } catch (e) { console.warn('Toast UI Editor init', e); }
                 }, 100);
                 return () => {
                     clearTimeout(timer);
+                    if (promptPasteHandlerRef.current && el) {
+                        el.removeEventListener('paste', promptPasteHandlerRef.current, true);
+                        promptPasteHandlerRef.current = null;
+                    }
                     if (promptEditorRef.current) {
                         try {
                             const md = promptEditorRef.current.getMarkdown();
@@ -390,7 +455,7 @@
                 }
             };
 
-            const handleStoryboardGenerate = async () => {
+            const handleStoryboardGenerateMarkdown = async () => {
                 const text = (storyboardInput || '').trim();
                 if (!text) {
                     setStoryboardError('请输入剧本内容');
@@ -405,17 +470,101 @@
                     const res = await fetch('/api/storyboard-from-script', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text })
+                        body: JSON.stringify({ text, prompt_file: storyboardPromptFile || 'storyboard.md', output: 'markdown' })
                     });
                     const data = await res.json();
                     if (!data.success) throw new Error(data.error || '生成失败');
                     setStoryboardMarkdown(data.markdown || '');
+                    setStoryboardMdView('preview');
+                } catch (e) {
+                    setStoryboardError(e.message || '请求失败');
+                } finally {
+                    setStoryboardLoading(false);
+                }
+            };
+
+            const handleQueueUpload = () => {
+                const input = storyboardFileInputRef.current;
+                if (!input || !input.files || !input.files.length) {
+                    setStoryboardError('请选择至少一个剧本文件');
+                    return;
+                }
+                setStoryboardError('');
+                setQueueLoading(true);
+                const form = new FormData();
+                form.append('prompt_file', storyboardPromptFile || 'storyboard.md');
+                for (let i = 0; i < input.files.length; i++) form.append('files[]', input.files[i]);
+                fetch('/api/storyboard-queue/upload', { method: 'POST', body: form })
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d.success) {
+                            setQueueTasks(d.tasks || []);
+                            input.value = '';
+                            setQueueSelectedFileNames([]);
+                        } else setStoryboardError(d.error || '上传失败');
+                    })
+                    .finally(() => setQueueLoading(false));
+            };
+
+            const handleProcessQueue = async () => {
+                setQueueProcessing(true);
+                setStoryboardError('');
+                try {
+                    while (true) {
+                        const res = await fetch('/api/storyboard-queue/process-one', { method: 'POST' });
+                        const d = await res.json();
+                        if (!d.success) {
+                            setStoryboardError(d.error || '处理失败');
+                            break;
+                        }
+                        if (d.tasks) setQueueTasks(d.tasks);
+                        if (!d.processed) break;
+                    }
+                } finally {
+                    setQueueProcessing(false);
+                }
+            };
+
+            const handleDeleteQueueTask = (taskId) => {
+                if (!confirm('确定删除该任务？')) return;
+                fetch('/api/storyboard-queue/' + taskId, { method: 'DELETE' })
+                    .then(r => r.json())
+                    .then(d => { if (d.success) setQueueTasks(d.tasks || []); });
+            };
+
+            const handleQueuePreviewTask = (task) => {
+                if (!task) return;
+                setStoryboardMarkdown(task.markdown_preview || '');
+                setStoryboardCsv(task.csv_preview || '');
+                setStoryboardTableData(csvToRows(task.csv_preview || ''));
+                setStoryboardMdView('preview');
+            };
+
+            const handleStoryboardGenerateCsv = async () => {
+                const text = (storyboardInput || '').trim();
+                const md = (storyboardMarkdown || '').trim();
+                if (!md) {
+                    setStoryboardError('请先生成分镜文本（Markdown）后再生成 CSV');
+                    return;
+                }
+                setStoryboardError('');
+                setStoryboardCsv('');
+                setStoryboardTableData({ headers: [], rows: [] });
+                setStoryboardCsvLoading(true);
+                try {
+                    const res = await fetch('/api/storyboard-from-script', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text, markdown: md, prompt_file: storyboardPromptFile || 'storyboard.md', output: 'csv' })
+                    });
+                    const data = await res.json();
+                    if (!data.success) throw new Error(data.error || '生成失败');
                     setStoryboardCsv(data.csv || '');
                     setStoryboardTableData(csvToRows(data.csv || ''));
                 } catch (e) {
                     setStoryboardError(e.message || '请求失败');
                 } finally {
-                    setStoryboardLoading(false);
+                    setStoryboardCsvLoading(false);
                 }
             };
 
@@ -550,13 +699,58 @@
                             )}
 
                             {activeTab === 'storyboard' && (
-                            <div className="panel">
+                            <div className="panel storyboard-with-queue">
+                                <div className="storyboard-main">
+                                <div className="txt2csv-row">
+                                    <div style={{ flex: 1 }}>
+                                        <label>批量生成（队列）</label>
+                                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                            <input
+                                                type="file"
+                                                ref={storyboardFileInputRef}
+                                                multiple
+                                                accept=".txt,.md,.json"
+                                                style={{ display: 'none' }}
+                                                onChange={(e) => {
+                                                    const files = e.target.files;
+                                                    setQueueSelectedFileNames(files && files.length ? Array.from(files).map(f => f.name) : []);
+                                                }}
+                                            />
+                                            <button type="button" className="btn-export" onClick={() => storyboardFileInputRef.current && storyboardFileInputRef.current.click()}>选择文件</button>
+                                            <span className="small-hint" style={{ color: '#9aa' }}>可多选 .txt / .md 剧本文件</span>
+                                            <button type="button" className="btn-convert" onClick={handleQueueUpload} disabled={queueLoading}>加入队列</button>
+                                            <button type="button" className="btn-convert" onClick={handleProcessQueue} disabled={queueProcessing || !queueTasks.some(t => t.status === 'pending')}>
+                                                {queueProcessing ? '处理中...' : '开始处理队列'}
+                                            </button>
+                                        </div>
+                                        {queueSelectedFileNames.length > 0 && (
+                                            <div className="small-hint" style={{ marginTop: 6, color: '#b8c8ff' }}>
+                                                已选文件：{queueSelectedFileNames.join('、')}
+                                            </div>
+                                        )}
+                                        <div className="small-hint" style={{ marginTop: 4, color: '#9aa' }}>生成后的 .md 与 .csv 保存在 output / 当前用户 / 当前项目 下</div>
+                                    </div>
+                                </div>
+                                <div className="txt2csv-row">
+                                    <div style={{ flex: 1 }}>
+                                        <label>提示词选择（config 目录下 .md）</label>
+                                        <select
+                                            value={storyboardPromptFile}
+                                            onChange={(e) => setStoryboardPromptFile(e.target.value)}
+                                            disabled={storyboardLoading}
+                                            style={{ minWidth: 220, padding: 8, borderRadius: 8, background: 'rgba(11,15,26,0.6)', color: '#e6ebff', border: '1px solid rgba(86,111,255,0.3)' }}
+                                        >
+                                            {[].concat('storyboard.md', storyboardPromptFiles).filter((f, i, a) => a.indexOf(f) === i).sort().map(f => <option key={f} value={f}>{f}</option>)}
+                                        </select>
+                                        <span className="small-hint" style={{ marginLeft: 8, color: '#9aa' }}>使用所选文件的格式要求进行生成</span>
+                                    </div>
+                                </div>
                                 <div className="txt2csv-row">
                                     <div style={{ flex: 1 }}>
                                         <label>输入剧本</label>
                                         <textarea
                                             className="txt2csv-input"
-                                            placeholder="在此粘贴或输入剧本内容，将按 config/storyboard.md 要求生成分镜 Markdown 与 CSV 表格..."
+                                            placeholder="在此粘贴或输入剧本内容；先点击「第一步：生成分镜文本」，可编辑与预览后再点击「生成 CSV 表格」"
                                             value={storyboardInput}
                                             onChange={(e) => setStoryboardInput(e.target.value)}
                                             disabled={storyboardLoading}
@@ -564,27 +758,47 @@
                                     </div>
                                 </div>
                                 <div className="txt2csv-row" style={{ alignItems: 'flex-end' }}>
-                                    <button className="btn-convert" onClick={handleStoryboardGenerate} disabled={storyboardLoading}>
-                                        {storyboardLoading ? '生成中...' : '生成分镜'}
+                                    <button className="btn-convert" onClick={handleStoryboardGenerateMarkdown} disabled={storyboardLoading}>
+                                        {storyboardLoading ? '生成中...' : '第一步：生成分镜文本'}
                                     </button>
                                 </div>
                                 {storyboardError && <div className="small-hint" style={{ color: '#ff9aa2', marginTop: 8 }}>{storyboardError}</div>}
                                 <div className="txt2csv-row" style={{ marginTop: 16 }}>
                                     <div style={{ flex: 1 }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                                            <label style={{ marginBottom: 0 }}>分镜文本（Markdown）</label>
-                                            <button type="button" className="btn-export" disabled={!storyboardMarkdown.trim()} onClick={exportMarkdown}>导出为 .md</button>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 8 }}>
+                                            <label style={{ marginBottom: 0 }}>分镜文本（Markdown）— 可粘贴、可编辑、可预览，按 Markdown 格式展示（不渲染为表格）</label>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                <button type="button" className="btn-export" style={{ opacity: storyboardMarkdown ? 1 : 0.6 }} disabled={!storyboardMarkdown.trim()} onClick={() => setStoryboardMdView('edit')}>编辑</button>
+                                                <button type="button" className="btn-export" style={{ opacity: storyboardMarkdown ? 1 : 0.6 }} disabled={!storyboardMarkdown.trim()} onClick={() => setStoryboardMdView('preview')}>预览</button>
+                                                <button type="button" className="btn-export" disabled={!storyboardMarkdown.trim()} onClick={exportMarkdown}>导出为 .md</button>
+                                            </div>
                                         </div>
-                                        <div className="storyboard-md-wrap" style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                                            {storyboardMarkdown ? (
+                                        {storyboardMdView === 'edit' || !storyboardMarkdown ? (
+                                            <textarea
+                                                className="txt2csv-input"
+                                                value={storyboardMarkdown}
+                                                onChange={(e) => setStoryboardMarkdown(e.target.value)}
+                                                placeholder="可直接粘贴 Markdown 格式分镜内容，或点击「第一步：生成分镜文本」由剧本生成；然后点击「生成 CSV 表格」"
+                                                style={{ minHeight: 280, maxHeight: 420, resize: 'vertical', fontFamily: 'monospace', fontSize: '0.9rem' }}
+                                            />
+                                        ) : (
+                                            <div className="storyboard-md-wrap" style={{ maxHeight: '420px', overflowY: 'auto' }}>
                                                 <div dangerouslySetInnerHTML={{ __html: renderMarkdown(storyboardMarkdown) }} />
-                                            ) : (
-                                                <div className="small-hint">生成后将以 Markdown 格式显示分镜文本</div>
-                                            )}
-                                        </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="txt2csv-row" style={{ marginTop: 16 }}>
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 8 }}>
+                                            <label style={{ marginBottom: 0 }}>第二步：生成 CSV 表格</label>
+                                            <button className="btn-convert" onClick={handleStoryboardGenerateCsv} disabled={!storyboardMarkdown.trim() || storyboardCsvLoading}>
+                                                {storyboardCsvLoading ? '生成中...' : '生成 CSV 表格'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="txt2csv-row" style={{ marginTop: 8 }}>
                                     <div style={{ flex: 1 }}>
                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                                             <label style={{ marginBottom: 0 }}>分镜表格（CSV 预览）</label>
@@ -601,9 +815,45 @@
                                                     </tbody>
                                                 </table>
                                             ) : (
-                                                <div className="small-hint">生成后将在此以表格形式预览 CSV</div>
+                                                <div className="small-hint">在分镜文本生成或编辑后，点击「生成 CSV 表格」可在此预览并导出 CSV</div>
                                             )}
                                         </div>
+                                    </div>
+                                </div>
+                                </div>
+                                <div className="storyboard-queue-panel">
+                                    <h3>任务列表</h3>
+                                    <div className="storyboard-queue-list">
+                                        {queueTasks.length === 0 ? (
+                                            <div className="small-hint">选择文件并点击「加入队列」后，任务将显示在此</div>
+                                        ) : (
+                                            queueTasks.map(t => {
+                                                const startTime = t.started_at || t.created_at;
+                                                const statusLabel = { pending: '等待', running: '生成中', completed: '已完成', failed: '失败' }[t.status] || t.status;
+                                                const canPreview = t.status === 'completed' && (t.markdown_preview || t.csv_preview);
+                                                return (
+                                                    <div key={t.id} className="storyboard-queue-item">
+                                                        <div className="row"><span>任务ID</span><span>{t.id}</span></div>
+                                                        <div className="row"><span>状态</span><span className={'status ' + (t.status || '')}>{statusLabel}</span></div>
+                                                        <div className="row"><span>文件名</span><span>{t.filename || '-'}</span></div>
+                                                        <div className="row"><span>提示词文件</span><span>{t.prompt_file || 'storyboard.md'}</span></div>
+                                                        <div className="row"><span>开始时间</span><span>{startTime ? new Date(startTime).toLocaleString('zh-CN') : '-'}</span></div>
+                                                        <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                                            {canPreview && (
+                                                                <button type="button" className="btn-export" style={{ fontSize: '0.75rem', padding: 4 }} onClick={() => handleQueuePreviewTask(t)}>预览</button>
+                                                            )}
+                                                            {t.status === 'completed' && (t.output_md || t.output_csv) && window.__APP_CONTEXT__?.user_id && currentProjectId && (
+                                                                <>
+                                                                    {t.output_md && <a href={`/output/${window.__APP_CONTEXT__.user_id}/${currentProjectId}/${t.output_md}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.8rem' }}>下载 .md</a>}
+                                                                    {t.output_csv && <a href={`/output/${window.__APP_CONTEXT__.user_id}/${currentProjectId}/${t.output_csv}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.8rem' }}>下载 .csv</a>}
+                                                                </>
+                                                            )}
+                                                            <button type="button" className="btn-export" style={{ fontSize: '0.75rem', padding: 4 }} onClick={() => handleDeleteQueueTask(t.id)}>删除任务</button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -640,8 +890,10 @@
                                 </div>
                                 <div className="txt2csv-row">
                                     <div style={{ flex: 1 }}>
-                                        <label>内容（所见即所得编辑，可切换 Markdown / 预览）</label>
-                                        <div id="promptEditorContainer" ref={promptEditorContainerRef} style={{ minHeight: 320 }} />
+                                        <label>内容（所见即所得编辑，可切换 Markdown / 预览；右下角可拖动缩放；从 .md 复制的文本粘贴时自动识别格式）</label>
+                                        <div className="prompt-editor-resize-wrap">
+                                            <div className="prompt-editor-inner" id="promptEditorContainer" ref={promptEditorContainerRef} />
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="txt2csv-row" style={{ alignItems: 'center', gap: 12 }}>
