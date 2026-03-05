@@ -827,7 +827,11 @@
                                         {queueTasks.length === 0 ? (
                                             <div className="small-hint">选择文件并点击「加入队列」后，任务将显示在此</div>
                                         ) : (
-                                            queueTasks.map(t => {
+                                            [...queueTasks].sort((a, b) => {
+                                                const ta = a.started_at || a.created_at || '';
+                                                const tb = b.started_at || b.created_at || '';
+                                                return tb.localeCompare(ta);
+                                            }).map(t => {
                                                 const startTime = t.started_at || t.created_at;
                                                 const statusLabel = { pending: '等待', running: '生成中', completed: '已完成', failed: '失败' }[t.status] || t.status;
                                                 const canPreview = t.status === 'completed' && (t.markdown_preview || t.csv_preview);
