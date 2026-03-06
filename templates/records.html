@@ -22,7 +22,7 @@
             position: relative;
             cursor: pointer;
         }
-        .result-card img { width: 100%; height: 170px; object-fit: cover; display: block; }
+        .result-card img { width: 100%; height: 170px; object-fit: contain; display: block; background: rgba(0,0,0,0.12); }
         .result-card.selected::after {
             content: '✓'; position: absolute; top: 8px; right: 8px;
             width: 22px; height: 22px; border-radius: 50%;
@@ -61,9 +61,9 @@
         .records-table th { font-weight: 600; }
         .records-table tr:hover { background: rgba(86,111,255,0.06); }
         .records-table .thumb-cell { width: 72px; }
-        .records-table .thumb-cell img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; display: block; cursor: pointer; }
+        .records-table .thumb-cell img { width: 56px; height: 56px; object-fit: contain; border-radius: 8px; display: block; cursor: pointer; background: rgba(0,0,0,0.12); }
         .records-table .ref-thumbs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
-        .records-table .ref-thumbs img { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; vertical-align: middle; }
+        .records-table .ref-thumbs img { width: 28px; height: 28px; object-fit: contain; border-radius: 4px; vertical-align: middle; background: rgba(0,0,0,0.12); }
         .records-table .prompt-cell { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
 </head>
