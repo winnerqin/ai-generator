@@ -380,6 +380,34 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 os.makedirs('static', exist_ok=True)
 
+# /asset 静态资源目录（用于 favicon 等）
+ASSET_DIR_CANDIDATES = [
+    Path(__file__).parent / 'asset',
+    Path(__file__).parent.parent / 'asset',
+]
+
+def _get_asset_dir():
+    for d in ASSET_DIR_CANDIDATES:
+        try:
+            if d.exists() and d.is_dir():
+                return d
+        except Exception:
+            continue
+    return ASSET_DIR_CANDIDATES[0]
+
+@app.route('/asset/<path:filename>')
+def asset_file(filename):
+    """提供 /asset 下的静态资源"""
+    return send_from_directory(str(_get_asset_dir()), filename)
+
+
+@app.route('/favicon.ico')
+def favicon():
+    """网站标签栏图标，从项目根目录读取 favicon.ico"""
+    root = Path(__file__).parent
+    return send_from_directory(str(root), 'favicon.ico')
+
+
 # 初始化数据库
 database.init_database()
 
@@ -5777,10 +5805,6 @@ def output_file(user_id, filename):
         return '403 Forbidden', 403
     legacy_folder = os.path.join(app.config['OUTPUT_FOLDER'], str(user_id))
     return send_from_directory(legacy_folder, filename)
-
-@app.route('/favicon.ico')
-def favicon():
-    return '', 204  # 返回空响应，避免 404
 
 @app.route('/api/analyze-script', methods=['POST'])
 @login_required

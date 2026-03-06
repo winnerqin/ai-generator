@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>转换工具 - Ai创作工具</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
@@ -78,7 +79,7 @@
 <body>
     <div id="reactApp"></div>
     <script>
-        window.__APP_CONTEXT__ = { username: "{{ user.username }}", user_id: "{{ user.id or '' }}" };
+        window.__APP_CONTEXT__ = { username: "{{ user.username }}", user_id: "{{ user.id or '' }}", is_system_admin: {{ 'true' if user.username == 'system_admin' else 'false' }} };
     </script>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -105,6 +106,13 @@
                     <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
                     <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
                     <a href="/txt2csv" className="sidebar-nav-item active"><span className="sidebar-nav-icon">🔄</span><span className="sidebar-nav-text">转换工具</span></a>
+                    {window.__APP_CONTEXT__?.is_system_admin && (
+                        <>
+                            <div className="sidebar-nav-divider"></div>
+                            <a href="/admin" className="sidebar-nav-item"><span className="sidebar-nav-icon">🛠️</span><span className="sidebar-nav-text">系统管理</span></a>
+                            <a href="/stats" className="sidebar-nav-item"><span className="sidebar-nav-icon">📈</span><span className="sidebar-nav-text">系统统计</span></a>
+                        </>
+                    )}
                 </div>
                 <div className="sidebar-nav-user">
                     <div className="sidebar-nav-user-info">
