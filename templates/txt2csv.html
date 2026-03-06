@@ -24,7 +24,8 @@
         .txt2csv-output { font-family: ui-monospace, monospace; white-space: pre-wrap; }
         .txt2csv-table-wrap { overflow-x: auto; margin-top: 12px; }
         .txt2csv-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-        .txt2csv-table th, .txt2csv-table td { padding: 8px 10px; border: 1px solid rgba(86,111,255,0.25); text-align: left; }
+        .txt2csv-table th, .txt2csv-table td { padding: 8px 10px; border: 1px solid rgba(86,111,255,0.25); text-align: left; vertical-align: top; }
+        .txt2csv-table td { white-space: pre-wrap; }
         .txt2csv-table th { background: rgba(86,111,255,0.15); font-weight: 600; }
         .txt2csv-table tr:hover { background: rgba(86,111,255,0.06); }
         .btn-convert { padding: 10px 24px; border-radius: 10px; font-size: 1rem; font-weight: 600; cursor: pointer; border: none; background: linear-gradient(135deg, #7eb8ff 0%, #5a9cf5 100%); color: #fff; }
@@ -129,15 +130,18 @@
             </nav>
         );
 
-        function parseCSVLine(line) {
-            const out = [];
+        function csvToRows(csvText) {
+            if (!csvText || !csvText.trim()) return { headers: [], rows: [] };
+            const text = (csvText || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            const all = [];
+            let row = [];
             let field = '';
             let inQuoted = false;
-            for (let i = 0; i < line.length; i++) {
-                const c = line[i];
+            for (let i = 0; i < text.length; i++) {
+                const c = text[i];
                 if (inQuoted) {
                     if (c === '"') {
-                        if (line[i + 1] === '"') { field += '"'; i++; }
+                        if (text[i + 1] === '"') { field += '"'; i++; }
                         else inQuoted = false;
                     } else {
                         field += c;
@@ -146,23 +150,22 @@
                     if (c === '"') {
                         inQuoted = true;
                     } else if (c === ',') {
-                        out.push(field.trim());
+                        row.push(field);
                         field = '';
+                    } else if (c === '\n') {
+                        row.push(field);
+                        field = '';
+                        if (row.some(cell => (cell || '').length > 0)) all.push(row);
+                        row = [];
                     } else {
                         field += c;
                     }
                 }
             }
-            out.push(field.trim());
-            return out;
-        }
-
-        function csvToRows(csvText) {
-            if (!csvText || !csvText.trim()) return { headers: [], rows: [] };
-            const lines = csvText.trim().split(/\r?\n/).filter(l => l.length > 0);
-            if (lines.length === 0) return { headers: [], rows: [] };
-            const all = lines.map(line => parseCSVLine(line));
-            const headers = all[0];
+            row.push(field);
+            if (row.some(cell => (cell || '').length > 0)) all.push(row);
+            if (all.length === 0) return { headers: [], rows: [] };
+            const headers = (all[0] || []).map(h => (h || '').trim());
             const rows = all.slice(1);
             return { headers, rows };
         }
@@ -532,12 +535,42 @@
                     .then(d => { if (d.success) setQueueTasks(d.tasks || []); });
             };
 
-            const handleQueuePreviewTask = (task) => {
+            const handleQueuePreviewTask = async (task) => {
                 if (!task) return;
-                setStoryboardMarkdown(task.markdown_preview || '');
-                setStoryboardCsv(task.csv_preview || '');
-                setStoryboardTableData(csvToRows(task.csv_preview || ''));
-                setStoryboardMdView('preview');
+                setStoryboardError('');
+                try {
+                    const uid = window.__APP_CONTEXT__?.user_id;
+                    const pid = currentProjectId;
+                    if (uid && pid && (task.output_md || task.output_csv)) {
+                        if (task.output_md) {
+                            const mdRes = await fetch(`/output/${uid}/${pid}/${task.output_md}`);
+                            const mdText = await mdRes.text();
+                            setStoryboardMarkdown(mdText || '');
+                        } else {
+                            setStoryboardMarkdown(task.markdown_preview || '');
+                        }
+                        if (task.output_csv) {
+                            const csvRes = await fetch(`/output/${uid}/${pid}/${task.output_csv}`);
+                            const csvText = await csvRes.text();
+                            setStoryboardCsv(csvText || '');
+                            setStoryboardTableData(csvToRows(csvText || ''));
+                        } else {
+                            setStoryboardCsv(task.csv_preview || '');
+                            setStoryboardTableData(csvToRows(task.csv_preview || ''));
+                        }
+                    } else {
+                        setStoryboardMarkdown(task.markdown_preview || '');
+                        setStoryboardCsv(task.csv_preview || '');
+                        setStoryboardTableData(csvToRows(task.csv_preview || ''));
+                    }
+                    setStoryboardMdView('preview');
+                } catch (e) {
+                    setStoryboardError('预览加载失败');
+                    setStoryboardMarkdown(task.markdown_preview || '');
+                    setStoryboardCsv(task.csv_preview || '');
+                    setStoryboardTableData(csvToRows(task.csv_preview || ''));
+                    setStoryboardMdView('preview');
+                }
             };
 
             const handleStoryboardGenerateCsv = async () => {

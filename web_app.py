@@ -1063,6 +1063,57 @@ def _load_config_md(filename):
         return None
 
 
+def _csv_normalize_storyboard_description_newlines(csv_text):
+    """
+    将分镜 CSV 中“描述”列里的 <br> 转为真实换行符，并通过标准 CSV 解析/重写保证结构不乱。
+    说明：
+    - 真实换行会出现在单元格内，必须由 CSV writer 自动加引号才能不打断行。
+    - 若输入 CSV 本身不合法（引号不闭合等），为避免“错乱”，将原样返回。
+    """
+    if not csv_text:
+        return csv_text
+    try:
+        import csv
+        import io
+
+        src = io.StringIO(csv_text, newline='')
+        reader = csv.reader(src)
+        rows = list(reader)
+        if not rows:
+            return csv_text
+
+        header = rows[0] or []
+        desc_idx = -1
+        for i, h in enumerate(header):
+            h2 = (h or '').strip()
+            if h2 == '描述' or h2.startswith('描述'):
+                desc_idx = i
+                break
+        if desc_idx < 0:
+            return csv_text
+
+        def br_to_nl(s):
+            if not s:
+                return s
+            return (s.replace('<br/>', '\n')
+                     .replace('<br />', '\n')
+                     .replace('<br>', '\n')
+                     .replace('<BR/>', '\n')
+                     .replace('<BR />', '\n')
+                     .replace('<BR>', '\n'))
+
+        for r in rows[1:]:
+            if desc_idx < len(r):
+                r[desc_idx] = br_to_nl(r[desc_idx])
+
+        out = io.StringIO(newline='')
+        writer = csv.writer(out, lineterminator='\n')
+        writer.writerows(rows)
+        return out.getvalue().strip()
+    except Exception:
+        return csv_text
+
+
 def _csv_ensure_halfwidth_punctuation(s):
     """将 CSV 文本中的全角标点替换为英文半角，确保逗号等不影响 CSV 解析。maketrans 的键和值都必须为单字符。"""
     if not s:
@@ -1192,7 +1243,7 @@ def api_storyboard_from_script():
             "表头：分镜号,中文台词,说话人,情绪,描述,场景/时间。"
             "【列含义】说话人：仅填角色名/称呼（2～6 字简短名词，如：小明、小红、旁白、咖啡师），绝不能填一句完整台词；中文台词：该角色说出的完整台词内容，必须填在「中文台词」列。若把台词误填到说话人列会导致整表错位。"
             "每个单元格若内容中包含逗号或双引号，必须用双引号包裹整个单元格；单元格内的双引号写成两个连续双引号 \"\"。"
-            "描述列内容通常较长且含逗号，请务必用双引号包裹该列每个单元格。CSV 每行一条记录，单元格内不要换行，可用空格或<br>代替。"
+            "描述列内容通常较长且含逗号，请务必用双引号包裹该列每个单元格。描述列内如需换行，请使用直接换行符（真实换行），不要使用<br>；用双引号包裹后 CSV 允许单元格内换行。其他列单元格内不要换行。"
         )
 
         if output_mode == 'markdown':
@@ -1238,6 +1289,7 @@ def api_storyboard_from_script():
             return jsonify({'success': True, 'markdown': content})
         if output_mode == 'csv':
             csv_part = _csv_ensure_halfwidth_punctuation(content)
+            csv_part = _csv_normalize_storyboard_description_newlines(csv_part)
             return jsonify({'success': True, 'csv': csv_part})
 
         if STORYBOARD_CSV_DELIMITER in content:
@@ -1255,6 +1307,7 @@ def api_storyboard_from_script():
                     break
 
         csv_part = _csv_ensure_halfwidth_punctuation(csv_part)
+        csv_part = _csv_normalize_storyboard_description_newlines(csv_part)
         return jsonify({
             'success': True,
             'markdown': markdown_part,
@@ -1276,7 +1329,7 @@ def _run_storyboard_generate_both(script, prompt_file):
         "表头：分镜号,中文台词,说话人,情绪,描述,场景/时间。"
         "【列含义】说话人：仅填角色名/称呼（2～6 字简短名词，如：小明、小红、旁白、咖啡师），绝不能填一句完整台词；中文台词：该角色说出的完整台词内容，必须填在「中文台词」列。若把台词误填到说话人列会导致整表错位。"
         "每个单元格若内容中包含逗号或双引号，必须用双引号包裹整个单元格；单元格内的双引号写成两个连续双引号 \"\"。"
-        "描述列内容通常较长且含逗号，请务必用双引号包裹该列每个单元格。CSV 每行一条记录，单元格内不要换行，可用空格或<br>代替。"
+        "描述列内容通常较长且含逗号，请务必用双引号包裹该列每个单元格。描述列内如需换行，请使用直接换行符（真实换行），不要使用<br>；用双引号包裹后 CSV 允许单元格内换行。其他列单元格内不要换行。"
     )
     system_prompt = (
         format_md
@@ -1315,6 +1368,7 @@ def _run_storyboard_generate_both(script, prompt_file):
                 csv_part = (parts[1].strip() if len(parts) > 1 else '')
                 break
     csv_part = _csv_ensure_halfwidth_punctuation(csv_part)
+    csv_part = _csv_normalize_storyboard_description_newlines(csv_part)
     return markdown_part, csv_part
 
 
@@ -1468,8 +1522,7 @@ def api_storyboard_queue_process_one():
     task['output_md'] = md_name
     task['output_csv'] = csv_name
     task['markdown_preview'] = markdown_part[:2000] if markdown_part else ''
-    lines = csv_part.strip().split('\n')[:11]
-    task['csv_preview'] = '\n'.join(lines)
+    task['csv_preview'] = csv_part[:5000] if csv_part else ''
     task['error'] = None
     if 'script' in task:
         del task['script']
