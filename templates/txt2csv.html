@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>转换工具 - Ai创作工具</title>
+    <title>工具 - Ai创作工具</title>
     <link rel="stylesheet" href="/static/styles.css">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
@@ -105,7 +105,7 @@
                     <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
                     <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
                     <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
-                    <a href="/txt2csv" className="sidebar-nav-item active"><span className="sidebar-nav-icon">🔄</span><span className="sidebar-nav-text">转换工具</span></a>
+                    <a href="/txt2csv" className="sidebar-nav-item active"><span className="sidebar-nav-icon">🔄</span><span className="sidebar-nav-text">工具</span></a>
                     {window.__APP_CONTEXT__?.is_system_admin && (
                         <>
                             <div className="sidebar-nav-divider"></div>
@@ -664,7 +664,7 @@
                     />
                     <div className="main-content">
                         <div className="page-wrap">
-                            <div className="page-title">🔄 转换工具</div>
+                            <div className="page-title">🔄 工具</div>
                             <div className="txt2csv-tabs">
                                 <button className={`txt2csv-tab ${activeTab === 'txt2csv' ? 'active' : ''}`} onClick={() => setActiveTab('txt2csv')}>文本转 CSV</button>
                                 <button className={`txt2csv-tab ${activeTab === 'storyboard' ? 'active' : ''}`} onClick={() => setActiveTab('storyboard')}>生成分镜</button>
