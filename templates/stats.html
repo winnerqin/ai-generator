@@ -3,488 +3,272 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>系统统计 - AI图片生成器</title>
-    <script src="/static/state-manager.js"></script>
+    <title>系统统计 - Ai创作工具</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
-            background: #f5f7fb;
-            min-height: 100vh;
-            padding: 0;
-        }
-        
-        .nav-bar {
-            background: white;
-            padding: 15px 30px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            display: flex;
-            gap: 20px;
-            align-items: center;
-        }
-        
-        .nav-bar a {
-            color: #667eea;
-            text-decoration: none;
-            padding: 8px 16px;
-            border-radius: 6px;
-            transition: all 0.3s;
-            font-weight: 500;
-        }
-        
-        .nav-bar a:hover {
-            background: #667eea;
-            color: white;
-        }
-        
-        .nav-bar a.active {
-            background: #667eea;
-            color: white;
-        }
-        
-        .user-info {
-            margin-left: auto;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            color: #666;
-            font-weight: 500;
-        }
-        
-        .user-info .username {
-            color: #667eea;
-            font-weight: 600;
-        }
-        
-        .logout-btn {
-            background: #dc3545;
-            color: white !important;
-            padding: 6px 14px !important;
-            font-size: 0.9em;
-        }
-        
-        .logout-btn:hover {
-            background: #c82333 !important;
-        }
-        
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            overflow: hidden;
-        }
-        
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            padding: 20px;
-        }
-        
-        .stat-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 25px;
-            border-radius: 15px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-        }
-        
-        .stat-card h3 {
-            font-size: 0.9em;
-            opacity: 0.9;
-            margin-bottom: 10px;
-        }
-        
-        .stat-card .value {
-            font-size: 2.5em;
-            font-weight: bold;
-        }
-        
-        .content {
-            padding: 30px;
-        }
-        
-        .section {
-            margin-bottom: 40px;
-        }
-        
-        .section h2 {
-            color: #333;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #667eea;
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background: white;
-        }
-        
-        table th {
-            background: #f8f9fa;
-            padding: 15px;
-            text-align: left;
-            font-weight: 600;
-            color: #333;
-            border-bottom: 2px solid #dee2e6;
-        }
-        
-        table td {
-            padding: 15px;
-            border-bottom: 1px solid #dee2e6;
-        }
-        
-        table tr:hover {
-            background: #f8f9fa;
-        }
-        
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #666;
-        }
-        
-        .chart-container {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        
-        .date-filter {
-            display: flex;
-            gap: 15px;
-            align-items: center;
-            margin-bottom: 20px;
-            padding: 15px;
-            background: #f8f9fa;
-            border-radius: 10px;
-        }
-        
-        .date-filter label {
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .date-filter input {
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            font-size: 14px;
-        }
-        
-        .date-filter button {
-            padding: 8px 20px;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: 600;
-        }
-        
-        .date-filter button:hover {
-            background: #5568d3;
-        }
+        .app-shell { display: flex; min-height: 100vh; }
+        .main-content { padding: 0; flex: 1; min-width: 0; }
+        .page-wrap { padding: 20px 24px 36px; }
+        .page-title { font-size: 1.4rem; font-weight: 600; margin-bottom: 16px; }
+        .panel { border-radius: 16px; padding: 16px; margin-bottom: 16px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+        .stat-card { background: linear-gradient(135deg, rgba(126,184,255,0.18) 0%, rgba(90,156,245,0.08) 100%); border: 1px solid rgba(86,111,255,0.3); border-radius: 14px; padding: 14px; }
+        .stat-card .label { font-size: 0.85rem; color: #c8d2ff; opacity: 0.9; }
+        .stat-card .value { margin-top: 8px; font-size: 1.8rem; font-weight: 800; color: #fff; }
+        .filter-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .filter-row label { font-weight: 600; font-size: 0.9rem; }
+        .filter-input { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(86,111,255,0.3); background: rgba(11,15,26,0.6); color: #e6ebff; font-size: 0.9rem; }
+        .table-wrap { overflow-x: auto; margin-top: 10px; }
+        .tbl { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .tbl th, .tbl td { padding: 8px 10px; border: 1px solid rgba(86,111,255,0.25); text-align: left; vertical-align: top; }
+        .tbl th { background: rgba(86,111,255,0.15); font-weight: 600; }
     </style>
 </head>
-<body class="sidebar-compact">
+<body>
     <div id="reactApp"></div>
-    <nav class="sidebar-nav" id="sidebarNav">
-        <div class="sidebar-nav-header">
-            <div class="sidebar-nav-title">Ai创作工具</div>
-            <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收缩/展开">
-                <span id="toggleIcon">‹</span>
-            </button>
-        </div>
-        <div class="sidebar-nav-menu">
-            <a href="/" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🎨</span>
-                <span class="sidebar-nav-text">单图生成</span>
-            </a>
-            <a href="/batch" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📦</span>
-                <span class="sidebar-nav-text">批量生成</span>
-            </a>
-            <a href="/records" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📊</span>
-                <span class="sidebar-nav-text">生图任务</span>
-            </a>
-            <a href="/video-generate" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🎬</span>
-                <span class="sidebar-nav-text">视频生成</span>
-            </a>
-            <a href="/video-tasks" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📹</span>
-                <span class="sidebar-nav-text">视频任务</span>
-            </a>
-            <a href="/script-generate" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📜</span>
-                <span class="sidebar-nav-text">剧本生成</span>
-            </a>
-            <a href="/storyboard-studio" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🧩</span>
-                <span class="sidebar-nav-text">分镜制作</span>
-            </a>
-            <a href="/txt2csv" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📋</span>
-                <span class="sidebar-nav-text">转换工具</span>
-            </a>
-            <a href="/content-management" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📚</span>
-                <span class="sidebar-nav-text">内容管理</span>
-            </a>
-            <div class="sidebar-nav-divider"></div>
-            <a href="/admin" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🛠️</span>
-                <span class="sidebar-nav-text">系统管理</span>
-            </a>
-            <a href="/stats" class="sidebar-nav-item active">
-                <span class="sidebar-nav-icon">📈</span>
-                <span class="sidebar-nav-text">系统统计</span>
-            </a>
-        </div>
-        <div class="sidebar-nav-user">
-            <div class="sidebar-nav-user-info">
-                <div class="sidebar-nav-user-avatar">👤</div>
-                <div class="sidebar-nav-user-name">{{ user.username }}</div>
-                <a href="/logout" class="sidebar-nav-logout">登出</a>
-            </div>
-            <div style="margin-top: 8px;">
-                <label style="font-size: 0.85em; color: #666;">当前项目</label>
-                <select id="projectSelect" style="width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #ddd;">
-                    <option>加载中...</option>
-                </select>
-            </div>
-        </div>
-    </nav>
-    
-    <div class="main-content">
-        <div class="container">
-        <div class="content" style="padding-top: 20px;">
-            <div class="stats-grid">
-            <div class="stat-card">
-                <h3>总用户数</h3>
-                <div class="value" id="totalUsers">-</div>
-            </div>
-            <div class="stat-card">
-                <h3>总生成图片</h3>
-                <div class="value" id="totalImages">-</div>
-            </div>
-            <div class="stat-card">
-                <h3>今日生成</h3>
-                <div class="value" id="todayImages">-</div>
-            </div>
-            <div class="stat-card">
-                <h3>本周生成</h3>
-                <div class="value" id="weekImages">-</div>
-            </div>
-            </div>
-        
-            <div class="date-filter">
-                <label>筛选日期：</label>
-                <input type="date" id="startDate">
-                <span>至</span>
-                <input type="date" id="endDate">
-                <button onclick="loadStats()">🔍 查询</button>
-                <button onclick="resetDates()">🔄 重置</button>
-            </div>
-            
-            <div class="section">
-                <h2>📊 用户生成统计</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>用户ID</th>
-                            <th>用户名</th>
-                            <th>总生成数</th>
-                            <th>今日生成</th>
-                            <th>本周生成</th>
-                            <th>最后生成时间</th>
-                        </tr>
-                    </thead>
-                    <tbody id="userStatsTable">
-                        <tr>
-                            <td colspan="6" class="loading">加载中...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            
-            <div class="section">
-                <h2>📅 每日生成统计（最近7天）</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>日期</th>
-                            <th>生成数量</th>
-                            <th>参与用户数</th>
-                        </tr>
-                    </thead>
-                    <tbody id="dailyStatsTable">
-                        <tr>
-                            <td colspan="3" class="loading">加载中...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        </div>
-    </div>
-    
     <script>
-        // 页面加载时初始化日期
-        window.onload = function() {
-            // 设置默认日期范围（最近7天）
-            const today = new Date();
-            const weekAgo = new Date(today);
-            weekAgo.setDate(weekAgo.getDate() - 7);
-            
-            document.getElementById('endDate').valueAsDate = today;
-            document.getElementById('startDate').valueAsDate = weekAgo;
-            
-            loadStats();
-        };
-        
-        function resetDates() {
-            const today = new Date();
-            const weekAgo = new Date(today);
-            weekAgo.setDate(weekAgo.getDate() - 7);
-            
-            document.getElementById('endDate').valueAsDate = today;
-            document.getElementById('startDate').valueAsDate = weekAgo;
-            
-            loadStats();
-        }
-        
-        async function loadStats() {
-            try {
-                const startDate = document.getElementById('startDate').value;
-                const endDate = document.getElementById('endDate').value;
-                
-                const params = new URLSearchParams();
-                if (startDate) params.append('start_date', startDate);
-                if (endDate) params.append('end_date', endDate);
-                
-                const response = await fetch(`/api/stats?${params}`);
-                const data = await response.json();
-                
-                if (data.success) {
-                    // 更新统计卡片
-                    document.getElementById('totalUsers').textContent = data.total_users;
-                    document.getElementById('totalImages').textContent = data.total_images;
-                    document.getElementById('todayImages').textContent = data.today_images;
-                    document.getElementById('weekImages').textContent = data.week_images;
-                    
-                    // 更新用户统计表格
-                    renderUserStats(data.user_stats);
-                    
-                    // 更新每日统计表格
-                    renderDailyStats(data.daily_stats);
-                } else {
-                    alert('加载统计数据失败: ' + data.error);
-                }
-            } catch (error) {
-                console.error('加载统计数据失败:', error);
-                alert('加载统计数据失败: ' + error.message);
-            }
-        }
-        
-        function renderUserStats(stats) {
-            const tbody = document.getElementById('userStatsTable');
-            
-            if (stats.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">暂无数据</td></tr>';
-                return;
-            }
-            
-            tbody.innerHTML = stats.map(stat => `
-                <tr>
-                    <td>${stat.user_id}</td>
-                    <td><strong>${stat.username}</strong></td>
-                    <td>${stat.total_count}</td>
-                    <td>${stat.today_count}</td>
-                    <td>${stat.week_count}</td>
-                    <td>${stat.last_generated || '从未生成'}</td>
-                </tr>
-            `).join('');
-        }
-        
-        function renderDailyStats(stats) {
-            const tbody = document.getElementById('dailyStatsTable');
-            
-            if (stats.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: #999;">暂无数据</td></tr>';
-                return;
-            }
-            
-            tbody.innerHTML = stats.map(stat => `
-                <tr>
-                    <td><strong>${stat.date}</strong></td>
-                    <td>${stat.count}</td>
-                    <td>${stat.user_count}</td>
-                </tr>
-            `).join('');
-        }
+        window.__APP_CONTEXT__ = { username: "{{ user.username }}", is_system_admin: {{ 'true' if user.username == 'system_admin' else 'false' }} };
     </script>
-    <script>
-        async function loadProjects() {
-            const select = document.getElementById('projectSelect');
-            if (!select) return;
-            try {
-                const resp = await fetch('/api/projects');
-                const data = await resp.json();
-                if (!data.success) throw new Error(data.error || '加载失败');
-                select.innerHTML = '';
-                data.projects.forEach(p => {
-                    const opt = document.createElement('option');
-                    opt.value = p.id;
-                    opt.textContent = p.name;
-                    if (String(p.id) === String(data.current_project_id)) {
-                        opt.selected = true;
-                    }
-                    select.appendChild(opt);
-                });
-            } catch (e) {
-                select.innerHTML = '<option>项目加载失败</option>';
-            }
-        }
-        async function switchProject(projectId) {
-            const resp = await fetch('/api/projects/switch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ project_id: projectId })
-            });
-            const data = await resp.json();
-            if (data.success) {
-                location.reload();
-            } else {
-                alert(data.error || '切换失败');
-            }
-        }
-        document.addEventListener('DOMContentLoaded', () => {
-            const select = document.getElementById('projectSelect');
-            if (select) {
-                select.addEventListener('change', () => switchProject(select.value));
-                loadProjects();
-            }
-        });
-    </script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="/static/react-app.js"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="/static/sidebar-nav.js"></script>
+    {% raw %}
+    <script type="text/babel">
+        const { useEffect, useMemo, useState } = React;
+
+        const Sidebar = ({ username, projects, currentProjectId, onProjectChange }) => (
+            <nav className="sidebar-nav" id="sidebarNav">
+                <div className="sidebar-nav-header">
+                    <div className="sidebar-nav-title">Ai创作工具</div>
+                    <button className="sidebar-nav-toggle" onClick={() => toggleSidebar()} title="收缩/展开">
+                        <span id="toggleIcon">‹</span>
+                    </button>
+                </div>
+                <div className="sidebar-nav-menu">
+                    <a href="/" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎨</span><span className="sidebar-nav-text">单图生成</span></a>
+                    <a href="/batch" className="sidebar-nav-item"><span className="sidebar-nav-icon">📦</span><span className="sidebar-nav-text">批量生成</span></a>
+                    <a href="/records" className="sidebar-nav-item"><span className="sidebar-nav-icon">📊</span><span className="sidebar-nav-text">生图任务</span></a>
+                    <a href="/video-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
+                    <a href="/video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
+                    <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
+                    <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
+                    <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
+                    <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">🔄</span><span className="sidebar-nav-text">工具</span></a>
+                    <div className="sidebar-nav-divider"></div>
+                    {window.__APP_CONTEXT__?.is_system_admin && (
+                        <>
+                            <a href="/admin" className="sidebar-nav-item"><span className="sidebar-nav-icon">🛠️</span><span className="sidebar-nav-text">系统管理</span></a>
+                            <a href="/stats" className="sidebar-nav-item active"><span className="sidebar-nav-icon">📈</span><span className="sidebar-nav-text">系统统计</span></a>
+                        </>
+                    )}
+                </div>
+                <div className="sidebar-nav-user">
+                    <div className="sidebar-nav-user-info">
+                        <div className="sidebar-nav-user-avatar">👤</div>
+                        <div className="sidebar-nav-user-name">{username}</div>
+                        <a href="/logout" className="sidebar-nav-logout">登出</a>
+                    </div>
+                    {projects.length > 0 && (
+                        <div style={{ marginTop: '8px' }}>
+                            <label style={{ fontSize: '0.85em', color: '#cbd4f5' }}>当前项目</label>
+                            <select
+                                style={{ width: '100%', padding: '6px', borderRadius: '6px' }}
+                                value={currentProjectId || ''}
+                                onChange={(e) => onProjectChange(e.target.value)}
+                            >
+                                {projects.map(p => (
+                                    <option key={p.id} value={p.id}>{p.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+                </div>
+            </nav>
+        );
+
+        function App() {
+            const [projects, setProjects] = useState([]);
+            const [currentProjectId, setCurrentProjectId] = useState('');
+
+            const [startDate, setStartDate] = useState('');
+            const [endDate, setEndDate] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+
+            const [overview, setOverview] = useState({ total_users: '-', total_images: '-', today_images: '-', week_images: '-' });
+            const [userStats, setUserStats] = useState([]);
+            const [dailyStats, setDailyStats] = useState([]);
+
+            useEffect(() => {
+                document.body.classList.add('react-theme', 'sidebar-compact');
+            }, []);
+
+            useEffect(() => {
+                fetch('/api/projects').then(res => res.json()).then(data => {
+                    if (data.success) {
+                        setProjects(data.projects || []);
+                        setCurrentProjectId(String(data.current_project_id || ''));
+                    }
+                });
+            }, []);
+
+            useEffect(() => {
+                const today = new Date();
+                const weekAgo = new Date(today);
+                weekAgo.setDate(weekAgo.getDate() - 7);
+                const toYmd = (d) => d.toISOString().slice(0, 10);
+                setEndDate(toYmd(today));
+                setStartDate(toYmd(weekAgo));
+            }, []);
+
+            const onProjectChange = async (pid) => {
+                const r = await fetch('/api/projects/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ project_id: pid })
+                });
+                const d = await r.json();
+                if (d.success) window.location.reload();
+            };
+
+            const loadStats = async () => {
+                setLoading(true);
+                setError('');
+                try {
+                    const params = new URLSearchParams();
+                    if (startDate) params.append('start_date', startDate);
+                    if (endDate) params.append('end_date', endDate);
+                    const res = await fetch('/api/stats?' + params.toString());
+                    const data = await res.json();
+                    if (!data.success) throw new Error(data.error || '加载统计失败');
+                    setOverview({
+                        total_users: data.total_users,
+                        total_images: data.total_images,
+                        today_images: data.today_images,
+                        week_images: data.week_images
+                    });
+                    setUserStats(data.user_stats || []);
+                    setDailyStats(data.daily_stats || []);
+                } catch (e) {
+                    setError(e.message || '加载失败');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            useEffect(() => {
+                if (startDate && endDate) loadStats();
+            }, [startDate, endDate]);
+
+            const resetDates = () => {
+                const today = new Date();
+                const weekAgo = new Date(today);
+                weekAgo.setDate(weekAgo.getDate() - 7);
+                const toYmd = (d) => d.toISOString().slice(0, 10);
+                setEndDate(toYmd(today));
+                setStartDate(toYmd(weekAgo));
+            };
+
+            return (
+                <div className="app-shell">
+                    <Sidebar
+                        username={window.__APP_CONTEXT__?.username || 'system_admin'}
+                        projects={projects}
+                        currentProjectId={currentProjectId}
+                        onProjectChange={onProjectChange}
+                    />
+                    <div className="main-content">
+                        <div className="page-wrap">
+                            <div className="page-title">📈 系统统计</div>
+                            {error && <div className="small-hint" style={{ color: '#ff9aa2', marginBottom: 12 }}>{error}</div>}
+
+                            <div className="panel">
+                                <div className="stats-grid">
+                                    <div className="stat-card"><div className="label">总用户数</div><div className="value">{overview.total_users}</div></div>
+                                    <div className="stat-card"><div className="label">总生成图片</div><div className="value">{overview.total_images}</div></div>
+                                    <div className="stat-card"><div className="label">今日生成</div><div className="value">{overview.today_images}</div></div>
+                                    <div className="stat-card"><div className="label">本周生成</div><div className="value">{overview.week_images}</div></div>
+                                </div>
+                            </div>
+
+                            <div className="panel">
+                                <div className="filter-row">
+                                    <label>筛选日期</label>
+                                    <input className="filter-input" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                                    <span className="small-hint">至</span>
+                                    <input className="filter-input" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                                    <button type="button" className="btn-convert" onClick={loadStats} disabled={loading}>{loading ? '查询中...' : '查询'}</button>
+                                    <button type="button" className="btn-export" onClick={resetDates} disabled={loading}>重置</button>
+                                </div>
+                            </div>
+
+                            <div className="panel">
+                                <div style={{ fontWeight: 800, marginBottom: 6 }}>📊 用户生成统计</div>
+                                <div className="table-wrap">
+                                    <table className="tbl">
+                                        <thead>
+                                            <tr>
+                                                <th>用户ID</th>
+                                                <th>用户名</th>
+                                                <th>总生成数</th>
+                                                <th>今日生成</th>
+                                                <th>本周生成</th>
+                                                <th>最后生成时间</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {userStats.length === 0 ? (
+                                                <tr><td colSpan="6" className="small-hint">暂无数据</td></tr>
+                                            ) : userStats.map(s => (
+                                                <tr key={s.user_id}>
+                                                    <td>{s.user_id}</td>
+                                                    <td style={{ fontWeight: 800 }}>{s.username}</td>
+                                                    <td>{s.total_count}</td>
+                                                    <td>{s.today_count}</td>
+                                                    <td>{s.week_count}</td>
+                                                    <td>{s.last_generated || '从未生成'}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div className="panel">
+                                <div style={{ fontWeight: 800, marginBottom: 6 }}>📅 每日生成统计（最近7天）</div>
+                                <div className="table-wrap">
+                                    <table className="tbl">
+                                        <thead>
+                                            <tr>
+                                                <th>日期</th>
+                                                <th>生成数量</th>
+                                                <th>参与用户数</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {dailyStats.length === 0 ? (
+                                                <tr><td colSpan="3" className="small-hint">暂无数据</td></tr>
+                                            ) : dailyStats.map((s, idx) => (
+                                                <tr key={idx}>
+                                                    <td style={{ fontWeight: 800 }}>{s.date}</td>
+                                                    <td>{s.count}</td>
+                                                    <td>{s.user_count}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('reactApp')).render(<App />);
+    </script>
+    {% endraw %}
 </body>
 </html>

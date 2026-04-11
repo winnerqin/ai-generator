@@ -7,7 +7,7 @@ import threading
 import queue
 import logging
 import string
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, send_from_directory, session, redirect, url_for, flash, Response, stream_with_context
@@ -372,11 +372,41 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['OUTPUT_FOLDER'] = 'output'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production-' + str(uuid.uuid4()))
+# 登录状态持久化：Cookie 有效期，刷新或关闭浏览器后仍保持登录
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 
 # 确保文件夹存在
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 os.makedirs('static', exist_ok=True)
+
+# /asset 静态资源目录（用于 favicon 等）
+ASSET_DIR_CANDIDATES = [
+    Path(__file__).parent / 'asset',
+    Path(__file__).parent.parent / 'asset',
+]
+
+def _get_asset_dir():
+    for d in ASSET_DIR_CANDIDATES:
+        try:
+            if d.exists() and d.is_dir():
+                return d
+        except Exception:
+            continue
+    return ASSET_DIR_CANDIDATES[0]
+
+@app.route('/asset/<path:filename>')
+def asset_file(filename):
+    """提供 /asset 下的静态资源"""
+    return send_from_directory(str(_get_asset_dir()), filename)
+
+
+@app.route('/favicon.ico')
+def favicon():
+    """网站标签栏图标，从项目根目录读取 favicon.ico"""
+    root = Path(__file__).parent
+    return send_from_directory(str(root), 'favicon.ico')
+
 
 # 初始化数据库
 database.init_database()
@@ -523,6 +553,7 @@ def login():
         if user:
             session['user_id'] = user['id']
             session['username'] = user['username']
+            session.permanent = True  # 使用 PERMANENT_SESSION_LIFETIME，刷新/关闭浏览器后仍保持登录
             ensure_session_project(user['id'])
             log_operation('用户登录成功', f'用户名: {username}, 用户ID: {user["id"]}')
             return redirect(url_for('index'))
@@ -1029,6 +1060,504 @@ def api_script_generate_stream():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _load_txt2csv_format():
+    """读取 config/txt2csv.md 格式要求"""
+    config_path = Path(__file__).parent / 'config' / 'txt2csv.md'
+    try:
+        return config_path.read_text(encoding='utf-8').strip()
+    except Exception:
+        return ''
+
+
+def _load_storyboard_format():
+    """读取 config/storyboard.md 分镜格式要求"""
+    config_path = Path(__file__).parent / 'config' / 'storyboard.md'
+    try:
+        return config_path.read_text(encoding='utf-8').strip()
+    except Exception:
+        return ''
+
+
+def _load_config_md(filename):
+    """从 config 目录读取指定 .md 文件内容，文件名须通过 _config_md_filename_safe 校验"""
+    if not filename or not _config_md_filename_safe(filename):
+        return None
+    path = CONFIG_DIR / filename
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        return path.read_text(encoding='utf-8').strip()
+    except Exception:
+        return None
+
+
+def _csv_normalize_storyboard_description_newlines(csv_text):
+    """
+    将分镜 CSV 中“描述”列里的 <br> 转为真实换行符，并通过标准 CSV 解析/重写保证结构不乱。
+    说明：
+    - 真实换行会出现在单元格内，必须由 CSV writer 自动加引号才能不打断行。
+    - 若输入 CSV 本身不合法（引号不闭合等），为避免“错乱”，将原样返回。
+    """
+    if not csv_text:
+        return csv_text
+    try:
+        import csv
+        import io
+
+        src = io.StringIO(csv_text, newline='')
+        reader = csv.reader(src)
+        rows = list(reader)
+        if not rows:
+            return csv_text
+
+        header = rows[0] or []
+        desc_idx = -1
+        for i, h in enumerate(header):
+            h2 = (h or '').strip()
+            if h2 == '描述' or h2.startswith('描述'):
+                desc_idx = i
+                break
+        if desc_idx < 0:
+            return csv_text
+
+        def br_to_nl(s):
+            if not s:
+                return s
+            return (s.replace('<br/>', '\n')
+                     .replace('<br />', '\n')
+                     .replace('<br>', '\n')
+                     .replace('<BR/>', '\n')
+                     .replace('<BR />', '\n')
+                     .replace('<BR>', '\n'))
+
+        for r in rows[1:]:
+            if desc_idx < len(r):
+                r[desc_idx] = br_to_nl(r[desc_idx])
+
+        out = io.StringIO(newline='')
+        writer = csv.writer(out, lineterminator='\n')
+        writer.writerows(rows)
+        return out.getvalue().strip()
+    except Exception:
+        return csv_text
+
+
+def _csv_ensure_halfwidth_punctuation(s):
+    """将 CSV 文本中的全角标点替换为英文半角，确保逗号等不影响 CSV 解析。maketrans 的键和值都必须为单字符。"""
+    if not s:
+        return s
+    # 全角 -> 半角 映射（每个键、值均为单字符，使用 Unicode 码点避免编码问题）
+    full_to_half = str.maketrans({
+        '\uff0c': ',',   # FULLWIDTH COMMA ，
+        '\u3002': '.',   # IDEOGRAPHIC FULL STOP 。
+        '\uff0e': '.',   # FULLWIDTH FULL STOP ．
+        '\uff1a': ':',   # FULLWIDTH COLON ：
+        '\uff1b': ';',   # FULLWIDTH SEMICOLON ；
+        '\uff01': '!',   # FULLWIDTH EXCLAMATION ！
+        '\uff1f': '?',   # FULLWIDTH QUESTION ？
+        '\uff08': '(',   # FULLWIDTH LEFT PARENTHESIS （
+        '\uff09': ')',   # FULLWIDTH RIGHT PARENTHESIS ）
+        '\u201c': '"',   # LEFT DOUBLE QUOTE "
+        '\u201d': '"',   # RIGHT DOUBLE QUOTE "
+        '\u2018': '\'',  # LEFT SINGLE QUOTE -> half-width '
+        '\u2019': '\'',  # RIGHT SINGLE QUOTE -> half-width '
+        '\u3000': ' ',   # IDEOGRAPHIC SPACE 　
+    })
+    return s.translate(full_to_half)
+
+
+@app.route('/api/txt2csv-stream', methods=['POST'])
+@login_required
+def api_txt2csv_stream():
+    """文本转 CSV 流式接口：按 config/txt2csv.md 规则，使用 qwen3.5-plus 流式输出"""
+    try:
+        data = request.get_json() or {}
+        text = (data.get('text') or '').strip()
+        if not text:
+            return jsonify({'success': False, 'error': '请输入文本内容'}), 400
+
+        api_key = os.environ.get('QWEN_API_KEY')
+        base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
+        if not api_key:
+            return jsonify({'success': False, 'error': 'QWEN_API_KEY 未配置'}), 500
+
+        format_md = _load_txt2csv_format()
+        if not format_md:
+            return jsonify({'success': False, 'error': 'config/txt2csv.md 不存在或为空'}), 500
+
+        halfwidth_rule = (
+            "\n\n### ⚠️ 标点符号强制要求\n"
+            "**输出 CSV 时，所有标点符号必须使用英文半角（ASCII），不得使用中文全角标点。**\n"
+            "- 逗号必须为半角逗号 `,`，严禁使用全角逗号 `，`，否则会导致 CSV 列错位。\n"
+            "- 引号、括号、句号等也一律使用英文半角字符。"
+        )
+        system_prompt = format_md + halfwidth_rule
+        user_prompt = "现在，请处理以下剧本内容：\n\n" + text
+
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        model = os.environ.get('TXT2CSV_MODEL', os.environ.get('SCRIPT_GENERATE_MODEL', 'qwen3.5-plus'))
+
+        def generate_stream():
+            full_text = ''
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.3,
+                    stream=True
+                )
+                for chunk in response:
+                    try:
+                        delta = chunk.choices[0].delta
+                        content = getattr(delta, 'content', None)
+                    except Exception:
+                        content = None
+                    if content:
+                        full_text += content
+                        # 流式输出时对当前片段做半角替换，避免全角逗号等影响显示
+                        content_safe = _csv_ensure_halfwidth_punctuation(content)
+                        yield format_sse_event({'type': 'chunk', 'content': content_safe})
+                # 最终完整 CSV 再做一次半角替换，确保表格解析正确
+                full_text = _csv_ensure_halfwidth_punctuation(full_text)
+                yield format_sse_event({'type': 'complete', 'csv': full_text})
+            except Exception as e:
+                log_operation('txt2csv 流式失败', str(e), 'WARNING')
+                yield format_sse_event({'type': 'error', 'error': str(e)})
+
+        return Response(
+            stream_with_context(generate_stream()),
+            mimetype='text/event-stream',
+            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+        )
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# 生成分镜 API 使用的分隔符，用于从模型输出中拆分 Markdown 与 CSV
+STORYBOARD_CSV_DELIMITER = '\n\n===CSV===\n\n'
+
+
+@app.route('/api/storyboard-from-script', methods=['POST'])
+@login_required
+def api_storyboard_from_script():
+    """根据剧本按 config/storyboard.md 要求生成分镜：可仅返回 Markdown、仅返回 CSV、或两者"""
+    try:
+        data = request.get_json() or {}
+        script = (data.get('text') or data.get('script') or '').strip()
+        output_mode = (data.get('output') or '').strip().lower() or 'both'  # 'markdown' | 'csv' | 'both'
+        markdown_ref = (data.get('markdown') or '').strip()  # 生成 CSV 时传入的已有分镜文本（可编辑或粘贴）
+
+        if output_mode != 'csv' and not script:
+            return jsonify({'success': False, 'error': '请输入剧本内容'}), 400
+        if output_mode == 'csv' and not markdown_ref:
+            return jsonify({'success': False, 'error': '请先填写或粘贴分镜文本（Markdown）后再点「生成 CSV 表格」'}), 400
+
+        api_key = os.environ.get('QWEN_API_KEY')
+        base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
+        if not api_key:
+            return jsonify({'success': False, 'error': 'QWEN_API_KEY 未配置'}), 500
+
+        prompt_file = (data.get('prompt_file') or data.get('format_file') or 'storyboard.md').strip()
+        format_md = _load_config_md(prompt_file) if prompt_file else None
+        if not format_md:
+            format_md = _load_storyboard_format()
+        if not format_md:
+            return jsonify({'success': False, 'error': f'config 下提示词文件不存在或为空（当前选择: {prompt_file or "storyboard.md"}）'}), 500
+
+        csv_rule = (
+            "表头：分镜号,中文台词,说话人,情绪,描述,场景/时间。"
+            "【列含义】说话人：仅填角色名/称呼（2～6 字简短名词，如：小明、小红、旁白、咖啡师），绝不能填一句完整台词；中文台词：该角色说出的完整台词内容，必须填在「中文台词」列。若把台词误填到说话人列会导致整表错位。"
+            "每个单元格若内容中包含逗号或双引号，必须用双引号包裹整个单元格；单元格内的双引号写成两个连续双引号 \"\"。"
+            "描述列内容通常较长且含逗号，请务必用双引号包裹该列每个单元格。描述列内如需换行，请使用直接换行符（真实换行），不要使用<br>；用双引号包裹后 CSV 允许单元格内换行。其他列单元格内不要换行。"
+        )
+
+        if output_mode == 'markdown':
+            system_prompt = (
+                format_md
+                + "\n\n【重要】请只输出分镜的 Markdown 文本（标题、列表、段落等），不要输出任何 CSV 或表格，不要使用 "
+                + repr(STORYBOARD_CSV_DELIMITER.strip()) + "。"
+            )
+            user_prompt = "请根据以下剧本生成分镜文本（仅 Markdown）：\n\n" + script
+        elif output_mode == 'csv':
+            system_prompt = (
+                format_md
+                + "\n\n【重要】请根据用户提供的分镜 Markdown 文本（及剧本若提供）生成对应的 CSV 表格。只输出 CSV 内容，不要输出 Markdown。"
+                + csv_rule
+            )
+            if script:
+                user_prompt = "剧本：\n\n" + script + "\n\n---\n\n分镜文本（供参考）：\n\n" + markdown_ref
+            else:
+                user_prompt = "请根据以下分镜文本生成 CSV 表格：\n\n" + markdown_ref
+        else:
+            system_prompt = (
+                format_md
+                + "\n\n【重要】请严格按以下两点执行：\n"
+                + "1. 分镜文本：只输出 Markdown 格式的纯文本（标题、列表、段落等），不要使用 Markdown 表格语法。分镜的表格形式仅在后面的 CSV 部分体现。\n"
+                + "2. CSV 表格：在单独一行输出 " + repr(STORYBOARD_CSV_DELIMITER.strip()) + " 后，输出" + csv_rule
+            )
+            user_prompt = "请根据以下剧本生成分镜（Markdown + CSV）：\n\n" + script
+
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        model = os.environ.get('STORYBOARD_GENERATE_MODEL', os.environ.get('SCRIPT_GENERATE_MODEL', 'qwen3.5-plus'))
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.3,
+            stream=False
+        )
+        content = (response.choices[0].message.content or '').strip()
+
+        if output_mode == 'markdown':
+            return jsonify({'success': True, 'markdown': content})
+        if output_mode == 'csv':
+            csv_part = _csv_ensure_halfwidth_punctuation(content)
+            csv_part = _csv_normalize_storyboard_description_newlines(csv_part)
+            return jsonify({'success': True, 'csv': csv_part})
+
+        if STORYBOARD_CSV_DELIMITER in content:
+            parts = content.split(STORYBOARD_CSV_DELIMITER, 1)
+            markdown_part = parts[0].strip()
+            csv_part = parts[1].strip() if len(parts) > 1 else ''
+        else:
+            markdown_part = content
+            csv_part = ''
+            for sep in ['\n\n===CSV===\n\n', '\n===CSV===\n', '===CSV===']:
+                if sep in content:
+                    parts = content.split(sep, 1)
+                    markdown_part = parts[0].strip()
+                    csv_part = (parts[1].strip() if len(parts) > 1 else '')
+                    break
+
+        csv_part = _csv_ensure_halfwidth_punctuation(csv_part)
+        csv_part = _csv_normalize_storyboard_description_newlines(csv_part)
+        return jsonify({
+            'success': True,
+            'markdown': markdown_part,
+            'csv': csv_part
+        })
+    except Exception as e:
+        log_operation('生成分镜失败', str(e), 'WARNING')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _run_storyboard_generate_both(script, prompt_file):
+    """内部：根据剧本和提示词文件生成分镜 Markdown + CSV，返回 (markdown, csv)。"""
+    format_md = _load_config_md(prompt_file) if prompt_file else None
+    if not format_md:
+        format_md = _load_storyboard_format()
+    if not format_md:
+        raise ValueError(f'config 下提示词文件不存在或为空: {prompt_file or "storyboard.md"}')
+    csv_rule = (
+        "表头：分镜号,中文台词,说话人,情绪,描述,场景/时间。"
+        "【列含义】说话人：仅填角色名/称呼（2～6 字简短名词，如：小明、小红、旁白、咖啡师），绝不能填一句完整台词；中文台词：该角色说出的完整台词内容，必须填在「中文台词」列。若把台词误填到说话人列会导致整表错位。"
+        "每个单元格若内容中包含逗号或双引号，必须用双引号包裹整个单元格；单元格内的双引号写成两个连续双引号 \"\"。"
+        "描述列内容通常较长且含逗号，请务必用双引号包裹该列每个单元格。描述列内如需换行，请使用直接换行符（真实换行），不要使用<br>；用双引号包裹后 CSV 允许单元格内换行。其他列单元格内不要换行。"
+    )
+    system_prompt = (
+        format_md
+        + "\n\n【重要】请严格按以下两点执行：\n"
+        + "1. 分镜文本：只输出 Markdown 格式的纯文本（标题、列表、段落等），不要使用 Markdown 表格语法。分镜的表格形式仅在后面的 CSV 部分体现。\n"
+        + "2. CSV 表格：在单独一行输出 " + repr(STORYBOARD_CSV_DELIMITER.strip()) + " 后，输出" + csv_rule
+    )
+    user_prompt = "请根据以下剧本生成分镜（Markdown + CSV）：\n\n" + script
+    api_key = os.environ.get('QWEN_API_KEY')
+    base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
+    if not api_key:
+        raise RuntimeError('QWEN_API_KEY 未配置')
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    model = os.environ.get('STORYBOARD_GENERATE_MODEL', os.environ.get('SCRIPT_GENERATE_MODEL', 'qwen3.5-plus'))
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=0.3,
+        stream=False
+    )
+    content = (response.choices[0].message.content or '').strip()
+    if STORYBOARD_CSV_DELIMITER in content:
+        parts = content.split(STORYBOARD_CSV_DELIMITER, 1)
+        markdown_part = parts[0].strip()
+        csv_part = parts[1].strip() if len(parts) > 1 else ''
+    else:
+        markdown_part = content
+        csv_part = ''
+        for sep in ['\n\n===CSV===\n\n', '\n===CSV===\n', '===CSV===']:
+            if sep in content:
+                parts = content.split(sep, 1)
+                markdown_part = parts[0].strip()
+                csv_part = (parts[1].strip() if len(parts) > 1 else '')
+                break
+    csv_part = _csv_ensure_halfwidth_punctuation(csv_part)
+    csv_part = _csv_normalize_storyboard_description_newlines(csv_part)
+    return markdown_part, csv_part
+
+
+def _get_storyboard_queue_path(user_id, project_id):
+    folder = get_user_output_folder(user_id, project_id)
+    return os.path.join(folder, '_storyboard_queue.json')
+
+
+def _load_storyboard_queue(user_id, project_id):
+    path = _get_storyboard_queue_path(user_id, project_id)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data.get('tasks') or []
+    except Exception:
+        return []
+
+
+def _save_storyboard_queue(user_id, project_id, tasks):
+    path = _get_storyboard_queue_path(user_id, project_id)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump({'tasks': tasks}, f, ensure_ascii=False, indent=2)
+
+
+@app.route('/api/storyboard-queue', methods=['GET'])
+@login_required
+def api_storyboard_queue_list():
+    """分镜队列任务列表（按用户、项目隔离）"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请选择当前项目'}), 400
+    tasks = _load_storyboard_queue(user_id, project_id)
+    return jsonify({'success': True, 'tasks': tasks})
+
+
+@app.route('/api/storyboard-queue/upload', methods=['POST'])
+@login_required
+def api_storyboard_queue_upload():
+    """批量上传剧本文件加入队列"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请选择当前项目'}), 400
+    prompt_file = (request.form.get('prompt_file') or 'storyboard.md').strip()
+    if 'files[]' in request.files:
+        files = request.files.getlist('files[]')
+    else:
+        files = [request.files.get('file')] if request.files.get('file') else []
+    files = [f for f in files if f and f.filename]
+    if not files:
+        return jsonify({'success': False, 'error': '请选择至少一个文件'}), 400
+    tasks = _load_storyboard_queue(user_id, project_id)
+    for f in files:
+        try:
+            raw = f.read()
+            if isinstance(raw, bytes):
+                raw = raw.decode('utf-8', errors='replace')
+            script = (raw or '').strip()
+        except Exception:
+            script = ''
+        name = secure_filename(f.filename) or f.filename or 'script.txt'
+        task_id = uuid.uuid4().hex[:12]
+        tasks.append({
+            'id': task_id,
+            'status': 'pending',
+            'filename': name,
+            'prompt_file': prompt_file,
+            'created_at': datetime.now().isoformat(),
+            'started_at': None,
+            'completed_at': None,
+            'output_md': None,
+            'output_csv': None,
+            'markdown_preview': None,
+            'csv_preview': None,
+            'error': None,
+            'script': script[:50000],
+        })
+    _save_storyboard_queue(user_id, project_id, tasks)
+    return jsonify({'success': True, 'tasks': tasks, 'added': len(files)})
+
+
+@app.route('/api/storyboard-queue/<task_id>', methods=['DELETE'])
+@login_required
+def api_storyboard_queue_delete(task_id):
+    """删除队列中的任务（仅从列表移除，不删输出文件）"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请选择当前项目'}), 400
+    tasks = _load_storyboard_queue(user_id, project_id)
+    tasks = [t for t in tasks if t.get('id') != task_id]
+    _save_storyboard_queue(user_id, project_id, tasks)
+    return jsonify({'success': True, 'tasks': tasks})
+
+
+@app.route('/api/storyboard-queue/process-one', methods=['POST'])
+@login_required
+def api_storyboard_queue_process_one():
+    """处理队列中第一个等待中的任务：生成分镜并写入 output 目录"""
+    user_id = session.get('user_id')
+    project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请选择当前项目'}), 400
+    tasks = _load_storyboard_queue(user_id, project_id)
+    pending = [t for t in tasks if t.get('status') == 'pending']
+    if not pending:
+        return jsonify({'success': True, 'processed': False, 'tasks': tasks, 'message': '暂无等待中的任务'})
+    task = pending[0]
+    task_id = task.get('id')
+    task['status'] = 'running'
+    task['started_at'] = datetime.now().isoformat()
+    _save_storyboard_queue(user_id, project_id, tasks)
+    script = (task.get('script') or '').strip()
+    if not script:
+        task['status'] = 'failed'
+        task['completed_at'] = datetime.now().isoformat()
+        task['error'] = '文件内容为空'
+        _save_storyboard_queue(user_id, project_id, tasks)
+        return jsonify({'success': True, 'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
+    try:
+        markdown_part, csv_part = _run_storyboard_generate_both(script, task.get('prompt_file') or 'storyboard.md')
+    except Exception as e:
+        task['status'] = 'failed'
+        task['completed_at'] = datetime.now().isoformat()
+        task['error'] = str(e)
+        _save_storyboard_queue(user_id, project_id, tasks)
+        return jsonify({'success': True, 'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
+    out_dir = get_user_output_folder(user_id, project_id)
+    base = Path(task.get('filename', 'script')).stem
+    safe_base = "".join(c for c in base if c.isalnum() or c in (' ', '-', '_'))[:80].strip() or 'storyboard'
+    md_name = f"{safe_base}.md"
+    csv_name = f"{safe_base}.csv"
+    md_path = os.path.join(out_dir, md_name)
+    csv_path = os.path.join(out_dir, csv_name)
+    try:
+        with open(md_path, 'w', encoding='utf-8') as f:
+            f.write(markdown_part)
+        with open(csv_path, 'w', encoding='utf-8-sig') as f:
+            f.write(csv_part)
+    except Exception as e:
+        task['status'] = 'failed'
+        task['completed_at'] = datetime.now().isoformat()
+        task['error'] = f'写入文件失败: {e}'
+        _save_storyboard_queue(user_id, project_id, tasks)
+        return jsonify({'success': True, 'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
+    task['status'] = 'completed'
+    task['completed_at'] = datetime.now().isoformat()
+    task['output_md'] = md_name
+    task['output_csv'] = csv_name
+    task['markdown_preview'] = markdown_part[:2000] if markdown_part else ''
+    task['csv_preview'] = csv_part[:5000] if csv_part else ''
+    task['error'] = None
+    if 'script' in task:
+        del task['script']
+    _save_storyboard_queue(user_id, project_id, tasks)
+    return jsonify({'success': True, 'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
+
+
 def _generate_storyboard_content(script, prompt):
     api_key = os.environ.get('QWEN_API_KEY')
     base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
@@ -1285,10 +1814,12 @@ def api_get_task(task_id):
 @app.route('/api/script-saves', methods=['GET', 'POST'])
 @login_required
 def api_script_saves():
-    """剧本保存与列表"""
+    """剧本保存与列表（按当前项目隔离）"""
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if request.method == 'GET':
+        if not project_id:
+            return jsonify({'success': True, 'records': []})
         records = database.list_script_records(user_id, project_id)
         return jsonify({'success': True, 'records': records})
     data = request.get_json() or {}
@@ -1322,6 +1853,8 @@ def api_script_saves():
 def api_script_save_detail(record_id):
     user_id = session.get('user_id')
     project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请先选择项目'}), 400
     record = database.get_script_record(user_id, project_id, record_id)
     if not record:
         return jsonify({'success': False, 'error': '记录不存在'}), 404
@@ -1338,9 +1871,11 @@ def api_script_save_detail(record_id):
 @app.route('/api/script-episodes', methods=['GET'])
 @login_required
 def api_script_episodes():
-    """获取剧本分集表格数据"""
+    """获取剧本分集表格数据（按当前项目隔离）"""
     user_id = session.get('user_id')
     project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': True, 'episodes': []})
     script_id = request.args.get('script_id')
     if not script_id:
         episodes = database.list_all_script_episodes(user_id, project_id)
@@ -1472,10 +2007,12 @@ def api_delete_script_episode(episode_id):
 @app.route('/api/storyboard-saves', methods=['GET', 'POST'])
 @login_required
 def api_storyboard_saves():
-    """分镜保存与列表"""
+    """分镜保存与列表（按当前项目隔离）"""
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if request.method == 'GET':
+        if not project_id:
+            return jsonify({'success': True, 'records': []})
         records = database.list_storyboard_records(user_id, project_id)
         return jsonify({'success': True, 'records': records})
     data = request.get_json() or {}
@@ -1515,6 +2052,8 @@ def api_storyboard_saves():
 def api_storyboard_save_detail(record_id):
     user_id = session.get('user_id')
     project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请先选择项目'}), 400
     record = database.get_storyboard_record(user_id, project_id, record_id)
     if not record:
         return jsonify({'success': False, 'error': '记录不存在'}), 404
@@ -1531,9 +2070,11 @@ def api_storyboard_save_detail(record_id):
 @app.route('/api/storyboard-series', methods=['GET'])
 @login_required
 def api_storyboard_series():
-    """分镜系列列表（最新版本）"""
+    """分镜系列列表（按当前项目隔离，最新版本）"""
     user_id = session.get('user_id')
     project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': True, 'records': []})
     records = database.list_storyboard_series(user_id, project_id)
     return jsonify({'success': True, 'records': records})
 
@@ -1541,9 +2082,11 @@ def api_storyboard_series():
 @app.route('/api/storyboard-series/<int:series_id>/versions', methods=['GET'])
 @login_required
 def api_storyboard_versions(series_id):
-    """分镜系列版本列表"""
+    """分镜系列版本列表（按当前项目隔离）"""
     user_id = session.get('user_id')
     project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': True, 'records': []})
     records = database.list_storyboard_versions(user_id, project_id, series_id)
     return jsonify({'success': True, 'records': records})
 
@@ -1660,6 +2203,8 @@ def api_storyboard_episodes():
 def api_script_templates_list():
     user_id = session.get('user_id')
     project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': True, 'templates': []})
     templates = database.get_script_templates(user_id, project_id)
     return jsonify({'success': True, 'templates': templates})
 
@@ -1669,6 +2214,8 @@ def api_script_templates_list():
 def api_script_templates_create():
     user_id = session.get('user_id')
     project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请先选择项目'}), 400
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
     prompt = (data.get('prompt') or '').strip()
@@ -1685,7 +2232,10 @@ def api_script_templates_create():
 @login_required
 def api_script_templates_delete(template_id):
     user_id = session.get('user_id')
-    database.delete_script_template(user_id, template_id)
+    project_id = get_current_project_id()
+    if not project_id:
+        return jsonify({'success': False, 'error': '请先选择项目'}), 400
+    database.delete_script_template(user_id, template_id, project_id)
     return jsonify({'success': True})
 
 # ==================== 主页路由 ====================
@@ -2439,10 +2989,12 @@ def generate_stream_resume():
 @app.route('/api/sample-images')
 @login_required
 def get_sample_images():
-    """获取 OSS 中的示例图列表（用户隔离）"""
+    """获取 OSS 中的示例图列表（按用户+项目隔离）"""
     try:
         user_id = session.get('user_id')
         project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': True, 'images': []})
         category = request.args.get('category')
         log_request('GET', '/api/sample-images', user_id, f'类别: {category or "全部"}')
         print(f"[API] /api/sample-images 请求 - 用户ID: {user_id}, 类别: {category}")
@@ -2540,15 +3092,14 @@ def get_image_styles():
 @app.route('/api/recent-images')
 @login_required
 def get_recent_images():
-    """获取最近生成的图片列表（用作参考图）"""
+    """获取最近生成的图片列表（按当前项目隔离，用作参考图）"""
     try:
         user_id = session.get('user_id')
         project_id = get_current_project_id()
-        limit = int(request.args.get('limit', 50))  # 默认获取最近50张
-        
+        if not project_id:
+            return jsonify({'success': True, 'images': []})
+        limit = int(request.args.get('limit', 50))
         log_request('GET', '/api/recent-images', user_id, f'数量: {limit}')
-        
-        # 从数据库获取最近生成的图片记录
         records = database.get_all_records(user_id, project_id, limit=limit, offset=0)
         
         # 提取图片信息，只返回OSS URL的图片（API可以访问的）
@@ -2637,139 +3188,90 @@ def storyboard_studio():
     """全新分镜制作页面（React）"""
     return render_template('storyboard_studio.html', user=get_current_user())
 
-
-def _get_txt2csv_prompt_path():
-    """config/txt2csv.md 路径（相对于项目根）"""
-    root = Path(__file__).resolve().parent
-    return root / 'config' / 'txt2csv.md'
-
-
 @app.route('/txt2csv')
 @login_required
 def txt2csv_page():
-    """转换工具页（含文本转表格等）"""
+    """文本转 CSV 转换工具页面"""
     return render_template('txt2csv.html', user=get_current_user())
 
 
-@app.route('/api/txt2csv-prompt', methods=['GET'])
+# 提示词管理：config 目录下的 .md 文件（仅允许 .md，禁止路径穿越）
+CONFIG_DIR = Path(__file__).parent / 'config'
+
+
+def _config_md_filename_safe(name):
+    """只允许纯文件名且以 .md 结尾，禁止 / \\ .. 等"""
+    if not name or not isinstance(name, str):
+        return False
+    name = name.strip()
+    if not name.endswith('.md'):
+        return False
+    if '..' in name or '/' in name or '\\' in name or '\n' in name:
+        return False
+    return name == os.path.basename(name) and len(name) <= 128
+
+
+@app.route('/api/config-prompts', methods=['GET'])
 @login_required
-def api_txt2csv_prompt():
-    """返回 config/txt2csv.md 的提示词内容"""
+def api_config_prompts_list():
+    """列出 config 目录下所有 .md 文件"""
     try:
-        path = _get_txt2csv_prompt_path()
-        if not path.exists():
-            return jsonify({'success': False, 'error': 'config/txt2csv.md 不存在'}), 404
-        content = path.read_text(encoding='utf-8')
-        return jsonify({'success': True, 'content': content})
+        if not CONFIG_DIR.exists():
+            return jsonify({'success': True, 'files': []})
+        files = [f.name for f in CONFIG_DIR.iterdir() if f.is_file() and f.suffix.lower() == '.md']
+        files.sort()
+        return jsonify({'success': True, 'files': files})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-def _parse_csv_line(line):
-    """简单解析单行 CSV（支持双引号包裹的字段）"""
-    row = []
-    current = []
-    in_quote = False
-    for i, c in enumerate(line):
-        if c == '"':
-            in_quote = not in_quote
-        elif not in_quote and c == ',':
-            row.append(''.join(current).strip())
-            current = []
-        else:
-            current.append(c)
-    row.append(''.join(current).strip())
-    return row
-
-
-def _call_llm_with_timeout(client, model, user_content, timeout_sec=90):
-    """在子线程中调用 LLM（流式，与分镜一致避免超时），主线程等待 timeout_sec。"""
-    result_queue = queue.Queue()
-
-    def _run():
-        try:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": user_content}],
-                temperature=0.3,
-                stream=True,
-            )
-            content = _collect_stream_content(resp).strip()
-            print('[txt2csv] API 返回成功, 内容长度:', len(content))
-            result_queue.put((content, None))
-        except Exception as e:
-            print('[txt2csv] API 请求异常:', type(e).__name__, str(e))
-            result_queue.put((None, str(e)))
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    try:
-        content, err = result_queue.get(timeout=timeout_sec)
-        return (content, err)
-    except queue.Empty:
-        return (None, f'模型响应超时（{timeout_sec} 秒）')
-
-
-@app.route('/api/txt2csv-process', methods=['POST'])
+@app.route('/api/config-prompts/<path:filename>', methods=['GET'])
 @login_required
-def api_txt2csv_process():
-    """按提示词处理文本，返回表格数据（表头+行）"""
+def api_config_prompts_get(filename):
+    """获取指定 .md 文件内容"""
+    try:
+        if not _config_md_filename_safe(filename):
+            return jsonify({'success': False, 'error': '文件名不合法'}), 400
+        path = CONFIG_DIR / filename
+        if not path.exists() or not path.is_file():
+            return jsonify({'success': False, 'error': '文件不存在'}), 404
+        content = path.read_text(encoding='utf-8')
+        return jsonify({'success': True, 'filename': filename, 'content': content})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config-prompts', methods=['POST'])
+@login_required
+def api_config_prompts_save():
+    """新增或覆盖保存 config 下的 .md 文件"""
     try:
         data = request.get_json() or {}
-        text = (data.get('text') or '').strip()
-        print('[txt2csv] 收到请求, 文本长度:', len(text), '前80字:', (text[:80] + '...') if len(text) > 80 else text)
-        if not text:
-            return jsonify({'success': False, 'error': '请输入要处理的文本'}), 400
-
-        path = _get_txt2csv_prompt_path()
-        if not path.exists():
-            return jsonify({'success': False, 'error': 'config/txt2csv.md 不存在'}), 404
-        prompt_md = path.read_text(encoding='utf-8')
-
-        api_key = os.environ.get('QWEN_API_KEY')
-        base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
-        if not api_key:
-            return jsonify({'success': False, 'error': '未配置 QWEN_API_KEY'}), 500
-
-        model = os.environ.get('TXT2CSV_MODEL') or os.environ.get('SCRIPT_GENERATE_MODEL', 'qwen3.5-plus')
-        user_content = prompt_md.rstrip() + "\n\n" + text
-        request_url = (base_url.rstrip('/') + '/chat/completions')
-        print('[txt2csv] 请求地址:', request_url)
-        print('[txt2csv] 请求模型:', model, '总内容长度:', len(user_content))
-        # 禁用重试，首次失败即返回真实错误
-        client = OpenAI(api_key=api_key, base_url=base_url, timeout=300.0, max_retries=0)
-        content, llm_error = _call_llm_with_timeout(client, model, user_content, timeout_sec=600)
-        if llm_error:
-            print('[txt2csv] 模型调用失败:', llm_error)
-            err_msg = str(llm_error)
-            if 'timed out' in err_msg.lower() or 'timeout' in err_msg.lower():
-                err_msg = '模型服务响应超时。请检查：1) 网络或 VPN 能否访问 ' + (base_url or '') + ' 2) .env 中 QWEN_BASE_URL 是否需代理 3) 稍后重试。'
-            return jsonify({'success': False, 'error': err_msg}), 500
-        print('[txt2csv] 收到模型响应, 内容长度:', len(content))
-        # 去掉可能的 markdown 代码块
-        if '```' in content:
-            for sep in ('```csv', '```CSV', '```'):
-                if sep in content:
-                    parts = content.split(sep, 1)
-                    if len(parts) > 1:
-                        content = parts[1].split('```')[0].strip()
-                    break
-        # 输出内容中的逗号统一为半角（便于 CSV 解析与导出）
-        content = content.replace('\uff0c', ',')
-        lines = [ln for ln in content.splitlines() if ln.strip()]
-        if not lines:
-            return jsonify({'success': False, 'error': '模型未返回有效 CSV'}), 400
-        headers = _parse_csv_line(lines[0])
-        rows = [_parse_csv_line(ln) for ln in lines[1:]]
-        n = len(headers)
-        for r in rows:
-            while len(r) < n:
-                r.append('')
-            del r[n:]
-        print('[txt2csv] 解析成功, 表头列数:', n, '行数:', len(rows))
-        return jsonify({'success': True, 'headers': headers, 'rows': rows, 'model_output': content})
+        filename = (data.get('filename') or '').strip()
+        content = data.get('content') or ''
+        if not _config_md_filename_safe(filename):
+            return jsonify({'success': False, 'error': '文件名须为 xxx.md 且不含路径'}), 400
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        path = CONFIG_DIR / filename
+        path.write_text(content, encoding='utf-8')
+        return jsonify({'success': True, 'filename': filename})
     except Exception as e:
-        print('[txt2csv] 异常:', type(e).__name__, str(e))
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config-prompts/<path:filename>', methods=['DELETE'])
+@login_required
+def api_config_prompts_delete(filename):
+    """删除 config 下的 .md 文件"""
+    try:
+        if not _config_md_filename_safe(filename):
+            return jsonify({'success': False, 'error': '文件名不合法'}), 400
+        path = CONFIG_DIR / filename
+        if not path.exists() or not path.is_file():
+            return jsonify({'success': False, 'error': '文件不存在'}), 404
+        path.unlink()
+        return jsonify({'success': True, 'filename': filename})
+    except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -3013,17 +3515,21 @@ def batch_generate():
 @app.route('/api/video-tasks', methods=['GET'])
 @login_required
 def api_video_tasks_list():
-    """查询视频任务列表 - 从服务器获取最新信息"""
+    """查询视频任务列表（按当前项目隔离）- 从服务器获取最新信息"""
     try:
         user_id = session.get('user_id')
         project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({
+                'success': True, 'items': [], 'tasks': [], 'total': 0,
+                'page': int(request.args.get('page', 1)), 'page_size': int(request.args.get('page_size', 10))
+            })
         page = int(request.args.get('page', 1))
         page_size = int(request.args.get('page_size', 10))
         task_id = request.args.get('task_id', '').strip()
         status = request.args.get('status', '').strip() or None
         start_date = request.args.get('start_date', '').strip() or None
         end_date = request.args.get('end_date', '').strip() or None
-        
         log_request('GET', '/api/video-tasks', user_id, 
                    f'任务ID: {task_id}, 页码: {page}, 每页: {page_size}, 状态: {status}, 开始日期: {start_date}, 结束日期: {end_date}')
         
@@ -3078,7 +3584,7 @@ def api_video_tasks_list():
                 # 如果API查询失败，尝试从数据库查询
                 db_task = database.get_video_task_by_id(task_id)
                 if db_task and db_task.get('user_id') == user_id and (project_id is None or db_task.get('project_id') == project_id):
-                    result_task = convert_db_task_to_api_format(db_task)
+                    result_task = convert_db_task_to_api_format(db_task, user_id)
                     return jsonify({
                         'success': True,
                         'items': [result_task],
@@ -3225,7 +3731,7 @@ def api_video_tasks_list():
             tasks = []
             for t in db_tasks:
                 try:
-                    converted_task = convert_db_task_to_api_format(t)
+                    converted_task = convert_db_task_to_api_format(t, user_id)
                     if converted_task:
                         tasks.append(converted_task)
                 except Exception as e:
@@ -3377,9 +3883,10 @@ def sync_task_to_database(api_task, user_id, project_id=None):
                         import tempfile
                         import os
                         
-                        # 下载视频
+                        # 下载视频（带 User-Agent 减少部分 CDN 403）
+                        headers = {'User-Agent': 'Mozilla/5.0 (compatible; VideoSync/1.0)'}
                         log_operation('开始下载视频', f'用户ID: {user_id}, 任务ID: {task_id_str}, URL: {server_video_url}')
-                        response = requests.get(server_video_url, timeout=300, stream=True)
+                        response = requests.get(server_video_url, timeout=300, stream=True, headers=headers)
                         if response.status_code == 200:
                             # 创建临时文件
                             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
@@ -3429,7 +3936,10 @@ def sync_task_to_database(api_task, user_id, project_id=None):
                             except Exception:
                                 pass
                         else:
-                            log_operation('下载视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP状态码: {response.status_code}', 'WARNING')
+                            if response.status_code == 403:
+                                log_operation('下载视频失败（链接可能已过期或无权访问）', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP 403', 'WARNING')
+                            else:
+                                log_operation('下载视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP状态码: {response.status_code}', 'WARNING')
                     except Exception as e:
                         log_operation('下载并上传视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
                         import traceback
@@ -3440,19 +3950,24 @@ def sync_task_to_database(api_task, user_id, project_id=None):
                 thread.daemon = True
                 thread.start()
     else:
-        # 数据库已有记录，更新服务器最新信息（任务ID、状态、token、URL）
+        # 数据库已有记录，更新服务器最新信息；保留原 project_id，不随当前请求改写（避免切换项目时把别项目的任务移入当前项目）
+        current_video_url = db_task.get('video_url')
+        if current_video_url and is_oss_url(current_video_url):
+            video_url_to_save = current_video_url
+        else:
+            video_url_to_save = server_video_url
         update_data = {
             'task_id': task_id_str,
-            'status': server_status,  # 使用服务器状态
-            'video_url': server_video_url,  # 使用服务器URL
+            'status': server_status,
+            'video_url': video_url_to_save,
             'last_frame_image_url': server_last_frame_url,
-            'token': server_token,  # 使用服务器token
+            'token': server_token,
             'usage': server_usage,
             'content': server_content,
             'error_message': api_task.get('error_message')
         }
         try:
-            update_data['project_id'] = project_id
+            update_data['project_id'] = db_task.get('project_id')  # 保留任务所属项目
             database.save_video_task(update_data)
         except Exception as e:
             log_operation('更新任务到数据库失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
@@ -3469,8 +3984,9 @@ def sync_task_to_database(api_task, user_id, project_id=None):
             if last_frame_url_from_api:
                 upload_image_url_to_oss_async(last_frame_url_from_api, 'last_frame_url')
     
-    # 如果视频状态为succeeded且有video_url，自动下载并上传到OSS，保存到video_library
-    if server_status == 'succeeded' and server_video_url:
+    # 仅对「已有记录且属于当前项目」的任务在此处触发下载（新任务已在上面 if not db_task 分支内处理，避免重复与跨项目下载）
+    task_belongs_to_current_project = (db_task is not None) and (project_id is not None and db_task.get('project_id') == project_id)
+    if server_status == 'succeeded' and server_video_url and task_belongs_to_current_project:
         log_operation('检测到视频生成成功', f'用户ID: {user_id}, 任务ID: {task_id_str}, 视频URL: {server_video_url}')
         # 检查视频库中是否已存在该任务ID的视频
         existing_video = database.get_video_by_task_id(user_id, task_id_str, project_id)
@@ -3483,10 +3999,9 @@ def sync_task_to_database(api_task, user_id, project_id=None):
                     import requests
                     import tempfile
                     import os
-                    
-                    # 下载视频
+                    headers = {'User-Agent': 'Mozilla/5.0 (compatible; VideoSync/1.0)'}
                     log_operation('开始下载视频', f'用户ID: {user_id}, 任务ID: {task_id_str}, URL: {server_video_url}')
-                    response = requests.get(server_video_url, timeout=300, stream=True)
+                    response = requests.get(server_video_url, timeout=300, stream=True, headers=headers)
                     if response.status_code == 200:
                         # 创建临时文件
                         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
@@ -3542,7 +4057,10 @@ def sync_task_to_database(api_task, user_id, project_id=None):
                         except Exception:
                             pass
                     else:
-                        log_operation('下载视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP状态码: {response.status_code}', 'WARNING')
+                        if response.status_code == 403:
+                            log_operation('下载视频失败（链接可能已过期或无权访问）', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP 403', 'WARNING')
+                        else:
+                            log_operation('下载视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, HTTP状态码: {response.status_code}', 'WARNING')
                 except Exception as e:
                     log_operation('下载并上传视频失败', f'用户ID: {user_id}, 任务ID: {task_id_str}, 错误: {str(e)}', 'WARNING')
                     import traceback
@@ -3767,9 +4285,17 @@ def convert_api_task_to_unified_format(api_task, user_id):
         unified_task['first_frame_url'] = db_task.get('first_frame_url') or inferred_first_frame
         unified_task['last_frame_url'] = db_task.get('last_frame_url') or inferred_last_frame
         unified_task['reference_image_urls'] = db_task.get('reference_image_urls') or unified_task.get('reference_image_urls', [])
-        # 如果数据库中已有OSS或持久化链接，优先使用
-        if db_task.get('video_url'):
-            unified_task['video_url'] = db_task.get('video_url')
+        # 播放/下载优先使用 OSS 地址，避免临时链接过期后无法使用
+        display_video_url = db_task.get('video_url')
+        if display_video_url:
+            _, oss_ep = get_oss_bucket()
+            def _is_oss(u):
+                return bool(oss_ep) and isinstance(u, str) and u.startswith(f"https://{oss_ep}/")
+            if not _is_oss(display_video_url):
+                asset = database.get_video_by_task_id(user_id, task_id_str, db_task.get('project_id'))
+                if asset and isinstance(asset.get('url'), str) and _is_oss(asset['url']):
+                    display_video_url = asset['url']
+            unified_task['video_url'] = display_video_url
         if db_task.get('last_frame_image_url'):
             unified_task['last_frame_image_url'] = db_task.get('last_frame_image_url')
     else:
@@ -3956,10 +4482,21 @@ def convert_api_task_to_db_format(api_task, user_id):
     
     return task_data
 
-def convert_db_task_to_api_format(db_task):
-    """将数据库任务格式转换为API格式"""
+def convert_db_task_to_api_format(db_task, user_id=None):
+    """将数据库任务格式转换为API格式。传入 user_id 时会对 video_url 做 OSS 回退（优先返回 OSS 地址）。"""
     if not db_task:
         return None
+    
+    # 播放/下载地址优先用 OSS；若 DB 中为临时链接且已过期，尝试从 video_library 取 OSS 地址
+    display_video_url = db_task.get('video_url')
+    if display_video_url and user_id is not None:
+        _, oss_ep = get_oss_bucket()
+        def _is_oss(u):
+            return bool(oss_ep) and isinstance(u, str) and u.startswith(f"https://{oss_ep}/")
+        if not _is_oss(display_video_url):
+            asset = database.get_video_by_task_id(user_id, db_task.get('task_id'), db_task.get('project_id'))
+            if asset and isinstance(asset.get('url'), str) and _is_oss(asset['url']):
+                display_video_url = asset['url']
     
     # 构建API格式的任务对象
     task = {
@@ -3989,8 +4526,8 @@ def convert_db_task_to_api_format(db_task):
     
     # 设置 content 中的 video_url、首尾帧（便于前端统一从 content 或顶层读取）
     content = task.get('content', {}) if isinstance(task.get('content'), dict) else {}
-    if db_task.get('video_url'):
-        content['video_url'] = db_task.get('video_url')
+    if display_video_url:
+        content['video_url'] = display_video_url
     if db_task.get('last_frame_image_url'):
         content['last_frame_image_url'] = db_task.get('last_frame_image_url')
     if db_task.get('first_frame_url'):
@@ -4004,13 +4541,16 @@ def convert_db_task_to_api_format(db_task):
 @app.route('/api/video-tasks/<task_id>', methods=['DELETE'])
 @login_required
 def api_video_task_delete(task_id):
-    """删除视频生成任务"""
+    """删除视频生成任务（仅允许删除当前项目内的任务）"""
     try:
         user_id = session.get('user_id')
         project_id = get_current_project_id()
-        
+        if not project_id:
+            return jsonify({'success': False, 'error': '请先选择项目'}), 400
+        db_task = database.get_video_task_by_id(task_id)
+        if not db_task or db_task.get('user_id') != user_id or db_task.get('project_id') != project_id:
+            return jsonify({'success': False, 'error': '任务不存在或不属于当前项目'}), 403
         log_request('DELETE', f'/api/video-tasks/{task_id}', user_id)
-        
         # 检查是否配置了 ARK_API_KEY
         ark_api_key = os.environ.get('ARK_API_KEY')
         if not ark_api_key:
@@ -4340,10 +4880,10 @@ def api_content_library():
     try:
         user_id = session.get('user_id')
         project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': True, 'assets': [], 'type': request.args.get('type', 'person')})
         library_type = request.args.get('type', 'person')  # person, scene, image, video
-        
         log_request('GET', '/api/content-library', user_id, f'类型: {library_type}')
-        
         assets = []
         if library_type == 'person':
             assets = database.get_person_assets(user_id, project_id)
@@ -4402,25 +4942,23 @@ def api_content_library():
 @app.route('/api/delete-image-asset', methods=['POST'])
 @login_required
 def delete_image_asset():
-    """删除图片库资源"""
+    """删除图片库资源（按当前项目隔离，仅能删当前项目内资源）"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': False, 'error': '请先选择项目'}), 400
         data = request.get_json()
         asset_id = data.get('id')
-        
         if not asset_id:
             return jsonify({'success': False, 'error': '缺少资源ID'}), 400
-        
-        # 如果是record_开头的ID，从生成记录中删除
         if asset_id.startswith('record_'):
             record_id = asset_id.replace('record_', '')
-            database.delete_record(int(record_id))
+            database.delete_record(int(record_id), user_id, project_id)
         else:
-            database.delete_image_asset(int(asset_id))
-        
-        log_operation('删除图片资源', f'用户ID: {user_id}, 资源ID: {asset_id}')
+            database.delete_image_asset(int(asset_id), user_id, project_id)
+        log_operation('删除图片资源', f'用户ID: {user_id}, 项目ID: {project_id}, 资源ID: {asset_id}')
         return jsonify({'success': True})
-    
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('删除图片资源失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
@@ -4429,20 +4967,19 @@ def delete_image_asset():
 @app.route('/api/delete-video-asset', methods=['POST'])
 @login_required
 def delete_video_asset():
-    """删除视频库资源"""
+    """删除视频库资源（按当前项目隔离，仅能删当前项目内资源）"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': False, 'error': '请先选择项目'}), 400
         data = request.get_json()
         asset_id = data.get('id')
-        
         if not asset_id:
             return jsonify({'success': False, 'error': '缺少资源ID'}), 400
-        
-        database.delete_video_asset(int(asset_id))
-        
-        log_operation('删除视频资源', f'用户ID: {user_id}, 资源ID: {asset_id}')
+        database.delete_video_asset(int(asset_id), user_id, project_id)
+        log_operation('删除视频资源', f'用户ID: {user_id}, 项目ID: {project_id}, 资源ID: {asset_id}')
         return jsonify({'success': True})
-    
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('删除视频资源失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
@@ -4451,16 +4988,16 @@ def delete_video_asset():
 @app.route('/api/records')
 @login_required
 def get_records():
-    """获取生成记录"""
+    """获取生成记录（按当前项目隔离）"""
     try:
         user_id = session.get('user_id')
         project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': True, 'records': [], 'total': 0})
         limit = int(request.args.get('limit', 20))
         offset = int(request.args.get('offset', 0))
         search = request.args.get('search', '')
-        
         log_request('GET', '/api/records', user_id, f'limit={limit}, offset={offset}, search={search[:20]}' if search else f'limit={limit}, offset={offset}')
-        
         records = database.get_all_records(user_id, project_id, limit, offset)
         
         # 如果有搜索条件，过滤结果
@@ -4489,12 +5026,15 @@ def get_records():
 @app.route('/api/records/<int:record_id>', methods=['DELETE'])
 @login_required
 def delete_record(record_id):
-    """删除记录"""
+    """删除生成记录（按当前项目隔离，仅能删当前项目内记录）"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': False, 'error': '请先选择项目'}), 400
         log_request('DELETE', f'/api/records/{record_id}', user_id)
-        database.delete_record(record_id)
-        log_operation('删除记录', f'用户ID: {user_id}, 记录ID: {record_id}')
+        database.delete_record(record_id, user_id, project_id)
+        log_operation('删除记录', f'用户ID: {user_id}, 项目ID: {project_id}, 记录ID: {record_id}')
         return jsonify({'success': True})
     except Exception as e:
         user_id = session.get('user_id')
@@ -4504,34 +5044,29 @@ def delete_record(record_id):
 @app.route('/api/batch-delete', methods=['POST'])
 @login_required
 def batch_delete_records():
-    """批量删除记录"""
+    """批量删除记录（按当前项目隔离，仅能删当前项目内记录）"""
     try:
         user_id = session.get('user_id')
+        project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': False, 'message': '请先选择项目'}), 400
         data = request.get_json()
         record_ids = data.get('ids', [])
         log_request('POST', '/api/batch-delete', user_id, f'记录数: {len(record_ids)}')
-        
         if not record_ids:
             log_operation('批量删除记录', f'用户ID: {user_id}, 未选择记录', 'WARNING')
             return jsonify({'success': False, 'message': '未选择要删除的记录'})
-        
         deleted_count = 0
         failed_count = 0
-        
         for record_id in record_ids:
             try:
-                database.delete_record(record_id)
+                database.delete_record(record_id, user_id, project_id)
                 deleted_count += 1
             except Exception as e:
                 log_operation('删除单条记录失败', f'用户ID: {user_id}, 记录ID: {record_id}, 错误: {str(e)}', 'WARNING')
                 failed_count += 1
-        
-        log_operation('批量删除记录', f'用户ID: {user_id}, 成功: {deleted_count}, 失败: {failed_count}')
-        return jsonify({
-            'success': True,
-            'deleted': deleted_count,
-            'failed': failed_count
-        })
+        log_operation('批量删除记录', f'用户ID: {user_id}, 项目ID: {project_id}, 成功: {deleted_count}, 失败: {failed_count}')
+        return jsonify({'success': True, 'deleted': deleted_count, 'failed': failed_count})
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('批量删除记录失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
@@ -4749,38 +5284,33 @@ def delete_sample_image():
 @app.route('/api/delete-library-asset', methods=['POST'])
 @login_required
 def delete_library_asset():
-    """删除数据库中人物/场景库的条目（key 格式: db_person_<id> 或 db_scene_<id>）"""
+    """删除数据库中人物/场景库的条目（按当前项目隔离，仅能删当前项目内资源；key 格式: db_person_<id> 或 db_scene_<id>）"""
     try:
         data = request.get_json() or {}
         key = data.get('key')
         user_id = session.get('user_id')
         project_id = get_current_project_id()
+        if not project_id:
+            return jsonify({'success': False, 'error': '请先选择项目'}), 400
         log_request('POST', '/api/delete-library-asset', user_id, f'key: {key}')
-
         if not key:
             log_operation('删除库资源失败', f'用户ID: {user_id}, 错误: 缺少key', 'WARNING')
             return jsonify({'success': False, 'error': '缺少 key'}), 400
-
         if key.startswith('db_person_'):
             aid = int(key.split('_')[-1])
-            # 删除数据库记录
-            try:
-                # 若存在本地文件路径，尝试删除
-                conn_asset = database.get_person_assets(user_id, project_id)
-            except Exception:
-                conn_asset = []
-
-            database.delete_person_asset(aid)
-            log_operation('删除人物库资源', f'用户ID: {user_id}, 资源ID: {aid}')
+            conn_asset = database.get_person_assets(user_id, project_id)
+            if not any(a.get('id') == aid for a in conn_asset):
+                return jsonify({'success': False, 'error': '该资源不属于当前项目或不存在'}), 403
+            database.delete_person_asset(aid, user_id, project_id)
+            log_operation('删除人物库资源', f'用户ID: {user_id}, 项目ID: {project_id}, 资源ID: {aid}')
             return jsonify({'success': True})
         elif key.startswith('db_scene_'):
             aid = int(key.split('_')[-1])
-            try:
-                conn_asset = database.get_scene_assets(user_id, project_id)
-            except Exception:
-                conn_asset = []
-            database.delete_scene_asset(aid)
-            log_operation('删除场景库资源', f'用户ID: {user_id}, 资源ID: {aid}')
+            conn_asset = database.get_scene_assets(user_id, project_id)
+            if not any(a.get('id') == aid for a in conn_asset):
+                return jsonify({'success': False, 'error': '该资源不属于当前项目或不存在'}), 403
+            database.delete_scene_asset(aid, user_id, project_id)
+            log_operation('删除场景库资源', f'用户ID: {user_id}, 项目ID: {project_id}, 资源ID: {aid}')
             return jsonify({'success': True})
         else:
             log_operation('删除库资源失败', f'用户ID: {user_id}, 错误: 不支持的key类型 {key}', 'WARNING')
@@ -5275,10 +5805,6 @@ def output_file(user_id, filename):
         return '403 Forbidden', 403
     legacy_folder = os.path.join(app.config['OUTPUT_FOLDER'], str(user_id))
     return send_from_directory(legacy_folder, filename)
-
-@app.route('/favicon.ico')
-def favicon():
-    return '', 204  # 返回空响应，避免 404
 
 @app.route('/api/analyze-script', methods=['POST'])
 @login_required

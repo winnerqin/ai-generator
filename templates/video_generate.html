@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>视频生成 - Ai创作工具</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <style>
         .app-shell { display: flex; min-height: 100vh; }
         .main-content { padding: 0; }
@@ -20,16 +21,16 @@
         .type-card { padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(86,111,255,0.25); cursor: pointer; }
         .type-card.active { background: rgba(86,111,255,0.2); border-color: rgba(86,111,255,0.5); }
         .image-preview { width: 100%; max-width: 260px; border-radius: 12px; overflow: hidden; border: 1px solid rgba(86,111,255,0.25); }
-        .image-preview img { width: 100%; height: 160px; object-fit: cover; display: block; }
+        .image-preview img { width: 100%; height: 160px; object-fit: contain; display: block; background: rgba(0,0,0,0.12); }
         .reference-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
         .reference-item { border-radius: 12px; overflow: hidden; border: 1px solid rgba(86,111,255,0.25); position: relative; }
-        .reference-item img { width: 100%; height: 140px; object-fit: cover; display: block; }
+        .reference-item img { width: 100%; height: 140px; object-fit: contain; display: block; background: rgba(0,0,0,0.12); }
         .reference-item button { position: absolute; top: 6px; right: 6px; }
         .modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(6,10,20,0.7); z-index: 2000; }
         .modal-card { width: min(980px, 92vw); max-height: 86vh; overflow: auto; padding: 16px; border-radius: 16px; }
         .library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
         .library-card { border-radius: 12px; overflow: hidden; border: 1px solid rgba(86,111,255,0.25); cursor: pointer; }
-        .library-card img { width: 100%; height: 140px; object-fit: cover; display: block; }
+        .library-card img { width: 100%; height: 140px; object-fit: contain; display: block; background: rgba(0,0,0,0.12); }
         .dropzone { border: 2px dashed rgba(86,111,255,0.5); border-radius: 12px; padding: 14px; text-align: center; cursor: pointer; }
         .panel textarea { min-height: 96px; height: 96px; resize: vertical; box-sizing: border-box; }
         .panel select, .panel input[type="number"], .panel input[type="text"] { height: 32px; box-sizing: border-box; }
@@ -51,13 +52,13 @@
         .video-play-fullscreen .video-close { position: absolute; top: 16px; right: 16px; z-index: 10; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,0.2); color: #fff; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
         .video-play-fullscreen .video-close:hover { background: rgba(255,255,255,0.35); }
         .frame-thumbs { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-        .frame-thumbs img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; border: 1px solid rgba(86,111,255,0.25); cursor: pointer; }
+        .frame-thumbs img { width: 40px; height: 40px; object-fit: contain; border-radius: 6px; border: 1px solid rgba(86,111,255,0.25); cursor: pointer; background: rgba(0,0,0,0.12); }
     </style>
 </head>
 <body>
     <div id="reactApp"></div>
     <script>
-        window.__APP_CONTEXT__ = { username: "{{ user.username }}" };
+        window.__APP_CONTEXT__ = { username: "{{ user.username }}", is_system_admin: {{ 'true' if user.username == 'system_admin' else 'false' }} };
     </script>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -84,6 +85,14 @@
                     <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
                     <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">📋</span><span className="sidebar-nav-text">转换工具</span></a>
                     <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
+                    <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">🔄</span><span className="sidebar-nav-text">工具</span></a>
+                    {window.__APP_CONTEXT__?.is_system_admin && (
+                        <>
+                            <div className="sidebar-nav-divider"></div>
+                            <a href="/admin" className="sidebar-nav-item"><span className="sidebar-nav-icon">🛠️</span><span className="sidebar-nav-text">系统管理</span></a>
+                            <a href="/stats" className="sidebar-nav-item"><span className="sidebar-nav-icon">📈</span><span className="sidebar-nav-text">系统统计</span></a>
+                        </>
+                    )}
                 </div>
                 <div className="sidebar-nav-user">
                     <div className="sidebar-nav-user-info">

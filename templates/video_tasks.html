@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>视频任务 - Ai创作工具</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <style>
         .app-shell { display: flex; min-height: 100vh; }
         .main-content { padding: 0; }
@@ -30,13 +31,13 @@
         .video-play-fullscreen .video-close { position: absolute; top: 16px; right: 16px; z-index: 10; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,0.2); color: #fff; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
         .video-play-fullscreen .video-close:hover { background: rgba(255,255,255,0.35); }
         .frame-thumbs { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-        .frame-thumbs img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; border: 1px solid rgba(86,111,255,0.25); cursor: pointer; }
+        .frame-thumbs img { width: 40px; height: 40px; object-fit: contain; border-radius: 6px; border: 1px solid rgba(86,111,255,0.25); cursor: pointer; background: rgba(0,0,0,0.12); }
     </style>
 </head>
 <body>
     <div id="reactApp"></div>
     <script>
-        window.__APP_CONTEXT__ = { username: "{{ user.username }}" };
+        window.__APP_CONTEXT__ = { username: "{{ user.username }}", is_system_admin: {{ 'true' if user.username == 'system_admin' else 'false' }} };
     </script>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -63,6 +64,14 @@
                     <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
                     <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">📋</span><span className="sidebar-nav-text">转换工具</span></a>
                     <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
+                    <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">🔄</span><span className="sidebar-nav-text">工具</span></a>
+                    {window.__APP_CONTEXT__?.is_system_admin && (
+                        <>
+                            <div className="sidebar-nav-divider"></div>
+                            <a href="/admin" className="sidebar-nav-item"><span className="sidebar-nav-icon">🛠️</span><span className="sidebar-nav-text">系统管理</span></a>
+                            <a href="/stats" className="sidebar-nav-item"><span className="sidebar-nav-icon">📈</span><span className="sidebar-nav-text">系统统计</span></a>
+                        </>
+                    )}
                 </div>
                 <div className="sidebar-nav-user">
                     <div className="sidebar-nav-user-info">
@@ -137,11 +146,12 @@
             const loadTasks = async (page = currentPage) => {
                 setError('');
                 let url = `/api/video-tasks?page=${page}&page_size=${pageSize}`;
+                if (currentProjectId) url += `&project_id=${encodeURIComponent(currentProjectId)}`;
                 if (taskIdSearch) url += `&task_id=${encodeURIComponent(taskIdSearch)}`;
                 if (statusFilter) url += `&status=${encodeURIComponent(statusFilter)}`;
                 if (startDate) url += `&start_date=${encodeURIComponent(startDate)}`;
                 if (endDate) url += `&end_date=${encodeURIComponent(endDate)}`;
-                const resp = await fetch(url);
+                const resp = await fetch(url, { cache: 'no-store' });
                 const data = await resp.json();
                 if (!data.success) {
                     setError(data.error || '查询失败');
@@ -158,9 +168,10 @@
                 }
             };
 
+            // 初始加载与切换项目后重新拉取（依赖 currentProjectId 避免缓存导致列表相同）
             useEffect(() => {
                 loadTasks(1);
-            }, []);
+            }, [currentProjectId]);
 
             useEffect(() => {
                 if (!autoRefresh) return;

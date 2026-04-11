@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>单图生成 - Ai创作工具</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <style>
         .app-shell {
             display: flex;
@@ -133,8 +134,9 @@
         .sample-item img {
             width: 100%;
             height: 90px;
-            object-fit: cover;
+            object-fit: contain;
             display: block;
+            background: rgba(0,0,0,0.12);
         }
         .reference-row {
             display: flex;
@@ -170,8 +172,9 @@
         .upload-ref-thumb img {
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: contain;
             display: block;
+            background: rgba(0,0,0,0.12);
         }
         .upload-ref-thumb .remove-ref-btn {
             position: absolute;
@@ -223,8 +226,9 @@
         .result-card img {
             width: 100%;
             height: 160px;
-            object-fit: cover;
+            object-fit: contain;
             display: block;
+            background: rgba(0,0,0,0.12);
         }
         .modal {
             position: fixed;
@@ -293,7 +297,8 @@
     <div id="reactApp"></div>
     <script>
         window.__APP_CONTEXT__ = {
-            username: "{{ user.username }}"
+            username: "{{ user.username }}",
+            is_system_admin: {{ 'true' if user.username == 'system_admin' else 'false' }}
         };
     </script>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -331,6 +336,14 @@
                     <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
                     <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">📋</span><span className="sidebar-nav-text">转换工具</span></a>
                     <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
+                    <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">🔄</span><span className="sidebar-nav-text">工具</span></a>
+                    {window.__APP_CONTEXT__?.is_system_admin && (
+                        <>
+                            <div className="sidebar-nav-divider"></div>
+                            <a href="/admin" className="sidebar-nav-item"><span className="sidebar-nav-icon">🛠️</span><span className="sidebar-nav-text">系统管理</span></a>
+                            <a href="/stats" className="sidebar-nav-item"><span className="sidebar-nav-icon">📈</span><span className="sidebar-nav-text">系统统计</span></a>
+                        </>
+                    )}
                 </div>
                 <div className="sidebar-nav-user">
                     <div className="sidebar-nav-user-info">
@@ -443,19 +456,22 @@
                 }
             }, []);
 
+            // 随当前项目与分类重新拉取示例图/最近图，URL 带 project_id 并禁用缓存，避免切换项目后显示相同内容
             useEffect(() => {
+                const projectParam = currentProjectId ? `&project_id=${currentProjectId}` : '';
+                const opts = { cache: 'no-store' };
                 if (sampleCategory === 'recent') {
-                    fetch('/api/recent-images?limit=50').then(res => res.json()).then(data => {
+                    fetch(`/api/recent-images?limit=50${projectParam}`, opts).then(res => res.json()).then(data => {
                         if (data.success) setSampleImages(data.images || []);
                         else setSampleImages([]);
                     });
                     return;
                 }
-                fetch(`/api/sample-images?category=${sampleCategory}`).then(res => res.json()).then(data => {
+                fetch(`/api/sample-images?category=${sampleCategory}${projectParam}`, opts).then(res => res.json()).then(data => {
                     if (data.success) setSampleImages(data.images || []);
                     else setSampleImages([]);
                 });
-            }, [sampleCategory]);
+            }, [sampleCategory, currentProjectId]);
 
             const referenceChips = useMemo(() => {
                 return selectedSample.map(url => ({ type: 'sample', url }))
@@ -949,7 +965,8 @@
             left: 0;
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: contain;
+            background: rgba(0,0,0,0.12);
         }
         
         .preview-image .remove-btn {
@@ -1007,8 +1024,9 @@
         .reference-image img {
             width: 100%;
             height: 70px;
-            object-fit: cover;
+            object-fit: contain;
             display: block;
+            background: rgba(0,0,0,0.12);
         }
 
         .reference-image .remove-btn {
@@ -1433,9 +1451,10 @@
         .sample-image-item img {
             width: 100%;
             height: 100px;
-            object-fit: cover;
+            object-fit: contain;
             display: block;
             cursor: pointer;
+            background: rgba(0,0,0,0.12);
         }
         
         .sample-image-count {
@@ -1581,6 +1600,10 @@
             <a href="/content-management" class="sidebar-nav-item">
                 <span class="sidebar-nav-icon">📚</span>
                 <span class="sidebar-nav-text">内容管理</span>
+            </a>
+            <a href="/txt2csv" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🔄</span>
+                <span class="sidebar-nav-text">工具</span>
             </a>
             {% if user.username == 'system_admin' %}
             <div class="sidebar-nav-divider"></div>
