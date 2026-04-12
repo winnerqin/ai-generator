@@ -321,3 +321,56 @@ def test_get_task_for_terminal_status_uses_local_data_only(monkeypatch):
     assert task["updated_at"] == "2026-04-12 10:05:00"
     assert task["token_usage"] == 77
     assert saved_video == {}
+
+
+def test_build_payload_resolves_local_upload_reference_urls(monkeypatch, tmp_path):
+    import importlib
+    from pathlib import Path
+
+    omni_module = importlib.import_module("app.services.omni_video_service")
+
+    upload_root = tmp_path / "uploads"
+    image_path = upload_root / "user_1" / "material_image" / "demo.jpg"
+    video_path = upload_root / "user_1" / "media_video" / "demo.mp4"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    image_path.write_bytes(b"img")
+    video_path.write_bytes(b"video")
+
+    monkeypatch.setattr(omni_module.config, "UPLOAD_FOLDER", str(upload_root))
+
+    uploaded = []
+
+    def fake_upload(file_path, user_id=None, project_id=None, file_type="image"):
+        uploaded.append((Path(file_path).name, user_id, project_id, file_type))
+        return f"https://cdn.example.com/{Path(file_path).name}"
+
+    monkeypatch.setattr(omni_module.oss_service, "is_available", lambda: True)
+    monkeypatch.setattr(omni_module.oss_service, "upload_file", fake_upload)
+
+    payload = omni_module.build_omni_video_payload(
+        {
+            "_user_id": 1,
+            "_project_id": 2,
+            "prompt": "pet joins the battle",
+            "model": "doubao-seedance-2-0-260128",
+            "resolution": "480p",
+            "aspect_ratio": "9:16",
+            "duration": 6,
+            "reference_urls": [
+                "/uploads/user_1/material_image/demo.jpg",
+                "/uploads/user_1/media_video/demo.mp4",
+            ],
+        }
+    )
+
+    assert payload["reference_urls"] == [
+        "https://cdn.example.com/demo.jpg",
+        "https://cdn.example.com/demo.mp4",
+    ]
+    assert payload["content"][1]["image_url"]["url"] == "https://cdn.example.com/demo.jpg"
+    assert payload["content"][2]["video_url"]["url"] == "https://cdn.example.com/demo.mp4"
+    assert uploaded == [
+        ("demo.jpg", 1, 2, "image"),
+        ("demo.mp4", 1, 2, "video"),
+    ]

@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import database
 from app.config import config
 from app.services.omni_video_client import omni_video_client
+from app.services.oss_service import oss_service
 
 SUPPORTED_OMNI_MODELS = {
     "doubao-seedance-2-0-260128",
@@ -25,6 +26,61 @@ def _normalize_reference_urls(reference_urls: list[str] | None) -> list[str]:
     if not reference_urls:
         return []
     return [url.strip() for url in reference_urls if isinstance(url, str) and url.strip()]
+
+
+def _infer_upload_file_type(url: str) -> str:
+    lower = url.lower()
+    if any(lower.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")):
+        return "image"
+    if any(lower.endswith(ext) for ext in (".mp4", ".mov", ".webm", ".avi", ".mkv")):
+        return "video"
+    if any(lower.endswith(ext) for ext in (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac")):
+        return "document"
+    return "document"
+
+
+def _resolve_reference_url(
+    url: str,
+    *,
+    user_id: int | None,
+    project_id: int | None,
+    public_origin: str | None,
+) -> str:
+    value = (url or "").strip()
+    if not value:
+        return value
+    if value.startswith(("http://", "https://")):
+        return value
+
+    local_path: Path | None = None
+    public_path: str | None = None
+    if value.startswith("/uploads/"):
+        relative_path = value.removeprefix("/uploads/").lstrip("/\\")
+        local_path = Path(config.UPLOAD_FOLDER) / relative_path
+        public_path = value
+    else:
+        candidate = Path(value)
+        if candidate.exists():
+            local_path = candidate
+            try:
+                public_path = f"/uploads/{candidate.resolve().relative_to(Path(config.UPLOAD_FOLDER).resolve()).as_posix()}"
+            except ValueError:
+                public_path = None
+
+    if local_path and local_path.exists() and oss_service.is_available():
+        oss_url = oss_service.upload_file(
+            str(local_path),
+            user_id=user_id,
+            project_id=project_id,
+            file_type=_infer_upload_file_type(value),
+        )
+        if oss_url:
+            return oss_url
+
+    if public_path and public_origin:
+        return f"{public_origin.rstrip('/')}{public_path}"
+
+    raise ValueError("参考素材必须使用可公开访问的 URL。请先启用 OSS，或使用可被外网访问的素材地址。")
 
 
 def _coerce_bool(value: Any, default: bool = True) -> bool:
@@ -53,7 +109,15 @@ def _content_item_for_url(url: str) -> dict[str, Any]:
 def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
     """Map local form fields into an omni-reference request payload."""
 
-    reference_urls = _normalize_reference_urls(data.get("reference_urls"))
+    reference_urls = [
+        _resolve_reference_url(
+            url,
+            user_id=data.get("_user_id"),
+            project_id=data.get("_project_id"),
+            public_origin=(data.get("_public_origin") or "").strip() or None,
+        )
+        for url in _normalize_reference_urls(data.get("reference_urls"))
+    ]
     model = (data.get("model") or config.SEEDANCE_OMNI_MODEL or "").strip()
     resolution = str(data.get("resolution") or "720p").strip().lower()
     aspect_ratio = str(data.get("aspect_ratio") or data.get("ratio") or "16:9").strip()

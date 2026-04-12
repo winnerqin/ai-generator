@@ -40,6 +40,9 @@ def create_omni_video_task():
     user_id = session.get("user_id")
     project_id = session.get("current_project_id")
     data = request.get_json(silent=True) or {}
+    data["_user_id"] = user_id
+    data["_project_id"] = project_id
+    data["_public_origin"] = request.host_url.rstrip("/")
     logger.info(
         "[omni-video][create][request] user_id=%s project_id=%s model=%s payload=%s",
         user_id,
