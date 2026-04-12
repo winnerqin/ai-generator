@@ -9,6 +9,74 @@ from pathlib import Path
 
 DB_PATH = 'generation_records.db'
 
+
+def ensure_media_library_tables():
+    """Ensure media library tables exist for older databases."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS image_library (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            project_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            filename TEXT NOT NULL,
+            url TEXT NOT NULL,
+            meta TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    '''
+    )
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS video_library (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            project_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            filename TEXT NOT NULL,
+            url TEXT NOT NULL,
+            meta TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    '''
+    )
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS audio_library (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            project_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            filename TEXT NOT NULL,
+            url TEXT NOT NULL,
+            meta TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    '''
+    )
+
+    for table_name in ('image_library', 'video_library', 'audio_library'):
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        cols = [col[1] for col in cursor.fetchall()]
+        if 'project_id' not in cols:
+            cursor.execute(f'ALTER TABLE {table_name} ADD COLUMN project_id INTEGER')
+
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_image_user_project_created ON image_library(user_id, project_id, created_at DESC)'
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_video_user_project_created ON video_library(user_id, project_id, created_at DESC)'
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_audio_user_project_created ON audio_library(user_id, project_id, created_at DESC)'
+    )
+
+    conn.commit()
+    conn.close()
+
 def init_database():
     """初始化数据库"""
     conn = sqlite3.connect(DB_PATH)
@@ -284,6 +352,18 @@ def init_database():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS audio_library (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            project_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            filename TEXT NOT NULL,
+            url TEXT NOT NULL,
+            meta TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
     
     # 创建视频任务表
     cursor.execute('''
@@ -317,12 +397,58 @@ def init_database():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
+
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS omni_video_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            task_id TEXT UNIQUE NOT NULL,
+            project_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'queued',
+            model TEXT,
+            mode TEXT,
+            prompt TEXT,
+            input_payload_json TEXT,
+            raw_response_json TEXT,
+            result_json TEXT,
+            fail_reason TEXT,
+            video_url TEXT,
+            cover_url TEXT,
+            first_frame_url TEXT,
+            last_frame_url TEXT,
+            reference_urls_json TEXT,
+            duration INTEGER,
+            frame_count INTEGER,
+            resolution TEXT,
+            aspect_ratio TEXT,
+            seed INTEGER,
+            token_usage INTEGER,
+            usage_json TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    '''
+    )
     
     # 创建索引以提高查询性能
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_user_id ON video_tasks(user_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_task_id ON video_tasks(task_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_status ON video_tasks(status)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_created_at ON video_tasks(created_at)')
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_omni_video_tasks_user_id ON omni_video_tasks(user_id)'
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_omni_video_tasks_task_id ON omni_video_tasks(task_id)'
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_omni_video_tasks_status ON omni_video_tasks(status)'
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_omni_video_tasks_created_at ON omni_video_tasks(created_at)'
+    )
     
     # ===== 项目字段迁移与默认项目 =====
     def ensure_column(table_name, column_name, column_def):
@@ -337,16 +463,23 @@ def init_database():
         'scene_library',
         'image_library',
         'video_library',
-        'video_tasks'
+        'audio_library',
+        'video_tasks',
+        'omni_video_tasks',
     ]:
         ensure_column(table_name, 'project_id', 'INTEGER')
+    ensure_column('omni_video_tasks', 'frame_count', 'INTEGER')
+    ensure_column('omni_video_tasks', 'token_usage', 'INTEGER')
+    ensure_column('omni_video_tasks', 'usage_json', 'TEXT')
     
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_records_user_project_created ON generation_records(user_id, project_id, created_at DESC)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_person_user_project_created ON person_library(user_id, project_id, created_at DESC)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_scene_user_project_created ON scene_library(user_id, project_id, created_at DESC)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_image_user_project_created ON image_library(user_id, project_id, created_at DESC)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_user_project_created ON video_library(user_id, project_id, created_at DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_audio_user_project_created ON audio_library(user_id, project_id, created_at DESC)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_user_project_created ON video_tasks(user_id, project_id, created_at DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_omni_video_tasks_user_project_created ON omni_video_tasks(user_id, project_id, created_at DESC)')
     
     # 为现有用户创建默认项目并回填 project_id
     cursor.execute('SELECT id FROM users')
@@ -375,7 +508,9 @@ def init_database():
             'scene_library',
             'image_library',
             'video_library',
-            'video_tasks'
+            'audio_library',
+            'video_tasks',
+            'omni_video_tasks',
         ]:
             cursor.execute(
                 f"UPDATE {table_name} SET project_id = ? WHERE user_id = ? AND (project_id IS NULL OR project_id = 0)",
@@ -553,6 +688,7 @@ def delete_scene_asset(asset_id, user_id=None, project_id=None):
 
 def save_image_asset(user_id, filename, url, meta=None, project_id=None):
     """保存图片到图片库"""
+    ensure_media_library_tables()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -566,6 +702,7 @@ def save_image_asset(user_id, filename, url, meta=None, project_id=None):
 
 def save_video_asset(user_id, filename, url, meta=None, project_id=None):
     """保存视频到视频库"""
+    ensure_media_library_tables()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -579,6 +716,7 @@ def save_video_asset(user_id, filename, url, meta=None, project_id=None):
 
 def get_image_assets(user_id, project_id=None, limit=500):
     """获取图片库资源"""
+    ensure_media_library_tables()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -598,6 +736,7 @@ def get_image_assets(user_id, project_id=None, limit=500):
 
 def get_video_assets(user_id, project_id=None, limit=500):
     """获取视频库资源"""
+    ensure_media_library_tables()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -615,8 +754,81 @@ def get_video_assets(user_id, project_id=None, limit=500):
     conn.close()
     return assets
 
+
+def rename_video_asset(asset_id, filename, user_id=None, project_id=None):
+    """Rename a video asset in the video library."""
+    ensure_media_library_tables()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    query = 'UPDATE video_library SET filename = ? WHERE id = ?'
+    params = [filename, asset_id]
+    if user_id is not None:
+        query += ' AND user_id = ?'
+        params.append(user_id)
+    if project_id is not None:
+        query += ' AND project_id = ?'
+        params.append(project_id)
+    cursor.execute(query, tuple(params))
+    updated = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return updated
+
+
+def save_audio_asset(user_id, filename, url, meta=None, project_id=None):
+    """淇濆瓨闊抽鍒伴煶棰戝簱"""
+    ensure_media_library_tables()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        '''
+        INSERT INTO audio_library (user_id, project_id, created_at, filename, url, meta)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''',
+        (
+            user_id,
+            project_id,
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            filename,
+            url,
+            json.dumps(meta or {}),
+        ),
+    )
+    asset_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return asset_id
+
+
+def get_audio_assets(user_id, project_id=None, limit=500):
+    """鑾峰彇闊抽搴撹祫婧?"""
+    ensure_media_library_tables()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute(
+            'SELECT * FROM audio_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
+            (user_id, limit),
+        )
+    else:
+        cursor.execute(
+            'SELECT * FROM audio_library WHERE user_id = ? AND project_id = ? ORDER BY created_at DESC LIMIT ?',
+            (user_id, project_id, limit),
+        )
+    rows = cursor.fetchall()
+    assets = [dict(r) for r in rows]
+    for a in assets:
+        try:
+            a['meta'] = json.loads(a.get('meta') or '{}')
+        except Exception:
+            a['meta'] = {}
+    conn.close()
+    return assets
+
 def get_video_by_task_id(user_id, task_id, project_id=None):
     """根据任务ID获取视频库中的视频"""
+    ensure_media_library_tables()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -824,8 +1036,268 @@ def get_video_task_by_id(task_id):
     conn.close()
     return None
 
+
+def _ensure_omni_video_task_schema(cursor):
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS omni_video_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            task_id TEXT UNIQUE NOT NULL,
+            project_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'queued',
+            model TEXT,
+            mode TEXT,
+            prompt TEXT,
+            input_payload_json TEXT,
+            raw_response_json TEXT,
+            result_json TEXT,
+            fail_reason TEXT,
+            video_url TEXT,
+            cover_url TEXT,
+            first_frame_url TEXT,
+            last_frame_url TEXT,
+            reference_urls_json TEXT,
+            duration INTEGER,
+            frame_count INTEGER,
+            resolution TEXT,
+            aspect_ratio TEXT,
+            seed INTEGER,
+            token_usage INTEGER,
+            usage_json TEXT
+        )
+    '''
+    )
+    cursor.execute("PRAGMA table_info(omni_video_tasks)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if "frame_count" not in columns:
+        cursor.execute("ALTER TABLE omni_video_tasks ADD COLUMN frame_count INTEGER")
+    if "token_usage" not in columns:
+        cursor.execute("ALTER TABLE omni_video_tasks ADD COLUMN token_usage INTEGER")
+    if "usage_json" not in columns:
+        cursor.execute("ALTER TABLE omni_video_tasks ADD COLUMN usage_json TEXT")
+
+
+def _decode_omni_video_task(row):
+    task = dict(row)
+    for field in ("input_payload_json", "raw_response_json", "result_json", "reference_urls_json", "usage_json"):
+        raw = task.get(field)
+        if not raw:
+            task[field] = [] if field == "reference_urls_json" else {}
+            continue
+        try:
+            task[field] = json.loads(raw)
+        except Exception:
+            task[field] = [] if field == "reference_urls_json" else {}
+    return task
+
+
+def save_omni_video_task(data):
+    """Insert or update an omni video task."""
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    _ensure_omni_video_task_schema(cursor)
+
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute('SELECT id FROM omni_video_tasks WHERE task_id = ?', (data.get('task_id'),))
+    existing = cursor.fetchone()
+
+    params = (
+        data.get('user_id'),
+        data.get('task_id'),
+        data.get('project_id'),
+        now,
+        now,
+        data.get('status', 'queued'),
+        data.get('model'),
+        data.get('mode'),
+        data.get('prompt'),
+        json.dumps(data.get('input_payload_json', {})),
+        json.dumps(data.get('raw_response_json', {})),
+        json.dumps(data.get('result_json', {})),
+        data.get('fail_reason'),
+        data.get('video_url'),
+        data.get('cover_url'),
+        data.get('first_frame_url'),
+        data.get('last_frame_url'),
+        json.dumps(data.get('reference_urls_json', [])),
+        data.get('duration'),
+        data.get('frame_count'),
+        data.get('resolution'),
+        data.get('aspect_ratio'),
+        data.get('seed'),
+        data.get('token_usage'),
+        json.dumps(data.get('usage_json', {})),
+    )
+
+    if existing:
+        cursor.execute(
+            '''
+            UPDATE omni_video_tasks
+            SET user_id = ?, project_id = ?, updated_at = ?, status = ?, model = ?, mode = ?,
+                prompt = ?, input_payload_json = ?, raw_response_json = ?, result_json = ?,
+                fail_reason = ?, video_url = ?, cover_url = ?, first_frame_url = ?,
+                last_frame_url = ?, reference_urls_json = ?, duration = ?, frame_count = ?,
+                resolution = ?, aspect_ratio = ?, seed = ?, token_usage = ?, usage_json = ?
+            WHERE task_id = ?
+        ''',
+            (
+                data.get('user_id'),
+                data.get('project_id'),
+                now,
+                data.get('status', 'queued'),
+                data.get('model'),
+                data.get('mode'),
+                data.get('prompt'),
+                json.dumps(data.get('input_payload_json', {})),
+                json.dumps(data.get('raw_response_json', {})),
+                json.dumps(data.get('result_json', {})),
+                data.get('fail_reason'),
+                data.get('video_url'),
+                data.get('cover_url'),
+                data.get('first_frame_url'),
+                data.get('last_frame_url'),
+                json.dumps(data.get('reference_urls_json', [])),
+                data.get('duration'),
+                data.get('frame_count'),
+                data.get('resolution'),
+                data.get('aspect_ratio'),
+                data.get('seed'),
+                data.get('token_usage'),
+                json.dumps(data.get('usage_json', {})),
+                data.get('task_id'),
+            ),
+        )
+        record_id = existing[0]
+    else:
+        cursor.execute(
+            '''
+            INSERT INTO omni_video_tasks (
+                user_id, task_id, project_id, created_at, updated_at, status, model, mode,
+                prompt, input_payload_json, raw_response_json, result_json, fail_reason,
+                video_url, cover_url, first_frame_url, last_frame_url, reference_urls_json,
+                duration, frame_count, resolution, aspect_ratio, seed, token_usage, usage_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''',
+            params,
+        )
+        record_id = cursor.lastrowid
+
+    conn.commit()
+    conn.close()
+    return record_id
+
+
+def get_omni_video_task(task_id, user_id=None, project_id=None):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    _ensure_omni_video_task_schema(cursor)
+
+    query = 'SELECT * FROM omni_video_tasks WHERE task_id = ?'
+    params = [task_id]
+    if user_id is not None:
+        query += ' AND user_id = ?'
+        params.append(user_id)
+    if project_id is not None:
+        query += ' AND project_id = ?'
+        params.append(project_id)
+
+    cursor.execute(query, params)
+    row = cursor.fetchone()
+    conn.close()
+    return _decode_omni_video_task(row) if row else None
+
+
+def get_omni_video_tasks(user_id, project_id=None, status=None, search=None, start_date=None, end_date=None, limit=20, offset=0):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    _ensure_omni_video_task_schema(cursor)
+
+    query = 'SELECT * FROM omni_video_tasks WHERE user_id = ?'
+    params = [user_id]
+    if project_id is not None:
+        query += ' AND project_id = ?'
+        params.append(project_id)
+    if status:
+        query += ' AND status = ?'
+        params.append(status)
+    if search:
+        query += ' AND (task_id LIKE ? OR prompt LIKE ?)'
+        like = f'%{search}%'
+        params.extend([like, like])
+    if start_date:
+        query += ' AND DATE(created_at) >= DATE(?)'
+        params.append(start_date)
+    if end_date:
+        query += ' AND DATE(created_at) <= DATE(?)'
+        params.append(end_date)
+
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    params.extend([limit, offset])
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return [_decode_omni_video_task(row) for row in rows]
+
+
+def count_omni_video_tasks(user_id, project_id=None, status=None, search=None, start_date=None, end_date=None):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    _ensure_omni_video_task_schema(cursor)
+
+    query = 'SELECT COUNT(*) FROM omni_video_tasks WHERE user_id = ?'
+    params = [user_id]
+    if project_id is not None:
+        query += ' AND project_id = ?'
+        params.append(project_id)
+    if status:
+        query += ' AND status = ?'
+        params.append(status)
+    if search:
+        query += ' AND (task_id LIKE ? OR prompt LIKE ?)'
+        like = f'%{search}%'
+        params.extend([like, like])
+    if start_date:
+        query += ' AND DATE(created_at) >= DATE(?)'
+        params.append(start_date)
+    if end_date:
+        query += ' AND DATE(created_at) <= DATE(?)'
+        params.append(end_date)
+
+    cursor.execute(query, params)
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total
+
+
+def delete_omni_video_task(task_id, user_id=None, project_id=None):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    _ensure_omni_video_task_schema(cursor)
+
+    query = 'DELETE FROM omni_video_tasks WHERE task_id = ?'
+    params = [task_id]
+    if user_id is not None:
+        query += ' AND user_id = ?'
+        params.append(user_id)
+    if project_id is not None:
+        query += ' AND project_id = ?'
+        params.append(project_id)
+
+    cursor.execute(query, params)
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
 def delete_image_asset(asset_id, user_id=None, project_id=None):
     """删除图片库资源。传入 user_id、project_id 时仅当资源属于该用户且属于该项目时删除（项目隔离）。"""
+    ensure_media_library_tables()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     if user_id is not None and project_id is not None:
@@ -842,6 +1314,7 @@ def delete_image_asset(asset_id, user_id=None, project_id=None):
 
 def delete_video_asset(asset_id, user_id=None, project_id=None):
     """删除视频库资源。传入 user_id、project_id 时仅当资源属于该用户且属于该项目时删除（项目隔离）。"""
+    ensure_media_library_tables()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     if user_id is not None and project_id is not None:
@@ -853,6 +1326,24 @@ def delete_video_asset(asset_id, user_id=None, project_id=None):
         cursor.execute('DELETE FROM video_library WHERE id = ? AND user_id = ?', (asset_id, user_id))
     else:
         cursor.execute('DELETE FROM video_library WHERE id = ?', (asset_id,))
+    conn.commit()
+    conn.close()
+
+
+def delete_audio_asset(asset_id, user_id=None, project_id=None):
+    """鍒犻櫎闊抽搴撹祫婧愩€?"""
+    ensure_media_library_tables()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    if user_id is not None and project_id is not None:
+        cursor.execute(
+            'DELETE FROM audio_library WHERE id = ? AND user_id = ? AND (project_id = ? OR (project_id IS NULL AND ? IS NULL))',
+            (asset_id, user_id, project_id, project_id),
+        )
+    elif user_id is not None:
+        cursor.execute('DELETE FROM audio_library WHERE id = ? AND user_id = ?', (asset_id, user_id))
+    else:
+        cursor.execute('DELETE FROM audio_library WHERE id = ?', (asset_id,))
     conn.commit()
     conn.close()
 
@@ -1143,6 +1634,18 @@ def get_project_by_id(project_id):
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def delete_project(project_id):
+    """Delete a project and its membership relations."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM user_projects WHERE project_id = ?', (project_id,))
+    cursor.execute('DELETE FROM projects WHERE id = ?', (project_id,))
+    conn.commit()
+    deleted = cursor.rowcount
+    conn.close()
+    return deleted > 0
 
 
 def get_project_users(project_id):

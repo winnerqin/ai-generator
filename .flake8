@@ -1,0 +1,36 @@
+[flake8]
+max-line-length = 100
+extend-ignore =
+    E203,
+    E501,
+    W503,
+    E402,
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    env,
+    build,
+    dist,
+    migrations,
+    node_modules,
+    *.pyc,
+    .tox,
+    .eggs,
+    *.egg,
+    .coverage,
+    htmlcov,
+    .pytest_cache,
+    .mypy_cache,
+    output,
+    uploads,
+    config,
+    static,
+    templates
+max-complexity = 15
+per-file-ignores =
+    __init__.py:F401,F403
+    web_app.py:E501,W503,C901
+    app_factory.py:E501,W503
+select = B,C,E,F,W,T4,B9

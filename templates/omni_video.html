@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全能视频 - AI创作工具</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/sidebar-nav.css">
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <style>
+        .app-shell { min-height: 100vh; }
+        .main-content { padding: 0; }
+        .page-wrap { max-width: 1220px; margin: 0 auto; padding: 24px; }
+        .page-title { font-size: 1.6rem; font-weight: 700; margin-bottom: 8px; }
+        .page-subtitle { color: #aeb8d9; margin-bottom: 18px; }
+        .grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 16px; }
+        .panel { border-radius: 16px; padding: 18px; margin-bottom: 16px; }
+        .field { display: grid; gap: 8px; margin-bottom: 14px; }
+        .field input, .field select, .field textarea { width: 100%; box-sizing: border-box; }
+        .field textarea { min-height: 110px; resize: vertical; }
+        .field-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+        .asset-card { border-radius: 12px; overflow: hidden; border: 1px solid rgba(86,111,255,0.2); background: rgba(255,255,255,0.02); cursor: pointer; }
+        .asset-card.selected { border-color: rgba(86,111,255,0.9); box-shadow: 0 0 0 2px rgba(86,111,255,0.2) inset; }
+        .asset-preview { height: 120px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.15); }
+        .asset-preview img, .asset-preview video { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .asset-info { padding: 8px; display: grid; gap: 4px; font-size: 0.82rem; }
+        .selected-list { display: grid; gap: 10px; }
+        .selected-item { display: grid; grid-template-columns: 56px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; background: rgba(86,111,255,0.08); }
+        .selected-thumb { width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.16); border-radius: 10px; overflow: hidden; }
+        .selected-thumb img, .selected-thumb video { width: 100%; height: 100%; object-fit: contain; }
+        .selected-thumb { cursor: pointer; }
+        .selected-label { font-weight: 600; }
+        .upload-box { border: 2px dashed rgba(86,111,255,0.4); border-radius: 14px; padding: 18px; text-align: center; cursor: pointer; }
+        .status-box { border: 1px solid rgba(86,111,255,0.22); border-radius: 14px; padding: 12px; background: rgba(86,111,255,0.05); }
+        .task-meta { display: grid; gap: 8px; font-size: 0.92rem; }
+        .video-preview { width: 100%; margin-top: 14px; border-radius: 12px; background: rgba(0,0,0,0.2); }
+        .small-hint { color: #9ca8cf; font-size: 0.85rem; }
+        .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+        .picker-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+        .picker-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.84); z-index: 2200; }
+        .picker-inner { width: min(980px, 94vw); max-height: 88vh; overflow: auto; padding: 18px; border-radius: 16px; background: rgba(8,13,24,0.97); }
+        .picker-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+        .picker-toolbar { position: sticky; top: 0; z-index: 5; margin: -18px -18px 14px; padding: 18px 18px 14px; background: rgba(8,13,24,0.98); border-bottom: 1px solid rgba(86,111,255,0.18); }
+        .picker-search { margin-bottom: 14px; }
+        .picker-search input { width: 100%; box-sizing: border-box; }
+        .picker-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+        .preview-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.88); z-index: 2300; }
+        .preview-inner { width: min(860px, 92vw); max-height: 88vh; padding: 18px; border-radius: 16px; background: rgba(8,13,24,0.97); }
+        .preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+        .preview-body img, .preview-body video { width: 100%; max-height: 72vh; object-fit: contain; display: block; }
+        .preview-body audio { width: 100%; margin-top: 18px; }
+        @media (max-width: 960px) {
+            .grid { grid-template-columns: 1fr; }
+            .field-row { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body class="react-theme sidebar-compact">
+    <div class="app-shell">
+        <nav class="sidebar-nav" id="sidebarNav">
+            <div class="sidebar-nav-header">
+                <div class="sidebar-nav-title">Ai创作工具</div>
+                <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收起/展开">
+                    <span id="toggleIcon">◀</span>
+                </button>
+            </div>
+            <div class="sidebar-nav-menu">
+                <a href="/" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">🎨</span>
+                    <span class="sidebar-nav-text">单图生成</span>
+                </a>
+                <a href="/batch" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">📝</span>
+                    <span class="sidebar-nav-text">批量生成</span>
+                </a>
+                <a href="/records" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">📳</span>
+                    <span class="sidebar-nav-text">生图任务</span>
+                </a>
+                <a href="/video-generate" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">🎀</span>
+                    <span class="sidebar-nav-text">视频生成</span>
+                </a>
+                <a href="/video-tasks" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">📴</span>
+                    <span class="sidebar-nav-text">视频任务</span>
+                </a>
+                <a href="/omni-video" class="sidebar-nav-item active">
+                    <span class="sidebar-nav-icon">🎥</span>
+                    <span class="sidebar-nav-text">全能视频</span>
+                </a>
+                <a href="/omni-video-tasks" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">🗂️</span>
+                    <span class="sidebar-nav-text">全能任务</span>
+                </a>
+                <a href="/script-generate" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">📐</span>
+                    <span class="sidebar-nav-text">剧本生成</span>
+                </a>
+                <a href="/storyboard-studio" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">🎬</span>
+                    <span class="sidebar-nav-text">分镜制作</span>
+                </a>
+                <a href="/txt2csv" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">📵</span>
+                    <span class="sidebar-nav-text">转换工具</span>
+                </a>
+                <a href="/content-management" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">📚</span>
+                    <span class="sidebar-nav-text">内容管理</span>
+                </a>
+                {% if user.username == 'system_admin' %}
+                <div class="sidebar-nav-divider"></div>
+                <a href="/admin" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">🛠️</span>
+                    <span class="sidebar-nav-text">系统管理</span>
+                </a>
+                <a href="/stats" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">📱</span>
+                    <span class="sidebar-nav-text">系统统计</span>
+                </a>
+                {% endif %}
+            </div>
+            <div class="sidebar-nav-user">
+                <div class="sidebar-nav-user-info">
+                    <div class="sidebar-nav-user-avatar">👁</div>
+                    <div class="sidebar-nav-user-name">{{ user.username }}</div>
+                    <a href="/logout" class="sidebar-nav-logout">登出</a>
+                </div>
+            </div>
+        </nav>
+        <main class="main-content">
+            <div class="page-wrap">
+
+        <div class="page-title">全能视频</div>
+        <div class="page-subtitle">支持模型、分辨率、比例、时长、帧数、声音开关与内容库选材。填写帧数时优先于时长。</div>
+
+        <div class="grid">
+            <div>
+                <div class="panel">
+                    <div class="field">
+                        <label for="prompt">提示词</label>
+                        <textarea id="prompt" placeholder="描述视频内容、镜头运动、风格、节奏和重点主体"></textarea>
+                    </div>
+
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="model">模型</label>
+                            <select id="model">
+                                <option value="doubao-seedance-2-0-260128">doubao-seedance-2-0-260128</option>
+                                <option value="doubao-seedance-2-0-fast-260128">doubao-seedance-2-0-fast-260128</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="resolution">输出分辨率</label>
+                            <select id="resolution">
+                                <option value="720p" selected>720P</option>
+                                <option value="480p">480P</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="aspectRatio">比例</label>
+                            <select id="aspectRatio">
+                                <option value="16:9">16:9</option>
+                                <option value="9:16">9:16</option>
+                                <option value="1:1">1:1</option>
+                                <option value="4:3">4:3</option>
+                                <option value="3:4">3:4</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="duration">时长(秒)</label>
+                            <select id="duration">
+                                <option value="-1" selected>-1</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="7">7</option>
+                                <option value="8">8</option>
+                                <option value="9">9</option>
+                                <option value="10">10</option>
+                                <option value="11">11</option>
+                                <option value="12">12</option>
+                                <option value="13">13</option>
+                                <option value="14">14</option>
+                                <option value="15">15</option>
+                            </select>
+                            <div class="small-hint">当填写帧数时，时长会自动禁用。</div>
+                        </div>
+                        <div class="field">
+                            <label for="frameCount">帧数</label>
+                            <input id="frameCount" type="number" min="29" max="289" placeholder="29-289">
+                        </div>
+                        <div class="field">
+                            <label for="seed">Seed</label>
+                            <input id="seed" type="number" value="-1">
+                        </div>
+                    </div>
+
+                    <div class="checkbox-row">
+                        <input id="generateAudio" type="checkbox" checked>
+                        <label for="generateAudio">生成声音</label>
+                        <span class="small-hint">默认开启</span>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div style="font-weight: 600; margin-bottom: 10px;">素材上传与选择</div>
+                    <div class="upload-box" id="uploadBox">
+                        点击上传图片、音频或视频素材。上传后会自动同步到 OSS，并按类型进入对应素材库。
+                        <input id="uploadInput" type="file" accept="image/*,audio/*,video/*" multiple style="display:none;">
+                    </div>
+                    <div class="picker-actions">
+                        <button id="openImagePickerBtn" class="btn btn-secondary">选择图片素材</button>
+                        <button id="openMediaPickerBtn" class="btn btn-secondary">选择音/视频素材</button>
+                    </div>
+                    <div class="small-hint" style="margin-top: 10px;">默认不展开素材列表。点击按钮后会弹出素材选择框，支持多选。</div>
+                </div>
+            </div>
+
+            <div>
+                <div class="panel">
+                    <div style="font-weight: 600; margin-bottom: 10px;">已选全能参考素材</div>
+                    <div class="small-hint" style="margin-bottom: 10px;">图片素材最多 9 个，音/视频素材最多 3 个。</div>
+                    <div id="selectedList" class="selected-list">
+                        <div class="small-hint">还没有选择参考素材。</div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="row" style="margin-bottom: 12px;">
+                        <button id="submitBtn" class="btn btn-primary">创建全能视频任务</button>
+                        <a class="btn btn-secondary" href="/omni-video-tasks">查看任务管理</a>
+                    </div>
+                    <div class="status-box">
+                        <div id="taskStatus" class="task-meta">
+                            <div>最近任务会显示在这里。</div>
+                        </div>
+                        <video id="videoPreview" class="video-preview" controls style="display:none;"></video>
+                    </div>
+                </div>
+            </div>
+        </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="assetPickerModal" class="picker-modal">
+        <div class="picker-inner">
+            <div class="picker-toolbar">
+                <div class="picker-header">
+                    <div>
+                        <div id="pickerTitle" style="font-weight: 700; font-size: 1.1rem;">选择素材</div>
+                        <div id="pickerHint" class="small-hint"></div>
+                    </div>
+                    <button id="closePickerBtn" class="btn btn-secondary">关闭</button>
+                </div>
+                <div class="picker-search">
+                    <input id="pickerSearch" type="text" placeholder="按文件名搜索当前素材">
+                </div>
+                <div class="picker-footer" style="margin-top: 0;">
+                    <div id="pickerSelectionInfo" class="small-hint">已选择 0 个</div>
+                    <button id="applyPickerBtn" class="btn btn-primary">加入参考列表</button>
+                </div>
+            </div>
+            <div id="pickerGrid" class="asset-grid"></div>
+        </div>
+    </div>
+
+    <div id="selectedPreviewModal" class="preview-modal">
+        <div class="preview-inner">
+            <div class="preview-header">
+                <div id="selectedPreviewTitle" style="font-weight:700;">素材预览</div>
+                <button id="closeSelectedPreviewBtn" class="btn btn-secondary">关闭</button>
+            </div>
+            <div id="selectedPreviewBody" class="preview-body"></div>
+        </div>
+    </div>
+
+    <script src="/static/sidebar-nav.js"></script>
+    <script>
+        const pickerConfigs = {
+            image_material: { label: '图片素材', max: 9, hint: '可从原人物/场景素材中多选，最多 9 个。' },
+            media: { label: '音/视频素材', max: 3, hint: '可选择音频或视频素材，最多 3 个。' },
+        };
+
+        let currentPickerType = null;
+        let pickerAssets = [];
+        let tempSelectedIds = new Set();
+        let selectedAssets = [];
+
+        function debugLog(label, payload) {
+            console.group(`[OmniVideo] ${label}`);
+            console.log(payload);
+            console.groupEnd();
+        }
+
+        function isVideoAsset(asset) {
+            return asset.type === 'video' || /\.(mp4|webm|mov)$/i.test(asset.url || '');
+        }
+
+        function isAudioAsset(asset) {
+            return asset.type === 'audio' || /\.(mp3|wav|m4a|aac|ogg)$/i.test(asset.url || '');
+        }
+
+        function renderPickerGrid() {
+            const keyword = document.getElementById('pickerSearch').value.trim().toLowerCase();
+            const grid = document.getElementById('pickerGrid');
+            const assets = pickerAssets.filter((asset) => (asset.filename || '').toLowerCase().includes(keyword));
+            if (!assets.length) {
+                grid.innerHTML = '<div class="small-hint">当前素材库暂无可选素材。</div>';
+                return;
+            }
+
+            grid.innerHTML = assets.map((asset) => {
+                let preview = `<img src="${asset.url}" alt="${asset.filename || 'asset'}">`;
+                if (isVideoAsset(asset)) preview = `<video src="${asset.url}" preload="metadata"></video>`;
+                if (isAudioAsset(asset)) preview = '<div style="font-size:42px;">♪</div>';
+                return `
+                    <div class="asset-card ${tempSelectedIds.has(String(asset.id)) ? 'selected' : ''}" data-pick="${asset.id}">
+                        <div class="asset-preview">${preview}</div>
+                        <div class="asset-info">
+                            <div>${asset.filename || '-'}</div>
+                            <div class="small-hint">${asset.type || '-'}</div>
+                            <div class="small-hint">${tempSelectedIds.has(String(asset.id)) ? '已选择' : '点击选择'}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            grid.querySelectorAll('[data-pick]').forEach((card) => {
+                card.addEventListener('click', () => toggleTempAsset(card.getAttribute('data-pick')));
+            });
+        }
+
+        function getSelectionKind(asset) {
+            return isAudioAsset(asset) || isVideoAsset(asset) ? 'media' : 'image_material';
+        }
+
+        function getAssetLabel(asset) {
+            const kind = isAudioAsset(asset) ? 'audio' : (isVideoAsset(asset) ? 'video' : 'image');
+            const filtered = selectedAssets.filter((item) => {
+                if (kind === 'audio') return isAudioAsset(item);
+                if (kind === 'video') return isVideoAsset(item);
+                return !isAudioAsset(item) && !isVideoAsset(item);
+            });
+            const index = filtered.findIndex((item) => item.url === asset.url) + 1;
+            if (kind === 'audio') return `音频${index}`;
+            if (kind === 'video') return `视频${index}`;
+            return `图片${index}`;
+        }
+
+        function renderSelectedAssets() {
+            const container = document.getElementById('selectedList');
+            if (!selectedAssets.length) {
+                container.innerHTML = '<div class="small-hint">还没有选择参考素材。</div>';
+                return;
+            }
+
+            container.innerHTML = selectedAssets.map((asset, index) => {
+                let preview = `<img src="${asset.url}" alt="${asset.filename || 'asset'}">`;
+                if (isVideoAsset(asset)) preview = `<video src="${asset.url}" preload="metadata"></video>`;
+                if (isAudioAsset(asset)) preview = '<div style="font-size:28px;">♪</div>';
+                return `
+                    <div class="selected-item">
+                        <div class="selected-thumb" data-preview-selected="${index}" title="双击放大预览">${preview}</div>
+                        <div>
+                            <div class="selected-label">${getAssetLabel(asset)}</div>
+                            <div class="small-hint">双击缩略图可放大预览</div>
+                        </div>
+                        <div class="row">
+                            <button class="btn btn-danger" data-remove="${index}">移除</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.querySelectorAll('[data-remove]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    selectedAssets.splice(Number(button.getAttribute('data-remove')), 1);
+                    renderSelectedAssets();
+                });
+            });
+            container.querySelectorAll('[data-preview-selected]').forEach((thumb) => {
+                thumb.addEventListener('dblclick', () => {
+                    const asset = selectedAssets[Number(thumb.getAttribute('data-preview-selected'))];
+                    if (asset) openSelectedPreview(asset);
+                });
+            });
+        }
+
+        async function openPicker(type) {
+            currentPickerType = type;
+            const config = pickerConfigs[type];
+            document.getElementById('pickerTitle').textContent = `选择${config.label}`;
+            document.getElementById('pickerHint').textContent = config.hint;
+            document.getElementById('pickerSearch').value = '';
+            tempSelectedIds = new Set(
+                selectedAssets
+                    .filter((asset) => getSelectionKind(asset) === type)
+                    .map((asset) => String(asset.id))
+            );
+            debugLog('content-library request', { type });
+            const resp = await fetch(`/api/content-library?type=${encodeURIComponent(type)}`);
+            const data = await resp.json();
+            debugLog('content-library response', data);
+            pickerAssets = data.success ? (data.assets || []) : [];
+            updatePickerSelectionInfo();
+            renderPickerGrid();
+            document.getElementById('assetPickerModal').style.display = 'flex';
+        }
+
+        function closePicker() {
+            document.getElementById('assetPickerModal').style.display = 'none';
+            pickerAssets = [];
+            tempSelectedIds = new Set();
+            currentPickerType = null;
+        }
+
+        function updatePickerSelectionInfo() {
+            const count = tempSelectedIds.size;
+            const max = currentPickerType ? pickerConfigs[currentPickerType].max : 0;
+            document.getElementById('pickerSelectionInfo').textContent = `已选择 ${count} 个 / 最多 ${max} 个`;
+        }
+
+        function toggleTempAsset(assetId) {
+            const asset = pickerAssets.find((item) => String(item.id) === String(assetId));
+            if (!asset) return;
+            const id = String(asset.id);
+            if (tempSelectedIds.has(id)) {
+                tempSelectedIds.delete(id);
+            } else {
+                const max = pickerConfigs[currentPickerType].max;
+                if (tempSelectedIds.size >= max) {
+                    alert(`最多只能选择 ${max} 个${pickerConfigs[currentPickerType].label}`);
+                    return;
+                }
+                tempSelectedIds.add(id);
+            }
+            updatePickerSelectionInfo();
+            renderPickerGrid();
+        }
+
+        function applyPickerSelection() {
+            if (!currentPickerType) return;
+            const type = currentPickerType;
+            selectedAssets = selectedAssets.filter((asset) => getSelectionKind(asset) !== type);
+            const picked = pickerAssets.filter((asset) => tempSelectedIds.has(String(asset.id)));
+            selectedAssets = selectedAssets.concat(picked);
+            renderSelectedAssets();
+            closePicker();
+        }
+
+        function openSelectedPreview(asset) {
+            document.getElementById('selectedPreviewTitle').textContent = getAssetLabel(asset);
+            const body = document.getElementById('selectedPreviewBody');
+            if (isVideoAsset(asset)) {
+                body.innerHTML = `<video controls autoplay src="${asset.url}"></video>`;
+            } else if (isAudioAsset(asset)) {
+                body.innerHTML = `<div style="text-align:center;font-size:64px;">♪</div><audio controls autoplay src="${asset.url}"></audio>`;
+            } else {
+                body.innerHTML = `<img src="${asset.url}" alt="${getAssetLabel(asset)}">`;
+            }
+            document.getElementById('selectedPreviewModal').style.display = 'flex';
+        }
+
+        function closeSelectedPreview() {
+            document.getElementById('selectedPreviewModal').style.display = 'none';
+            document.getElementById('selectedPreviewBody').innerHTML = '';
+        }
+
+        function addUploadedAsset(asset) {
+            if (!asset || !asset.url) return;
+            const normalized = {
+                id: asset.id,
+                url: asset.url,
+                filename: asset.filename || '',
+                type: asset.type === 'image_material' ? 'image' : asset.type,
+                meta: asset.meta || {},
+            };
+            const kind = getSelectionKind(normalized);
+            const max = pickerConfigs[kind].max;
+            if (selectedAssets.some((item) => item.url === normalized.url)) return;
+            const currentCount = selectedAssets.filter((item) => getSelectionKind(item) === kind).length;
+            if (currentCount >= max) return;
+            selectedAssets.push(normalized);
+        }
+
+        async function uploadMedia(files) {
+            const list = Array.from(files || []);
+            for (const file of list) {
+                const formData = new FormData();
+                formData.append('file', file);
+                const uploadType = file.type.startsWith('image/') ? 'image_material' : 'media';
+                formData.append('type', uploadType);
+                debugLog('upload-media request', { filename: file.name, size: file.size, type: file.type });
+                const resp = await fetch('/api/upload-media-asset', { method: 'POST', body: formData });
+                const data = await resp.json();
+                debugLog('upload-media response', data);
+                if (!resp.ok || !data.success) {
+                    alert(data.error || `上传失败: ${file.name}`);
+                    return;
+                }
+                addUploadedAsset(data.asset || {});
+            }
+            renderSelectedAssets();
+            if (currentPickerType) {
+                await openPicker(currentPickerType);
+            }
+        }
+
+        function syncDurationState() {
+            const frameCount = document.getElementById('frameCount').value.trim();
+            document.getElementById('duration').disabled = !!frameCount;
+        }
+
+        function buildPayload() {
+            const frameCountValue = document.getElementById('frameCount').value.trim();
+            return {
+                prompt: document.getElementById('prompt').value.trim(),
+                model: document.getElementById('model').value,
+                resolution: document.getElementById('resolution').value,
+                duration: Number(document.getElementById('duration').value || -1),
+                frame_count: frameCountValue ? Number(frameCountValue) : null,
+                aspect_ratio: document.getElementById('aspectRatio').value,
+                seed: Number(document.getElementById('seed').value || -1),
+                generate_audio: document.getElementById('generateAudio').checked,
+                reference_urls: selectedAssets.map((asset) => asset.url).filter(Boolean),
+            };
+        }
+
+        function renderTask(task, message) {
+            const box = document.getElementById('taskStatus');
+            const video = document.getElementById('videoPreview');
+            const inputPayload = task.input_payload_json || {};
+            box.innerHTML = `
+                <div><strong>任务ID：</strong>${task.task_id || '-'}</div>
+                <div><strong>状态：</strong>${task.status || '-'}</div>
+                <div><strong>模型：</strong>${task.model || inputPayload.model || '-'}</div>
+                <div><strong>分辨率：</strong>${task.resolution || inputPayload.resolution || '-'}</div>
+                <div><strong>比例：</strong>${task.aspect_ratio || inputPayload.aspect_ratio || inputPayload.ratio || '-'}</div>
+                <div><strong>时长：</strong>${inputPayload.frame_count ? '-' : (inputPayload.duration ?? '-')}</div>
+                <div><strong>帧数：</strong>${inputPayload.frame_count ?? '-'}</div>
+                <div><strong>生成声音：</strong>${String(inputPayload.generate_audio ?? true)}</div>
+                <div><strong>说明：</strong>${message || '-'}</div>
+            `;
+            if (task.video_url) {
+                video.style.display = 'block';
+                video.src = task.video_url;
+            } else {
+                video.style.display = 'none';
+                video.removeAttribute('src');
+            }
+        }
+
+        async function createTask() {
+            const payload = buildPayload();
+            debugLog('create-task payload', payload);
+            if (!payload.prompt) {
+                alert('提示词不能为空');
+                return;
+            }
+            const button = document.getElementById('submitBtn');
+            button.disabled = true;
+            button.textContent = '创建中...';
+            try {
+                const resp = await fetch('/api/omni-video/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const data = await resp.json();
+                debugLog('create-task response', data);
+                if (!resp.ok || !data.success) {
+                    throw new Error(data.error || '创建任务失败');
+                }
+                renderTask(data.task || {}, data.message);
+            } catch (error) {
+                alert(error.message || '创建任务失败');
+            } finally {
+                button.disabled = false;
+                button.textContent = '创建全能视频任务';
+            }
+        }
+
+        document.getElementById('submitBtn').addEventListener('click', createTask);
+        document.getElementById('uploadBox').addEventListener('click', () => document.getElementById('uploadInput').click());
+        document.getElementById('uploadInput').addEventListener('change', (event) => uploadMedia(event.target.files));
+        document.getElementById('frameCount').addEventListener('input', syncDurationState);
+        document.getElementById('openImagePickerBtn').addEventListener('click', () => openPicker('image_material'));
+        document.getElementById('openMediaPickerBtn').addEventListener('click', () => openPicker('media'));
+        document.getElementById('pickerSearch').addEventListener('input', renderPickerGrid);
+        document.getElementById('closePickerBtn').addEventListener('click', closePicker);
+        document.getElementById('applyPickerBtn').addEventListener('click', applyPickerSelection);
+        document.getElementById('assetPickerModal').addEventListener('click', (event) => {
+            if (event.target === event.currentTarget) {
+                closePicker();
+            }
+        });
+        document.getElementById('closeSelectedPreviewBtn').addEventListener('click', closeSelectedPreview);
+        document.getElementById('selectedPreviewModal').addEventListener('click', (event) => {
+            if (event.target === event.currentTarget) {
+                closeSelectedPreview();
+            }
+        });
+
+        renderSelectedAssets();
+        syncDurationState();
+    </script>
+</body>
+</html>

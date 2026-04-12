@@ -78,11 +78,12 @@
                     <a href="/records" className="sidebar-nav-item"><span className="sidebar-nav-icon">📊</span><span className="sidebar-nav-text">生图任务</span></a>
                     <a href="/video-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
                     <a href="/video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
+                    <a href="/omni-video" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎥</span><span className="sidebar-nav-text">全能视频</span></a>
+                    <a href="/omni-video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">🗂️</span><span className="sidebar-nav-text">全能任务</span></a>
                     <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
                     <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
                     <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">📋</span><span className="sidebar-nav-text">转换工具</span></a>
                     <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
-                    <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">🔄</span><span className="sidebar-nav-text">工具</span></a>
                     {window.__APP_CONTEXT__?.is_system_admin && (
                         <>
                             <div className="sidebar-nav-divider"></div>
@@ -120,7 +121,7 @@
             const [batchData, setBatchData] = useState([]);
             const [imageStyles, setImageStyles] = useState([]);
             const [sampleImages, setSampleImages] = useState([]);
-            const [sampleCategory, setSampleCategory] = useState('person');
+            const [sampleCategory, setSampleCategory] = useState('image_material');
             const [modalOpen, setModalOpen] = useState(false);
             const [modalRowIndex, setModalRowIndex] = useState(-1);
             const [modalSelected, setModalSelected] = useState([]);
@@ -176,6 +177,13 @@
                 if (sampleCategory === 'recent') {
                     fetch('/api/recent-images?limit=50').then(res => res.json()).then(data => {
                         if (data.success) setSampleImages(data.images || []);
+                        else setSampleImages([]);
+                    });
+                    return;
+                }
+                if (sampleCategory === 'image_material') {
+                    fetch('/api/content-library?type=image_material').then(res => res.json()).then(data => {
+                        if (data.success) setSampleImages(data.assets || []);
                         else setSampleImages([]);
                     });
                     return;
@@ -540,8 +548,7 @@
                                     <button className="btn btn-secondary" onClick={() => setModalOpen(false)}>关闭</button>
                                 </div>
                                 <div className="row" style={{ margin: '10px 0' }}>
-                                    <button className={`btn ${sampleCategory === 'person' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSampleCategory('person')}>人物</button>
-                                    <button className={`btn ${sampleCategory === 'scene' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSampleCategory('scene')}>场景</button>
+                                    <button className={`btn ${sampleCategory === 'image_material' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSampleCategory('image_material')}>图片素材</button>
                                     <button className={`btn ${sampleCategory === 'recent' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSampleCategory('recent')}>最近</button>
                                 </div>
                                 <div className="sample-grid">

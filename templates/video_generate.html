@@ -81,11 +81,12 @@
                     <a href="/records" className="sidebar-nav-item"><span className="sidebar-nav-icon">📊</span><span className="sidebar-nav-text">生图任务</span></a>
                     <a href="/video-generate" className="sidebar-nav-item active"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
                     <a href="/video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
+                    <a href="/omni-video" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎥</span><span className="sidebar-nav-text">全能视频</span></a>
+                    <a href="/omni-video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">🗂️</span><span className="sidebar-nav-text">全能任务</span></a>
                     <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
                     <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
                     <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">📋</span><span className="sidebar-nav-text">转换工具</span></a>
                     <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
-                    <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">🔄</span><span className="sidebar-nav-text">工具</span></a>
                     {window.__APP_CONTEXT__?.is_system_admin && (
                         <>
                             <div className="sidebar-nav-divider"></div>
@@ -139,7 +140,7 @@
             const [success, setSuccess] = useState('');
             const [modalOpen, setModalOpen] = useState(false);
             const [modalType, setModalType] = useState('first');
-            const [libraryType, setLibraryType] = useState('person');
+            const [libraryType, setLibraryType] = useState('image_material');
             const [libraryAssets, setLibraryAssets] = useState([]);
             const [taskListTasks, setTaskListTasks] = useState([]);
             const [taskListPage, setTaskListPage] = useState(1);
@@ -345,7 +346,7 @@
             const openLibrary = (type) => {
                 setModalType(type);
                 setModalOpen(true);
-                setLibraryType('person');
+                setLibraryType('image_material');
             };
 
             const selectLibraryAsset = (asset) => {
@@ -719,13 +720,13 @@
                                     <button className="btn btn-secondary" onClick={() => setModalOpen(false)}>关闭</button>
                                 </div>
                                 <div className="row" style={{ marginTop: '10px' }}>
-                                    {['person', 'scene', 'image'].map(t => (
+                                    {['image_material', 'image'].map(t => (
                                         <button
                                             key={t}
                                             className={`btn ${libraryType === t ? 'btn-primary' : 'btn-secondary'}`}
                                             onClick={() => setLibraryType(t)}
                                         >
-                                            {t === 'person' ? '人物库' : t === 'scene' ? '场景库' : '图片库'}
+                                            {t === 'image_material' ? '图片素材' : '图片库'}
                                         </button>
                                     ))}
                                 </div>

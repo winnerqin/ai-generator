@@ -1,0 +1,396 @@
+"""Content management and asset library APIs."""
+
+from __future__ import annotations
+
+import mimetypes
+from pathlib import Path
+
+from flask import Blueprint, current_app, jsonify, render_template, request, send_file, session
+
+import database
+from app.decorators import handle_api_error, login_required
+from app.services import file_upload_service, oss_service
+
+content_bp = Blueprint("content", __name__)
+
+
+def _current_user_context() -> dict[str, object]:
+    return {"username": session.get("username", ""), "id": session.get("user_id")}
+
+
+def _append_assets(target: list[dict], items: list[dict], prefix: str, asset_type: str) -> None:
+    for item in items:
+        target.append(
+            {
+                "id": f"{prefix}_{item.get('id')}",
+                "url": item.get("url"),
+                "filename": item.get("filename"),
+                "type": asset_type,
+                "source": "database",
+                "created_at": item.get("created_at"),
+                "meta": item.get("meta", {}),
+            }
+        )
+
+
+def _append_image_material_assets(target: list[dict], items: list[dict], prefix: str, origin: str) -> None:
+    for item in items:
+        meta = item.get("meta", {}) or {}
+        meta.setdefault("source_library", origin)
+        target.append(
+            {
+                "id": f"{prefix}_{item.get('id')}",
+                "url": item.get("url"),
+                "filename": item.get("filename"),
+                "type": "image",
+                "source": "database",
+                "created_at": item.get("created_at"),
+                "meta": meta,
+            }
+        )
+
+
+def _is_media_upload_asset(item: dict) -> bool:
+    meta = item.get("meta") or {}
+    url = str(item.get("url") or "").lower()
+    if meta.get("library_group") == "media":
+        return True
+    if meta.get("library_group") == "video":
+        return False
+    if meta.get("task_id") or meta.get("source") == "omni_video" or meta.get("model"):
+        return False
+    if meta.get("mime_type"):
+        return True
+    return "media_video" in url or "media_audio" in url
+
+
+def _is_generated_video_asset(item: dict) -> bool:
+    meta = item.get("meta") or {}
+    if meta.get("library_group") == "video":
+        return True
+    return bool(meta.get("task_id") or meta.get("source") == "omni_video" or meta.get("model"))
+
+
+@content_bp.route("/content-management")
+@login_required
+def content_management_page():
+    return render_template("content_management.html", user=_current_user_context())
+
+
+@content_bp.route("/manage-samples")
+@login_required
+def manage_samples_page():
+    return render_template("manage_samples.html", user=_current_user_context())
+
+
+@content_bp.route("/api/content-library", methods=["GET"])
+@login_required
+def get_content_library():
+    user_id = session.get("user_id")
+    project_id = session.get("current_project_id")
+    library_type = request.args.get("type", "all")
+
+    assets: list[dict] = []
+
+    if oss_service.is_available():
+        if library_type in ("person", "all", "image_material"):
+            for item in oss_service.list_sample_images(user_id, project_id, "person"):
+                assets.append(
+                    {
+                        "id": item.get("key", "oss_person"),
+                        "url": item.get("url"),
+                        "filename": item.get("filename"),
+                        "type": "image" if library_type == "image_material" else "person",
+                        "source": "oss",
+                        "created_at": item.get("last_modified"),
+                        "meta": {"source_library": "person"},
+                    }
+                )
+        if library_type in ("scene", "all", "image_material"):
+            for item in oss_service.list_sample_images(user_id, project_id, "scene"):
+                assets.append(
+                    {
+                        "id": item.get("key", "oss_scene"),
+                        "url": item.get("url"),
+                        "filename": item.get("filename"),
+                        "type": "image" if library_type == "image_material" else "scene",
+                        "source": "oss",
+                        "created_at": item.get("last_modified"),
+                        "meta": {"source_library": "scene"},
+                    }
+                )
+
+    if library_type in ("person", "all"):
+        _append_assets(assets, database.get_person_assets(user_id, project_id), "db_person", "person")
+    if library_type in ("scene", "all"):
+        _append_assets(assets, database.get_scene_assets(user_id, project_id), "db_scene", "scene")
+    if library_type == "image_material":
+        _append_image_material_assets(
+            assets,
+            database.get_person_assets(user_id, project_id),
+            "db_person",
+            "person",
+        )
+        _append_image_material_assets(
+            assets,
+            database.get_scene_assets(user_id, project_id),
+            "db_scene",
+            "scene",
+        )
+    if library_type in ("image", "all"):
+        _append_assets(assets, database.get_image_assets(user_id, project_id), "db_image", "image")
+    video_assets = database.get_video_assets(user_id, project_id)
+    if library_type == "video":
+        _append_assets(
+            assets,
+            [item for item in video_assets if _is_generated_video_asset(item)],
+            "db_video",
+            "video",
+        )
+    if library_type == "all":
+        _append_assets(assets, video_assets, "db_video", "video")
+    if library_type == "media":
+        _append_assets(
+            assets,
+            [item for item in video_assets if _is_media_upload_asset(item)],
+            "db_video",
+            "video",
+        )
+    if library_type in ("audio", "all", "media"):
+        _append_assets(assets, database.get_audio_assets(user_id, project_id), "db_audio", "audio")
+
+    return jsonify({"success": True, "assets": assets})
+
+
+@content_bp.route("/api/upload-media-asset", methods=["POST"])
+@login_required
+@handle_api_error
+def upload_media_asset():
+    user_id = session.get("user_id")
+    project_id = session.get("current_project_id")
+
+    file = request.files.get("file")
+    library_type = (request.form.get("type") or "media").strip().lower()
+    if not file:
+        return jsonify({"success": False, "error": "未选择文件"}), 400
+
+    filename = file.filename or ""
+    mime_type = mimetypes.guess_type(filename)[0] or ""
+    if library_type == "media":
+        if mime_type.startswith("audio/"):
+            library_type = "audio"
+        elif mime_type.startswith("video/"):
+            library_type = "video"
+        else:
+            return jsonify({"success": False, "error": "媒体库仅支持音频或视频文件"}), 400
+    elif library_type == "image_material":
+        if not mime_type.startswith("image/"):
+            return jsonify({"success": False, "error": "图片素材仅支持图片文件"}), 400
+
+    if library_type == "audio":
+        file_type = "audio"
+        subfolder = "media_audio"
+    elif library_type == "video":
+        file_type = "video"
+        subfolder = "media_video"
+    else:
+        file_type = "image"
+        subfolder = "material_image"
+
+    success, path_or_url, error = file_upload_service.save_uploaded_file(
+        file=file,
+        user_id=user_id,
+        project_id=project_id,
+        subfolder=subfolder,
+        file_type=file_type,
+        upload_to_oss=True,
+    )
+    if not success:
+        return jsonify({"success": False, "error": error}), 400
+
+    meta = {"mime_type": mime_type}
+    if library_type == "audio":
+        meta["library_group"] = "media"
+        asset_id = database.save_audio_asset(
+            user_id=user_id,
+            filename=filename,
+            url=path_or_url,
+            meta=meta,
+            project_id=project_id,
+        )
+    elif library_type == "video":
+        meta["library_group"] = "media"
+        asset_id = database.save_video_asset(
+            user_id=user_id,
+            filename=filename,
+            url=path_or_url,
+            meta=meta,
+            project_id=project_id,
+        )
+    else:
+        meta["library_group"] = "image_material"
+        asset_id = database.save_person_asset(
+            user_id=user_id,
+            filename=filename,
+            url=path_or_url,
+            meta=meta,
+            project_id=project_id,
+        )
+
+    return jsonify(
+        {
+            "success": True,
+            "asset": {
+                "id": asset_id,
+                "filename": filename,
+                "url": path_or_url,
+                "type": library_type,
+            },
+            "message": "素材上传成功",
+        }
+    )
+
+
+@content_bp.route("/api/add-to-person-library", methods=["POST"])
+@login_required
+@handle_api_error
+def add_to_person_library():
+    user_id = session.get("user_id")
+    project_id = session.get("current_project_id")
+    data = request.get_json(silent=True) or {}
+    url = data.get("url", "")
+    if not url:
+        return jsonify({"success": False, "error": "URL 不能为空"}), 400
+
+    library_id = database.save_person_asset(
+        user_id=user_id,
+        filename=data.get("filename", ""),
+        url=url,
+        meta=data.get("meta"),
+        project_id=project_id,
+    )
+    return jsonify({"success": True, "id": library_id, "message": "已添加到人物库"})
+
+
+@content_bp.route("/api/add-to-scene-library", methods=["POST"])
+@login_required
+@handle_api_error
+def add_to_scene_library():
+    user_id = session.get("user_id")
+    project_id = session.get("current_project_id")
+    data = request.get_json(silent=True) or {}
+    url = data.get("url", "")
+    if not url:
+        return jsonify({"success": False, "error": "URL 不能为空"}), 400
+
+    library_id = database.save_scene_asset(
+        user_id=user_id,
+        filename=data.get("filename", ""),
+        url=url,
+        meta=data.get("meta"),
+        project_id=project_id,
+    )
+    return jsonify({"success": True, "id": library_id, "message": "已添加到场景库"})
+
+
+@content_bp.route("/api/delete-library-asset", methods=["POST"])
+@login_required
+def delete_library_asset():
+    user_id = session.get("user_id")
+    data = request.get_json(silent=True) or request.form.to_dict()
+    asset_id = (data.get("id") or data.get("key") or "").strip()
+    if not asset_id:
+        return jsonify({"success": False, "error": "参数不完整"}), 400
+
+    try:
+        if asset_id.startswith("db_person_"):
+            database.delete_person_asset(int(asset_id.replace("db_person_", "")), user_id)
+        elif asset_id.startswith("db_scene_"):
+            database.delete_scene_asset(int(asset_id.replace("db_scene_", "")), user_id)
+        elif asset_id.startswith("db_image_"):
+            database.delete_image_asset(int(asset_id.replace("db_image_", "")), user_id)
+        elif asset_id.startswith("db_video_"):
+            database.delete_video_asset(int(asset_id.replace("db_video_", "")), user_id)
+        elif asset_id.startswith("db_audio_"):
+            database.delete_audio_asset(int(asset_id.replace("db_audio_", "")), user_id)
+        else:
+            file_upload_service.delete_file(asset_id, is_oss=True)
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+    return jsonify({"success": True, "message": "资源已删除"})
+
+
+@content_bp.route("/api/rename-library-asset", methods=["POST"])
+@login_required
+def rename_library_asset():
+    user_id = session.get("user_id")
+    project_id = session.get("current_project_id")
+    data = request.get_json(silent=True) or request.form.to_dict()
+    asset_id = (data.get("id") or "").strip()
+    filename = (data.get("filename") or "").strip()
+
+    if not asset_id or not filename:
+        return jsonify({"success": False, "error": "缺少素材 ID 或文件名"}), 400
+
+    try:
+        if asset_id.startswith("db_video_"):
+            updated = database.rename_video_asset(
+                int(asset_id.replace("db_video_", "")),
+                filename,
+                user_id=user_id,
+                project_id=project_id,
+            )
+        else:
+            return jsonify({"success": False, "error": "当前仅支持视频库重命名"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+    if not updated:
+        return jsonify({"success": False, "error": "素材不存在"}), 404
+    return jsonify({"success": True, "message": "重命名成功", "filename": filename})
+
+
+@content_bp.route("/api/image-styles", methods=["POST"])
+@login_required
+@handle_api_error
+def create_image_style():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"success": False, "error": "样式名称不能为空"}), 400
+    return jsonify({"success": True, "id": 1, "message": "样式已创建"})
+
+
+@content_bp.route("/api/image-styles/<int:style_id>", methods=["DELETE"])
+@login_required
+def delete_image_style(style_id: int):
+    return jsonify({"success": True, "message": "样式已删除"})
+
+
+@content_bp.route("/output/<int:user_id>/<int:project_id>/<filename>")
+@login_required
+def get_output_file(user_id: int, project_id: int, filename: str):
+    current_user_id = session.get("user_id")
+    if current_user_id != user_id:
+        return jsonify({"success": False, "error": "无权访问该文件"}), 403
+
+    output_dir = Path(current_app.config.get("OUTPUT_FOLDER", "output"))
+    file_path = output_dir / str(user_id) / str(project_id) / filename
+    if not file_path.exists():
+        return jsonify({"success": False, "error": "文件不存在"}), 404
+    return send_file(file_path)
+
+
+@content_bp.route("/output/<int:user_id>/<filename>")
+@login_required
+def get_output_file_simple(user_id: int, filename: str):
+    current_user_id = session.get("user_id")
+    if current_user_id != user_id:
+        return jsonify({"success": False, "error": "无权访问该文件"}), 403
+
+    output_dir = Path(current_app.config.get("OUTPUT_FOLDER", "output"))
+    file_path = output_dir / str(user_id) / filename
+    if not file_path.exists():
+        return jsonify({"success": False, "error": "文件不存在"}), 404
+    return send_file(file_path)

@@ -257,6 +257,14 @@
                 <span class="sidebar-nav-icon">📹</span>
                 <span class="sidebar-nav-text">视频任务</span>
             </a>
+            <a href="/omni-video" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎥</span>
+                <span class="sidebar-nav-text">全能视频</span>
+            </a>
+            <a href="/omni-video-tasks" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🗂️</span>
+                <span class="sidebar-nav-text">全能任务</span>
+            </a>
             <a href="/script-generate" class="sidebar-nav-item">
                 <span class="sidebar-nav-icon">📜</span>
                 <span class="sidebar-nav-text">剧本生成</span>
@@ -272,10 +280,6 @@
             <a href="/content-management" class="sidebar-nav-item">
                 <span class="sidebar-nav-icon">📚</span>
                 <span class="sidebar-nav-text">内容管理</span>
-            </a>
-            <a href="/txt2csv" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🔄</span>
-                <span class="sidebar-nav-text">工具</span>
             </a>
             {% if user.username == 'system_admin' %}
             <div class="sidebar-nav-divider"></div>
@@ -765,10 +769,10 @@
                     <div className="flow-column">
                         <div className="studio-card">
                             <div className="card-title">Step 3 · 参考图</div>
-                            <div className="card-hint">点击「人物库」或「场景库」选择参考图，选中后将显示在下方缩略图</div>
+                            <div className="card-hint">点击「人物素材」或「场景素材」选择参考图，选中后将显示在下方缩略图</div>
                             <div className="btn-row">
-                                <button className="btn btn-secondary" onClick={() => openLibraryPicker('person')}>人物库</button>
-                                <button className="btn btn-secondary" onClick={() => openLibraryPicker('scene')}>场景库</button>
+                                <button className="btn btn-secondary" onClick={() => openLibraryPicker('person')}>人物素材</button>
+                                <button className="btn btn-secondary" onClick={() => openLibraryPicker('scene')}>场景素材</button>
                             </div>
                             {selectedReferences.length > 0 && (
                                 <div style={{ marginTop: '12px' }}>
@@ -792,7 +796,7 @@
                             )}
                             {showMaterialPicker && (
                                 <>
-                                    <div className="card-title" style={{ marginTop: '16px', fontSize: '0.9rem' }}>{materialType === 'person' ? '人物库' : '场景库'} · 点击选择</div>
+                                    <div className="card-title" style={{ marginTop: '16px', fontSize: '0.9rem' }}>{materialType === 'person' ? '人物素材' : '场景素材'} · 点击选择</div>
                                     <div className="btn-row" style={{ marginTop: '6px' }}>
                                         <button className="btn btn-secondary" onClick={() => setShowMaterialPicker(false)}>完成选择</button>
                                     </div>

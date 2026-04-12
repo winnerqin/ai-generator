@@ -3,409 +3,364 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>内容管理 - Ai创作工具</title>
+    <title>内容管理 - AI创作工具</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/sidebar-nav.css">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <style>
-        .app-shell { display: flex; min-height: 100vh; }
+        .app-shell { min-height: 100vh; }
         .main-content { padding: 0; }
-        .page-wrap { padding: 20px 24px 36px; }
-        .page-title { font-size: 1.4rem; font-weight: 600; }
-        .panel { border-radius: 16px; padding: 16px; }
-        .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-        .row.space { justify-content: space-between; }
+        .page-wrap { max-width: 1260px; margin: 0 auto; padding: 24px; }
+        .page-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 8px; }
+        .page-subtitle { color: #aeb8d9; margin-bottom: 18px; }
+        .panel { border-radius: 16px; padding: 18px; margin-bottom: 16px; }
         .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
-        .tab { padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(86,111,255,0.3); cursor: pointer; }
-        .tab.active { background: rgba(86,111,255,0.2); border-color: rgba(86,111,255,0.6); }
-        .assets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
-        .asset-card { border-radius: 12px; overflow: hidden; border: 1px solid rgba(86,111,255,0.25); position: relative; cursor: pointer; }
-        .asset-card.selected::after {
-            content: '✓'; position: absolute; top: 8px; right: 8px;
-            width: 20px; height: 20px; border-radius: 50%;
-            background: rgba(86,111,255,0.85); color: #fff; font-size: 12px;
-            display: flex; align-items: center; justify-content: center;
+        .tab-btn { padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(86,111,255,0.3); background: rgba(86,111,255,0.08); color: inherit; cursor: pointer; }
+        .tab-btn.active { background: rgba(86,111,255,0.22); border-color: rgba(86,111,255,0.55); }
+        .toolbar { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: end; }
+        .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+        .asset-card { border-radius: 14px; overflow: hidden; border: 1px solid rgba(86,111,255,0.2); background: rgba(255,255,255,0.02); }
+        .asset-preview { height: 160px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.15); cursor: pointer; }
+        .asset-preview img, .asset-preview video { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .asset-info { padding: 10px; display: grid; gap: 6px; font-size: 0.88rem; }
+        .asset-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .empty-hint { color: #9ca8cf; }
+        .preview-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.88); display: none; align-items: center; justify-content: center; z-index: 2000; }
+        .preview-inner { width: min(960px, 92vw); max-height: 88vh; padding: 18px; border-radius: 16px; background: rgba(8,13,24,0.95); }
+        .preview-close { float: right; }
+        .preview-media { margin-top: 12px; }
+        .preview-media img, .preview-media video { width: 100%; max-height: 70vh; object-fit: contain; }
+        .preview-audio { width: 100%; margin-top: 18px; }
+        .small-hint { color: #9ca8cf; font-size: 0.82rem; }
+        @media (max-width: 900px) {
+            .toolbar { grid-template-columns: 1fr; }
         }
-        .asset-card img, .asset-card video { width: 100%; height: 140px; object-fit: contain; display: block; background: rgba(0,0,0,0.12); }
-        .asset-info { padding: 8px 10px; font-size: 0.8rem; }
-        .upload-zone { border: 2px dashed rgba(86,111,255,0.5); border-radius: 12px; padding: 18px; text-align: center; cursor: pointer; }
-        .modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(6,10,20,0.85); z-index: 2000; overflow: hidden; }
-        .modal-content-wrap { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; padding: 48px 56px; box-sizing: border-box; }
-        .modal-content-wrap img, .modal-content-wrap video { max-width: 100%; max-height: 100%; object-fit: contain; }
-        .modal-nav-btn { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,0.15); color: #fff; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 2001; }
-        .modal-nav-btn:hover { background: rgba(255,255,255,0.25); }
-        .modal-nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-        .modal-nav-btn.prev { left: 12px; }
-        .modal-nav-btn.next { right: 12px; }
-        .modal-top-bar { position: absolute; top: 0; left: 0; right: 0; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; background: linear-gradient(to bottom, rgba(0,0,0,0.5), transparent); z-index: 2001; color: #fff; }
-        .modal-top-bar .title { font-size: 0.95rem; }
-        .modal-top-bar .close-btn { padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.3); background: rgba(0,0,0,0.3); color: #fff; cursor: pointer; }
-        .modal-index-hint { font-size: 0.85rem; opacity: 0.9; }
-        .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: rgba(86,111,255,0.2); font-size: 0.75rem; }
     </style>
 </head>
-<body>
-    <div id="reactApp"></div>
-    <script>
-        window.__APP_CONTEXT__ = { username: "{{ user.username }}", is_system_admin: {{ 'true' if user.username == 'system_admin' else 'false' }} };
-    </script>
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    {% raw %}
-    <script type="text/babel">
-        const { useEffect, useMemo, useState } = React;
+<body class="react-theme sidebar-compact">
+    <div class="app-shell">
+        <nav class="sidebar-nav" id="sidebarNav">
+            <div class="sidebar-nav-header">
+                <div class="sidebar-nav-title">Ai创作工具</div>
+                <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收起/展开">
+                    <span id="toggleIcon">◀</span>
+                </button>
+            </div>
+            <div class="sidebar-nav-menu">
+                <a href="/" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">🎨</span>
+                    <span class="sidebar-nav-text">单图生成</span>
+                </a>
+                <a href="/batch" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">📝</span>
+                    <span class="sidebar-nav-text">批量生成</span>
+                </a>
+                <a href="/records" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">📳</span>
+                    <span class="sidebar-nav-text">生图任务</span>
+                </a>
+                <a href="/video-generate" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">🎀</span>
+                    <span class="sidebar-nav-text">视频生成</span>
+                </a>
+                <a href="/video-tasks" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">📴</span>
+                    <span class="sidebar-nav-text">视频任务</span>
+                </a>
+                <a href="/omni-video" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">🎥</span>
+                    <span class="sidebar-nav-text">全能视频</span>
+                </a>
+                <a href="/omni-video-tasks" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">🗂️</span>
+                    <span class="sidebar-nav-text">全能任务</span>
+                </a>
+                <a href="/script-generate" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">📐</span>
+                    <span class="sidebar-nav-text">剧本生成</span>
+                </a>
+                <a href="/storyboard-studio" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">🎬</span>
+                    <span class="sidebar-nav-text">分镜制作</span>
+                </a>
+                <a href="/txt2csv" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">📵</span>
+                    <span class="sidebar-nav-text">转换工具</span>
+                </a>
+                <a href="/content-management" class="sidebar-nav-item active">
+                    <span class="sidebar-nav-icon">📚</span>
+                    <span class="sidebar-nav-text">内容管理</span>
+                </a>
+                {% if user.username == 'system_admin' %}
+                <div class="sidebar-nav-divider"></div>
+                <a href="/admin" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">🛠️</span>
+                    <span class="sidebar-nav-text">系统管理</span>
+                </a>
+                <a href="/stats" class="sidebar-nav-item">
+                    <span class="sidebar-nav-icon">📱</span>
+                    <span class="sidebar-nav-text">系统统计</span>
+                </a>
+                {% endif %}
+            </div>
+            <div class="sidebar-nav-user">
+                <div class="sidebar-nav-user-info">
+                    <div class="sidebar-nav-user-avatar">👁</div>
+                    <div class="sidebar-nav-user-name">{{ user.username }}</div>
+                    <a href="/logout" class="sidebar-nav-logout">登出</a>
+                </div>
+            </div>
+        </nav>
+        <main class="main-content">
+            <div class="page-wrap">
 
+        <div class="page-title">内容管理</div>
+        <div class="page-subtitle">统一管理图片素材、图片库、视频库与音/视频素材。全能视频生成成功后会自动保存到视频库。</div>
+
+        <div class="panel">
+            <div class="tabs" id="tabBar"></div>
+        </div>
+
+        <div class="panel">
+            <div class="toolbar">
+                <div>
+                    <label for="searchInput">搜索素材</label>
+                    <input id="searchInput" type="text" placeholder="按文件名搜索">
+                </div>
+                <button class="btn btn-secondary" id="refreshBtn">刷新</button>
+                <button class="btn btn-secondary" id="uploadTrigger">上传素材</button>
+            </div>
+            <input id="uploadInput" type="file" multiple style="display:none;">
+        </div>
+
+        <div class="panel">
+            <div id="assetGrid" class="asset-grid"></div>
+        </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="previewModal" class="preview-modal">
+        <div class="preview-inner">
+            <button class="btn btn-secondary preview-close" id="previewClose">关闭</button>
+            <div id="previewTitle" style="font-weight:600;"></div>
+            <div id="previewMedia" class="preview-media"></div>
+        </div>
+    </div>
+
+    <script src="/static/sidebar-nav.js"></script>
+    <script>
         const tabs = [
-            { key: 'person', label: '人物库' },
-            { key: 'scene', label: '场景库' },
+            { key: 'image_material', label: '图片素材' },
             { key: 'image', label: '图片库' },
-            { key: 'video', label: '视频库' }
+            { key: 'video', label: '视频库' },
+            { key: 'media', label: '音/视频素材' },
         ];
 
-        const Sidebar = ({ username, projects, currentProjectId, onProjectChange }) => (
-            <nav className="sidebar-nav" id="sidebarNav">
-                <div className="sidebar-nav-header">
-                    <div className="sidebar-nav-title">Ai创作工具</div>
-                    <button className="sidebar-nav-toggle" onClick={() => toggleSidebar()} title="收缩/展开">
-                        <span id="toggleIcon">‹</span>
-                    </button>
-                </div>
-                <div className="sidebar-nav-menu">
-                    <a href="/" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎨</span><span className="sidebar-nav-text">单图生成</span></a>
-                    <a href="/batch" className="sidebar-nav-item"><span className="sidebar-nav-icon">📦</span><span className="sidebar-nav-text">批量生成</span></a>
-                    <a href="/records" className="sidebar-nav-item"><span className="sidebar-nav-icon">📊</span><span className="sidebar-nav-text">生图任务</span></a>
-                    <a href="/video-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
-                    <a href="/video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
-                    <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
-                    <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
-                    <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">📋</span><span className="sidebar-nav-text">转换工具</span></a>
-                    <a href="/content-management" className="sidebar-nav-item active"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
-                    <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">🔄</span><span className="sidebar-nav-text">工具</span></a>
-                    {window.__APP_CONTEXT__?.is_system_admin && (
-                        <>
-                            <div className="sidebar-nav-divider"></div>
-                            <a href="/admin" className="sidebar-nav-item"><span className="sidebar-nav-icon">🛠️</span><span className="sidebar-nav-text">系统管理</span></a>
-                            <a href="/stats" className="sidebar-nav-item"><span className="sidebar-nav-icon">📈</span><span className="sidebar-nav-text">系统统计</span></a>
-                        </>
-                    )}
-                </div>
-                <div className="sidebar-nav-user">
-                    <div className="sidebar-nav-user-info">
-                        <div className="sidebar-nav-user-avatar">👤</div>
-                        <div className="sidebar-nav-user-name">{username}</div>
-                        <a href="/logout" className="sidebar-nav-logout">登出</a>
-                    </div>
-                    <div style={{ marginTop: '8px' }}>
-                        <label style={{ fontSize: '0.85em', color: '#cbd4f5' }}>当前项目</label>
-                        <select
-                            style={{ width: '100%', padding: '6px', borderRadius: '6px' }}
-                            value={currentProjectId || ''}
-                            onChange={(e) => onProjectChange(e.target.value)}
-                        >
-                            {projects.length === 0 && <option>加载中...</option>}
-                            {projects.map(p => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                </div>
-            </nav>
-        );
+        let currentTab = 'image_material';
+        let allAssets = [];
 
-        function App() {
-            const [projects, setProjects] = useState([]);
-            const [currentProjectId, setCurrentProjectId] = useState('');
-            const [currentTab, setCurrentTab] = useState('person');
-            const [allAssets, setAllAssets] = useState([]);
-            const [filteredAssets, setFilteredAssets] = useState([]);
-            const [selected, setSelected] = useState(new Set());
-            const [search, setSearch] = useState('');
-            const [startDate, setStartDate] = useState('');
-            const [endDate, setEndDate] = useState('');
-            const [modalIndex, setModalIndex] = useState(null);
-
-            useEffect(() => {
-                document.body.classList.add('react-theme', 'sidebar-compact');
-            }, []);
-
-            useEffect(() => {
-                fetch('/api/projects').then(res => res.json()).then(data => {
-                    if (data.success) {
-                        setProjects(data.projects || []);
-                        setCurrentProjectId(String(data.current_project_id || ''));
-                    }
-                });
-            }, []);
-
-            const loadAssets = async (tab = currentTab) => {
-                const resp = await fetch(`/api/content-library?type=${tab}`);
-                const data = await resp.json();
-                if (data.success) {
-                    setAllAssets(data.assets || []);
-                } else {
-                    setAllAssets([]);
-                }
-            };
-
-            useEffect(() => {
-                loadAssets(currentTab);
-            }, [currentTab]);
-
-            useEffect(() => {
-                const filtered = allAssets.filter(asset => {
-                    const filename = (asset.filename || '').toLowerCase();
-                    if (search && !filename.includes(search.toLowerCase())) return false;
-                    if (startDate || endDate) {
-                        const createdAt = asset.created_at || '';
-                        if (!createdAt) return false;
-                        const dateStr = new Date(createdAt).toISOString().split('T')[0];
-                        if (startDate && dateStr < startDate) return false;
-                        if (endDate && dateStr > endDate) return false;
-                    }
-                    return true;
-                });
-                setFilteredAssets(filtered);
-            }, [allAssets, search, startDate, endDate]);
-
-            const toggleSelect = (assetId) => {
-                setSelected(prev => {
-                    const next = new Set(prev);
-                    if (next.has(assetId)) next.delete(assetId);
-                    else next.add(assetId);
-                    return next;
-                });
-            };
-
-            const deleteAsset = async (asset) => {
-                const assetId = asset.key || asset.id;
-                let response;
-                if (assetId.startsWith('record_')) {
-                    const recordId = assetId.replace('record_', '');
-                    response = await fetch(`/api/records/${recordId}`, { method: 'DELETE' });
-                } else if (assetId.startsWith('db_person_') || assetId.startsWith('db_scene_')) {
-                    response = await fetch('/api/delete-library-asset', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ key: assetId })
-                    });
-                } else {
-                    const deleteUrl = currentTab === 'image' ? '/api/delete-image-asset' : '/api/delete-video-asset';
-                    response = await fetch(deleteUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id: assetId })
-                    });
-                }
-                const data = await response.json();
-                if (!data.success) {
-                    alert(data.error || '删除失败');
-                } else {
-                    loadAssets(currentTab);
-                }
-            };
-
-            const deleteSelected = async () => {
-                if (selected.size === 0) return;
-                if (!confirm(`确定删除 ${selected.size} 个资源吗？`)) return;
-                for (const assetId of selected) {
-                    const asset = allAssets.find(a => (a.key || a.id) === assetId);
-                    if (asset) {
-                        await deleteAsset(asset);
-                    }
-                }
-                setSelected(new Set());
-                loadAssets(currentTab);
-            };
-
-            const addSelectedToLibrary = async (type) => {
-                const list = Array.from(selected);
-                for (const assetId of list) {
-                    const asset = allAssets.find(a => (a.key || a.id) === assetId);
-                    if (!asset || !asset.url) continue;
-                    const response = await fetch(asset.url);
-                    const blob = await response.blob();
-                    const formData = new FormData();
-                    formData.append('file', blob, asset.filename || 'file');
-                    formData.append('category', type);
-                    await fetch('/api/upload-sample-image', { method: 'POST', body: formData });
-                }
-                setSelected(new Set());
-                loadAssets(currentTab);
-            };
-
-            const downloadAsset = (url, filename) => {
-                if (!url) return;
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = filename || 'file';
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-            };
-
-            const downloadSelected = () => {
-                const list = Array.from(selected);
-                list.forEach(assetId => {
-                    const asset = allAssets.find(a => (a.key || a.id) === assetId);
-                    if (asset && asset.url) downloadAsset(asset.url, asset.filename);
-                });
-            };
-
-            const handleUpload = async (files) => {
-                const list = Array.from(files || []);
-                if (!list.length) return;
-                for (const file of list) {
-                    const formData = new FormData();
-                    formData.append('file', file);
-                    formData.append('category', currentTab === 'person' ? 'person' : 'scene');
-                    await fetch('/api/upload-sample-image', { method: 'POST', body: formData });
-                }
-                loadAssets(currentTab);
-            };
-
-            const currentAsset = modalIndex !== null ? filteredAssets[modalIndex] : null;
-            const isVideo = currentAsset && (currentTab === 'video' || currentAsset.url?.match(/\.(mp4|webm|mov)$/i));
-            const canPrev = modalIndex !== null && modalIndex > 0;
-            const canNext = modalIndex !== null && modalIndex < filteredAssets.length - 1;
-
-            useEffect(() => {
-                if (modalIndex === null) return;
-                const onKey = (e) => {
-                    if (e.key === 'Escape') setModalIndex(null);
-                    if (e.key === 'ArrowLeft' && modalIndex > 0) setModalIndex(modalIndex - 1);
-                    if (e.key === 'ArrowRight' && modalIndex < filteredAssets.length - 1) setModalIndex(modalIndex + 1);
-                };
-                window.addEventListener('keydown', onKey);
-                return () => window.removeEventListener('keydown', onKey);
-            }, [modalIndex, filteredAssets.length]);
-
-            return (
-                <div className="app-shell">
-                    <Sidebar
-                        username={window.__APP_CONTEXT__?.username || 'user'}
-                        projects={projects}
-                        currentProjectId={currentProjectId}
-                        onProjectChange={async (pid) => {
-                            const resp = await fetch('/api/projects/switch', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ project_id: pid })
-                            });
-                            const data = await resp.json();
-                            if (data.success) window.location.reload();
-                        }}
-                    />
-                    <div className="main-content">
-                        <div className="page-wrap">
-                            <div className="page-title">📚 内容管理</div>
-                            <div className="panel" style={{ marginTop: '16px' }}>
-                                <div className="row space">
-                                    <div className="tabs">
-                                        {tabs.map(t => (
-                                            <div key={t.key} className={`tab ${currentTab === t.key ? 'active' : ''}`} onClick={() => setCurrentTab(t.key)}>
-                                                {t.label}
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <div className="row">
-                                        <span className="pill">总计 {filteredAssets.length}</span>
-                                    </div>
-                                </div>
-                                <div className="row" style={{ marginTop: '10px' }}>
-                                    <input placeholder="搜索资源名称..." value={search} onChange={(e) => setSearch(e.target.value)} />
-                                    <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                                    <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-                                    <button className="btn btn-secondary" onClick={() => { setSearch(''); setStartDate(''); setEndDate(''); }}>清空过滤</button>
-                                    <button className="btn btn-secondary" onClick={downloadSelected} disabled={!selected.size}>批量下载</button>
-                                    <button className="btn btn-danger" onClick={deleteSelected} disabled={!selected.size}>删除选中</button>
-                                    {currentTab !== 'person' && currentTab !== 'scene' && (
-                                        <>
-                                            <button className="btn btn-secondary" onClick={() => addSelectedToLibrary('person')}>加到人物库</button>
-                                            <button className="btn btn-secondary" onClick={() => addSelectedToLibrary('scene')}>加到场景库</button>
-                                        </>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="panel" style={{ marginTop: '16px' }}>
-                                {(currentTab === 'person' || currentTab === 'scene') && (
-                                    <div className="upload-zone" onClick={() => document.getElementById('uploadInput').click()}>
-                                        点击上传或拖拽文件到此处
-                                        <input id="uploadInput" type="file" accept="image/*" multiple style={{ display: 'none' }}
-                                            onChange={(e) => handleUpload(e.target.files)} />
-                                    </div>
-                                )}
-                                <div className="assets-grid" style={{ marginTop: '12px' }}>
-                                    {filteredAssets.map((asset, index) => {
-                                        const id = asset.key || asset.id || `asset_${index}`;
-                                        return (
-                                            <div
-                                                key={id}
-                                                className={`asset-card ${selected.has(id) ? 'selected' : ''}`}
-                                                onClick={() => toggleSelect(id)}
-                                                onDoubleClick={() => setModalIndex(index)}
-                                            >
-                                                {currentTab === 'video' ? (
-                                                    <video src={asset.url} preload="metadata" />
-                                                ) : (
-                                                    <img src={asset.url} alt={asset.filename || 'asset'} />
-                                                )}
-                                                <div className="asset-info">
-                                                    <div>{asset.filename || '-'}</div>
-                                                    <div className="small-hint">{asset.created_at || '-'}</div>
-                                                    <div className="row" style={{ marginTop: '6px' }}>
-                                                        <button className="btn btn-secondary" onClick={(e) => { e.stopPropagation(); downloadAsset(asset.url, asset.filename); }}>下载</button>
-                                                        <button className="btn btn-danger" onClick={(e) => { e.stopPropagation(); deleteAsset(asset); }}>删除</button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                    {filteredAssets.length === 0 && <div className="small-hint">暂无资源</div>}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {modalIndex !== null && currentAsset && (
-                        <div className="modal" onClick={() => setModalIndex(null)}>
-                            <div className="modal-top-bar" onClick={(e) => e.stopPropagation()}>
-                                <span className="title">{currentAsset.filename || '预览'}</span>
-                                <div className="row" style={{ gap: '10px', alignItems: 'center' }}>
-                                    <span className="modal-index-hint">{modalIndex + 1} / {filteredAssets.length}</span>
-                                    <button className="close-btn" onClick={() => setModalIndex(null)}>关闭</button>
-                                </div>
-                            </div>
-                            <button
-                                type="button"
-                                className="modal-nav-btn prev"
-                                onClick={(e) => { e.stopPropagation(); if (modalIndex > 0) setModalIndex(modalIndex - 1); }}
-                                disabled={!canPrev}
-                                aria-label="上一张"
-                            >‹</button>
-                            <div className="modal-content-wrap" onClick={(e) => e.stopPropagation()}>
-                                {isVideo ? (
-                                    <video key={currentAsset.url} controls autoPlay src={currentAsset.url} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
-                                ) : (
-                                    <img src={currentAsset.url} alt={currentAsset.filename || 'asset'} />
-                                )}
-                            </div>
-                            <button
-                                type="button"
-                                className="modal-nav-btn next"
-                                onClick={(e) => { e.stopPropagation(); if (modalIndex < filteredAssets.length - 1) setModalIndex(modalIndex + 1); }}
-                                disabled={!canNext}
-                                aria-label="下一张"
-                            >›</button>
-                        </div>
-                    )}
-                </div>
-            );
+        function assetTypeLabel(asset) {
+            return { image: '图片', video: '视频', audio: '音频' }[asset.type] || asset.type || '-';
         }
 
-        ReactDOM.createRoot(document.getElementById('reactApp')).render(<App />);
+        function renderTabs() {
+            const container = document.getElementById('tabBar');
+            container.innerHTML = tabs.map((tab) => `
+                <button class="tab-btn ${tab.key === currentTab ? 'active' : ''}" data-tab="${tab.key}">${tab.label}</button>
+            `).join('');
+            container.querySelectorAll('[data-tab]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    currentTab = button.getAttribute('data-tab');
+                    renderTabs();
+                    updateUploadAccept();
+                    loadAssets();
+                });
+            });
+        }
+
+        function matchesFilter(asset, keyword) {
+            if (!keyword) return true;
+            return (asset.filename || '').toLowerCase().includes(keyword.toLowerCase());
+        }
+
+        function canRename(asset) {
+            return asset.type === 'video';
+        }
+
+        function previewMarkup(asset) {
+            if (asset.type === 'video') {
+                return `<video src="${asset.url}" preload="metadata"></video>`;
+            }
+            if (asset.type === 'audio') {
+                return '<div style="font-size:52px;">♪</div>';
+            }
+            return `<img src="${asset.url}" alt="${asset.filename || 'asset'}">`;
+        }
+
+        function renderAssets() {
+            const keyword = document.getElementById('searchInput').value.trim();
+            const grid = document.getElementById('assetGrid');
+            const assets = allAssets.filter((asset) => matchesFilter(asset, keyword));
+
+            if (!assets.length) {
+                grid.innerHTML = '<div class="empty-hint">当前分类下暂无素材。</div>';
+                return;
+            }
+
+            grid.innerHTML = assets.map((asset) => `
+                <div class="asset-card">
+                    <div class="asset-preview" data-preview="${asset.id}">${previewMarkup(asset)}</div>
+                    <div class="asset-info">
+                        <div>${asset.filename || '-'}</div>
+                        <div class="small-hint">${assetTypeLabel(asset)}</div>
+                        <div class="small-hint">${asset.created_at || '-'}</div>
+                        <div class="asset-actions">
+                            <button class="btn btn-secondary" data-preview="${asset.id}">预览</button>
+                            <button class="btn btn-secondary" data-download="${asset.id}">下载</button>
+                            ${canRename(asset) ? `<button class="btn btn-secondary" data-rename="${asset.id}">重命名</button>` : ''}
+                            <button class="btn btn-danger" data-delete="${asset.id}">删除</button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            grid.querySelectorAll('[data-preview]').forEach((button) => {
+                button.addEventListener('click', () => openPreview(button.getAttribute('data-preview')));
+            });
+            grid.querySelectorAll('[data-download]').forEach((button) => {
+                button.addEventListener('click', () => downloadAsset(button.getAttribute('data-download')));
+            });
+            grid.querySelectorAll('[data-delete]').forEach((button) => {
+                button.addEventListener('click', () => deleteAsset(button.getAttribute('data-delete')));
+            });
+            grid.querySelectorAll('[data-rename]').forEach((button) => {
+                button.addEventListener('click', () => renameAsset(button.getAttribute('data-rename')));
+            });
+        }
+
+        function updateUploadAccept() {
+            const uploadInput = document.getElementById('uploadInput');
+            if (currentTab === 'media') {
+                uploadInput.accept = 'audio/*,video/*';
+            } else if (currentTab === 'video') {
+                uploadInput.accept = 'video/*';
+            } else {
+                uploadInput.accept = 'image/*';
+            }
+        }
+
+        async function loadAssets() {
+            const resp = await fetch(`/api/content-library?type=${encodeURIComponent(currentTab)}`);
+            const data = await resp.json();
+            allAssets = data.success ? (data.assets || []) : [];
+            renderAssets();
+        }
+
+        function openPreview(assetId) {
+            const asset = allAssets.find((item) => String(item.id) === String(assetId));
+            if (!asset) return;
+            document.getElementById('previewTitle').textContent = `${asset.filename || '-'} / ${assetTypeLabel(asset)}`;
+            const media = document.getElementById('previewMedia');
+            if (asset.type === 'video') {
+                media.innerHTML = `<video controls autoplay src="${asset.url}" poster="${asset.meta?.cover_url || ''}"></video>`;
+            } else if (asset.type === 'audio') {
+                media.innerHTML = `<div style="text-align:center;font-size:64px;">♪</div><audio class="preview-audio" controls autoplay src="${asset.url}"></audio>`;
+            } else {
+                media.innerHTML = `<img src="${asset.url}" alt="${asset.filename || 'asset'}">`;
+            }
+            document.getElementById('previewModal').style.display = 'flex';
+        }
+
+        function closePreview() {
+            document.getElementById('previewModal').style.display = 'none';
+            document.getElementById('previewMedia').innerHTML = '';
+        }
+
+        function downloadAsset(assetId) {
+            const asset = allAssets.find((item) => String(item.id) === String(assetId));
+            if (!asset || !asset.url) return;
+            const link = document.createElement('a');
+            link.href = asset.url;
+            link.download = asset.filename || 'asset';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        async function renameAsset(assetId) {
+            const asset = allAssets.find((item) => String(item.id) === String(assetId));
+            if (!asset) return;
+            const nextName = prompt('请输入新的文件名', asset.filename || '');
+            if (!nextName || nextName === asset.filename) return;
+
+            const resp = await fetch('/api/rename-library-asset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: asset.id, filename: nextName.trim() }),
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                alert(data.error || '重命名失败');
+                return;
+            }
+            await loadAssets();
+        }
+
+        async function deleteAsset(assetId) {
+            const asset = allAssets.find((item) => String(item.id) === String(assetId));
+            if (!asset || !confirm(`确认删除 ${asset.filename || '该素材'} 吗？`)) return;
+
+            const resp = await fetch('/api/delete-library-asset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: asset.id }),
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                alert(data.error || '删除失败');
+                return;
+            }
+            closePreview();
+            await loadAssets();
+        }
+
+        async function uploadFiles(files) {
+            const list = Array.from(files || []);
+            if (!list.length) return;
+
+            for (const file of list) {
+                const formData = new FormData();
+                formData.append('file', file);
+                if (currentTab === 'image_material') {
+                    formData.append('type', 'image_material');
+                    await fetch('/api/upload-media-asset', { method: 'POST', body: formData });
+                } else if (currentTab === 'media') {
+                    formData.append('type', 'media');
+                    await fetch('/api/upload-media-asset', { method: 'POST', body: formData });
+                } else if (currentTab === 'video') {
+                    formData.append('type', 'video');
+                    await fetch('/api/upload-media-asset', { method: 'POST', body: formData });
+                } else {
+                    alert('图片库暂不支持手动上传，请从生成结果添加。');
+                    return;
+                }
+            }
+            await loadAssets();
+        }
+
+        document.getElementById('searchInput').addEventListener('input', renderAssets);
+        document.getElementById('refreshBtn').addEventListener('click', loadAssets);
+        document.getElementById('uploadTrigger').addEventListener('click', () => document.getElementById('uploadInput').click());
+        document.getElementById('uploadInput').addEventListener('change', (event) => uploadFiles(event.target.files));
+        document.getElementById('previewClose').addEventListener('click', closePreview);
+        document.getElementById('previewModal').addEventListener('click', (event) => {
+            if (event.target === event.currentTarget) closePreview();
+        });
+
+        renderTabs();
+        updateUploadAccept();
+        loadAssets();
     </script>
-    {% endraw %}
-    <script src="/static/sidebar-nav.js"></script>
 </body>
 </html>

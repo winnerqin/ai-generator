@@ -17,6 +17,18 @@ import database
 import time
 import urllib.request
 
+# ========== 新模块化结构导入（逐步迁移中）==========
+# 尝试导入新的模块，如果失败则继续使用旧代码
+try:
+    from app.utils import ApiResponse
+    from app.services import oss_service, file_upload_service
+    from app.decorators import login_required as new_login_required, admin_required as new_admin_required
+    NEW_MODULES_AVAILABLE = True
+except ImportError:
+    NEW_MODULES_AVAILABLE = False
+    print("提示：新模块不可用，使用原有代码结构")
+# ============================================
+
 def convert_to_dict(obj):
     """将响应对象转换为字典"""
     if isinstance(obj, dict):
@@ -119,36 +131,56 @@ single_generation_lock = threading.Lock()
 video_uploading = {}
 video_upload_lock = threading.Lock()
 
-# 阿里云 OSS 上传支持
+# 阿里云 OSS 上传支持（已迁移到新模块）
+# 如果新模块可用，使用新模块；否则使用旧实现
 def upload_to_aliyun_oss(file_path, user_id=None, is_sample=False, is_video=False, project_id=None):
     """
-    上传文件到阿里云 OSS（对象存储服务）
-    需要配置以下环境变量：
-    - OSS_ENDPOINT: OSS 端点（如：oss-cn-wulanchabu.aliyuncs.com）
-    - OSS_BUCKET: 存储桶名称（从 endpoint 中提取）
-    - OSS_ACCESS_KEY_ID: 阿里云 AccessKey ID
-    - OSS_ACCESS_KEY_SECRET: 阿里云 AccessKey Secret
-    
+    上传文件到阿里云 OSS（兼容函数，优先使用新模块）
+
     Args:
         file_path: 本地文件路径
         user_id: 用户ID，用于隔离用户文件
-        is_sample: 是否为示例图（示例图保存到sample/user_{user_id}/目录）
-        is_video: 是否为视频文件（视频保存到video_generator/user_{user_id}/目录）
+        is_sample: 是否为示例图
+        is_video: 是否为视频文件
+        project_id: 项目ID
     """
+    # 优先使用新模块
+    if NEW_MODULES_AVAILABLE:
+        try:
+            # 确定文件类型
+            if is_sample:
+                file_type = 'sample'
+            elif is_video:
+                file_type = 'video'
+            else:
+                file_type = 'image'
+
+            # 使用新的 oss_service
+            url = oss_service.upload_file(
+                file_path=file_path,
+                user_id=user_id,
+                project_id=project_id,
+                file_type=file_type
+            )
+            return url
+        except Exception as e:
+            print(f"[OSS] 新模块上传失败，回退到旧实现: {e}")
+            # 继续使用旧实现
+
+    # 旧实现（保留作为回退）
     try:
         import oss2
-        
+
         # 从环境变量获取配置
         oss_endpoint_full = os.environ.get('OSS_ENDPOINT', 'shor-file.oss-cn-wulanchabu.aliyuncs.com')
         access_key_id = os.environ.get('OSS_ACCESS_KEY_ID')
         access_key_secret = os.environ.get('OSS_ACCESS_KEY_SECRET')
-        
+
         if not all([oss_endpoint_full, access_key_id, access_key_secret]):
             print("警告：OSS 配置不完整，请检查 .env 文件")
             return None
-        
+
         # 从完整的 endpoint 中提取 bucket 和实际 endpoint
-        # 格式: bucket-name.oss-region.aliyuncs.com
         parts = oss_endpoint_full.split('.', 1)
         if len(parts) == 2:
             bucket_name = parts[0]
@@ -156,45 +188,41 @@ def upload_to_aliyun_oss(file_path, user_id=None, is_sample=False, is_video=Fals
         else:
             print(f"警告：OSS_ENDPOINT 格式不正确: {oss_endpoint_full}")
             return None
-        
+
         # 初始化 OSS 客户端
         auth = oss2.Auth(access_key_id, access_key_secret)
         bucket = oss2.Bucket(auth, f"https://{oss_endpoint}", bucket_name)
-        
-        # 生成对象键（文件名）- 根据类型和用户分类
+
+        # 生成对象键（文件名）
         filename = os.path.basename(file_path)
         timestamp = datetime.now().strftime('%Y%m%d')
-        
+
         if is_sample and user_id:
-            # 示例图按用户/项目隔离
             if project_id:
                 object_key = f"sample/user_{user_id}/project_{project_id}/{filename}"
             else:
                 object_key = f"sample/user_{user_id}/{filename}"
         elif is_video and user_id:
-            # 视频按用户/项目隔离
             if project_id:
                 object_key = f"video_generator/user_{user_id}/project_{project_id}/{filename}"
             else:
                 object_key = f"video_generator/user_{user_id}/{filename}"
         else:
-            # 生成的图片按用户/项目隔离
             if user_id and project_id:
                 object_key = f"ai-images/{timestamp}/user_{user_id}/project_{project_id}/{filename}"
             elif user_id:
                 object_key = f"ai-images/{timestamp}/user_{user_id}/{filename}"
             else:
                 object_key = f"ai-images/{timestamp}/{filename}"
-        
+
         # 上传文件
         with open(file_path, 'rb') as f:
             result = bucket.put_object(object_key, f)
-        
+
         # 返回公网访问 URL
-        # 格式: https://bucket-name.oss-region.aliyuncs.com/object-key
         public_url = f"https://{oss_endpoint_full}/{object_key}"
         return public_url
-        
+
     except ImportError:
         print("提示：未安装 oss2 SDK，无法使用阿里云 OSS 上传功能。")
         print("安装命令: pip install oss2")
@@ -207,29 +235,36 @@ def upload_to_aliyun_oss(file_path, user_id=None, is_sample=False, is_video=Fals
 
 def get_oss_bucket():
     """
-    获取已配置的 OSS Bucket 对象
+    获取已配置的 OSS Bucket 对象（兼容函数，优先使用新模块）
     """
+    # 优先使用新模块
+    if NEW_MODULES_AVAILABLE:
+        try:
+            return oss_service.get_bucket()
+        except Exception as e:
+            print(f"[OSS] 新模块获取 bucket 失败，回退到旧实现: {e}")
+
+    # 旧实现
     try:
         import oss2
-        
+
         oss_endpoint_full = os.environ.get('OSS_ENDPOINT', 'shor-file.oss-cn-wulanchabu.aliyuncs.com')
         access_key_id = os.environ.get('OSS_ACCESS_KEY_ID')
         access_key_secret = os.environ.get('OSS_ACCESS_KEY_SECRET')
-        
+
         if not all([oss_endpoint_full, access_key_id, access_key_secret]):
             return None, None
-        
-        # 从完整的 endpoint 中提取 bucket 和实际 endpoint
+
         parts = oss_endpoint_full.split('.', 1)
         if len(parts) == 2:
             bucket_name = parts[0]
             oss_endpoint = parts[1]
         else:
             return None, None
-        
+
         auth = oss2.Auth(access_key_id, access_key_secret)
         bucket = oss2.Bucket(auth, f"https://{oss_endpoint}", bucket_name)
-        
+
         return bucket, oss_endpoint_full
     except:
         return None, None
@@ -289,22 +324,33 @@ def safe_object_exists(bucket, object_key):
 
 def list_sample_images_from_oss(user_id=None, project_id=None):
     """
-    列出阿里云 OSS 中的示例图（按用户隔离）
+    列出阿里云 OSS 中的示例图（按用户隔离，兼容函数，优先使用新模块）
     返回格式: [{'url': 'http://...', 'filename': 'xxx.jpg', 'size': 12345}, ...]
     """
+    # 优先使用新模块
+    if NEW_MODULES_AVAILABLE:
+        try:
+            images = oss_service.list_sample_images(user_id, project_id)
+            if images:
+                print(f"[OSS] 从新模块加载到 {len(images)} 张示例图（用户ID: {user_id}）")
+                return images
+        except Exception as e:
+            print(f"[OSS] 新模块加载示例图失败，回退到旧实现: {e}")
+            # 继续使用旧实现
+
+    # 旧实现
     try:
         import oss2
-        
+
         if not user_id:
             return []
-        
+
         bucket, endpoint_full = get_oss_bucket()
         if not bucket:
             return []
-        
+
         # 列出多个可能的路径（向后兼容不同的上传方式）
         sample_images = []
-        # 1. 标准路径：sample/person/user_{user_id}/project_{project_id}/
         prefixes = []
         if project_id:
             prefixes.extend([
@@ -314,12 +360,12 @@ def list_sample_images_from_oss(user_id=None, project_id=None):
         prefixes.extend([
             f'sample/person/user_{user_id}/',
             f'sample/scene/user_{user_id}/',
-            f'sample/user_{user_id}/',  # 兼容旧的上传路径
-            'ai-images/sample/',  # 兼容 upload_sample_images.py 脚本的路径
+            f'sample/user_{user_id}/',
+            'ai-images/sample/',
         ])
-        
-        seen_keys = set()  # 用于去重
-        
+
+        seen_keys = set()
+
         for prefix in prefixes:
             try:
                 count = 0
@@ -329,18 +375,16 @@ def list_sample_images_from_oss(user_id=None, project_id=None):
                     if obj.key.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
                         seen_keys.add(obj.key)
                         count += 1
-                        # 生成公网访问URL
                         url = f"https://{endpoint_full}/{obj.key}"
                         filename = os.path.basename(obj.key)
-                        # 推断类别
+
                         if '/person/' in obj.key:
                             category = 'person'
                         elif '/scene/' in obj.key:
                             category = 'scene'
                         else:
-                            # 对于没有明确分类的路径，默认归类为 person
                             category = 'person'
-                        
+
                         sample_images.append({
                             'url': url,
                             'filename': filename,
@@ -351,16 +395,14 @@ def list_sample_images_from_oss(user_id=None, project_id=None):
                 if count > 0:
                     print(f"[OSS] 从路径 {prefix} 加载到 {count} 张图片")
             except Exception as prefix_err:
-                # 如果某个路径不存在或出错，继续处理其他路径
                 print(f"[OSS] 警告：读取路径 {prefix} 时出错: {prefix_err}")
                 import traceback
                 traceback.print_exc()
                 continue
-        
-        print(f"[OSS] 总计加载到 {len(sample_images)} 张示例图（用户ID: {user_id}）")
 
+        print(f"[OSS] 总计加载到 {len(sample_images)} 张示例图（用户ID: {user_id}）")
         return sample_images
-    
+
     except Exception as e:
         print(f"读取 OSS 示例图失败: {e}")
         import traceback
@@ -469,7 +511,7 @@ def login_required(f):
         if 'user_id' not in session:
             return redirect(url_for('login'))
         # 确保已选择项目
-        if 'project_id' not in session:
+        if 'current_project_id' not in session:
             ensure_session_project(session.get('user_id'))
         return f(*args, **kwargs)
     return decorated_function
@@ -480,6 +522,9 @@ def admin_required(f):
     def decorated_function(*args, **kwargs):
         user = get_current_user()
         if not user or user.get('username') != 'system_admin':
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.forbidden("无权限")
             return jsonify({'success': False, 'error': '无权限'}), 403
         return f(*args, **kwargs)
     return decorated_function
@@ -502,12 +547,12 @@ def ensure_session_project(user_id):
     else:
         project = projects[0]
     if project:
-        session['project_id'] = project.get('id')
-        session['project_name'] = project.get('name')
+        session['current_project_id'] = project.get('id')
+        session['current_project_name'] = project.get('name')
 
 def get_current_project_id():
     """获取当前项目ID"""
-    return session.get('project_id')
+    return session.get('current_project_id')
 
 def get_current_project():
     """获取当前项目信息"""
@@ -583,11 +628,22 @@ def api_projects():
     """获取当前用户可访问的项目"""
     user_id = session.get('user_id')
     projects = database.get_user_projects(user_id)
+
+    # 使用新模块返回响应（如果可用）
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({
+            'projects': projects,
+            'current_project_id': session.get('current_project_id'),
+            'current_project_name': session.get('current_project_name')
+        })
+
+    # 保持原有格式以兼容
     return jsonify({
         'success': True,
         'projects': projects,
-        'current_project_id': session.get('project_id'),
-        'current_project_name': session.get('project_name')
+        'current_project_id': session.get('current_project_id'),
+        'current_project_name': session.get('current_project_name')
     })
 
 @app.route('/api/projects/switch', methods=['POST'])
@@ -600,14 +656,31 @@ def api_switch_project():
     try:
         project_id = int(project_id)
     except Exception:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("项目ID无效")
         return jsonify({'success': False, 'error': '项目ID无效'}), 400
+
     if not user_has_project(user_id, project_id):
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.forbidden("无权访问该项目")
         return jsonify({'success': False, 'error': '无权访问该项目'}), 403
+
     project = database.get_project_by_id(project_id)
     if not project:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.not_found("项目不存在")
         return jsonify({'success': False, 'error': '项目不存在'}), 404
-    session['project_id'] = project.get('id')
-    session['project_name'] = project.get('name')
+
+    session['current_project_id'] = project.get('id')
+    session['current_project_name'] = project.get('name')
+
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success(project)
+
     return jsonify({'success': True, 'project': project})
 
 # ==================== 统计页面路由（仅系统管理员） ====================
@@ -635,6 +708,9 @@ def admin_page():
 @admin_required
 def api_admin_users():
     users = database.get_all_users()
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'users': users})
     return jsonify({'success': True, 'users': users})
 
 @app.route('/api/admin/users', methods=['POST'])
@@ -645,12 +721,24 @@ def api_admin_users_create():
     username = (data.get('username') or '').strip()
     password = data.get('password') or ''
     if not username or not password:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("用户名和密码不能为空")
         return jsonify({'success': False, 'error': '用户名和密码不能为空'}), 400
+
     user_id = database.create_user(username, password)
     if not user_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.conflict("用户名已存在")
         return jsonify({'success': False, 'error': '用户名已存在'}), 400
+
     project_id = database.create_project('默认项目', owner_id=user_id)
     database.assign_user_to_project(user_id, project_id)
+
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.created({'user_id': user_id}, "用户创建成功")
     return jsonify({'success': True, 'user_id': user_id})
 
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
@@ -658,11 +746,22 @@ def api_admin_users_create():
 @admin_required
 def api_admin_users_delete(user_id):
     if user_id == session.get('user_id'):
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("不能删除当前登录用户")
         return jsonify({'success': False, 'error': '不能删除当前登录用户'}), 400
+
     user = database.get_user_by_id(user_id)
     if user and user.get('username') == 'system_admin':
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("不能删除系统管理员")
         return jsonify({'success': False, 'error': '不能删除系统管理员'}), 400
+
     database.delete_user(user_id)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success(None, "用户已删除")
     return jsonify({'success': True})
 
 @app.route('/api/admin/users/<int:user_id>/password', methods=['POST'])
@@ -672,8 +771,15 @@ def api_admin_users_password(user_id):
     data = request.get_json() or {}
     new_password = data.get('password') or ''
     if not new_password:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("密码不能为空")
         return jsonify({'success': False, 'error': '密码不能为空'}), 400
+
     database.update_user_password(user_id, new_password)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success(None, "密码已修改")
     return jsonify({'success': True})
 
 @app.route('/api/admin/projects', methods=['GET'])
@@ -683,6 +789,9 @@ def api_admin_projects():
     projects = database.get_all_projects()
     for project in projects:
         project['users'] = database.get_project_users(project.get('id'))
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'projects': projects})
     return jsonify({'success': True, 'projects': projects})
 
 @app.route('/api/admin/projects', methods=['POST'])
@@ -692,9 +801,17 @@ def api_admin_projects_create():
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
     if not name:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("项目名不能为空")
         return jsonify({'success': False, 'error': '项目名不能为空'}), 400
+
     owner_id = data.get('owner_id')
     project_id = database.create_project(name, owner_id=owner_id)
+
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.created({'project_id': project_id}, "项目创建成功")
     return jsonify({'success': True, 'project_id': project_id})
 
 @app.route('/api/admin/projects/<int:project_id>/assign', methods=['POST'])
@@ -704,8 +821,15 @@ def api_admin_projects_assign(project_id):
     data = request.get_json() or {}
     user_id = data.get('user_id')
     if not user_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("缺少用户ID")
         return jsonify({'success': False, 'error': '缺少用户ID'}), 400
+
     database.assign_user_to_project(int(user_id), project_id)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success(None, "授权成功")
     return jsonify({'success': True})
 
 @app.route('/api/admin/projects/<int:project_id>/revoke', methods=['POST'])
@@ -715,8 +839,15 @@ def api_admin_projects_revoke(project_id):
     data = request.get_json() or {}
     user_id = data.get('user_id')
     if not user_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("缺少用户ID")
         return jsonify({'success': False, 'error': '缺少用户ID'}), 400
+
     database.revoke_user_from_project(int(user_id), project_id)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success(None, "权限已移除")
     return jsonify({'success': True})
 
 @app.route('/api/stats')
@@ -726,33 +857,44 @@ def api_stats():
     user = get_current_user()
     # 检查是否为系统管理员
     if user['username'] != 'system_admin':
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.forbidden("权限不足")
         return jsonify({'success': False, 'error': '权限不足'}), 403
-    
+
     try:
         # 获取日期筛选参数
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
-        
+
         # 获取统计概览
         overview = database.get_stats_overview()
-        
+
         # 获取用户统计
         user_stats = database.get_user_stats(start_date, end_date)
-        
+
         # 获取每日统计
         daily_stats = database.get_daily_stats(days=7)
-        
-        return jsonify({
-            'success': True,
+
+        data = {
             'total_users': overview['total_users'],
             'total_images': overview['total_images'],
             'today_images': overview['today_images'],
             'week_images': overview['week_images'],
             'user_stats': user_stats,
             'daily_stats': daily_stats
-        })
+        }
+
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success(data)
+
+        return jsonify({'success': True, **data})
     except Exception as e:
         print(f"获取统计数据失败: {e}")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -981,13 +1123,22 @@ def api_script_generate_stream():
         max_seconds = int(data.get('max_seconds') or 150)
 
         if not text:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请输入小说文本")
             return jsonify({'success': False, 'error': '请输入小说文本'}), 400
         if min_seconds < 60 or max_seconds < min_seconds:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("分集时长设置不合法")
             return jsonify({'success': False, 'error': '分集时长设置不合法'}), 400
 
         api_key = os.environ.get('QWEN_API_KEY')
         base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
         if not api_key:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.server_error("QWEN_API_KEY 未配置")
             return jsonify({'success': False, 'error': 'QWEN_API_KEY 未配置'}), 500
 
         client = OpenAI(api_key=api_key, base_url=base_url)
@@ -1057,6 +1208,9 @@ def api_script_generate_stream():
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('剧本生成流式失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1174,15 +1328,24 @@ def api_txt2csv_stream():
         data = request.get_json() or {}
         text = (data.get('text') or '').strip()
         if not text:
-            return jsonify({'success': False, 'error': '请输入文本内容'}), 400
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+            return ApiResponse.bad_request("请输入文本内容")
+        return jsonify({'success': False, 'error': '请输入文本内容'}), 400
 
         api_key = os.environ.get('QWEN_API_KEY')
         base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
         if not api_key:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.server_error("QWEN_API_KEY 未配置")
             return jsonify({'success': False, 'error': 'QWEN_API_KEY 未配置'}), 500
 
         format_md = _load_txt2csv_format()
         if not format_md:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("config/txt2csv.md 不存在或为空")
             return jsonify({'success': False, 'error': 'config/txt2csv.md 不存在或为空'}), 500
 
         halfwidth_rule = (
@@ -1233,6 +1396,9 @@ def api_txt2csv_stream():
             headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
         )
     except Exception as e:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1251,13 +1417,22 @@ def api_storyboard_from_script():
         markdown_ref = (data.get('markdown') or '').strip()  # 生成 CSV 时传入的已有分镜文本（可编辑或粘贴）
 
         if output_mode != 'csv' and not script:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请输入剧本内容")
             return jsonify({'success': False, 'error': '请输入剧本内容'}), 400
         if output_mode == 'csv' and not markdown_ref:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请先填写或粘贴分镜文本（Markdown）后再点「生成 CSV 表格」")
             return jsonify({'success': False, 'error': '请先填写或粘贴分镜文本（Markdown）后再点「生成 CSV 表格」'}), 400
 
         api_key = os.environ.get('QWEN_API_KEY')
         base_url = os.environ.get('QWEN_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1')
         if not api_key:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.server_error("QWEN_API_KEY 未配置")
             return jsonify({'success': False, 'error': 'QWEN_API_KEY 未配置'}), 500
 
         prompt_file = (data.get('prompt_file') or data.get('format_file') or 'storyboard.md').strip()
@@ -1265,6 +1440,9 @@ def api_storyboard_from_script():
         if not format_md:
             format_md = _load_storyboard_format()
         if not format_md:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request(f'config 下提示词文件不存在或为空（当前选择: {prompt_file or "storyboard.md"}）')
             return jsonify({'success': False, 'error': f'config 下提示词文件不存在或为空（当前选择: {prompt_file or "storyboard.md"}）'}), 500
 
         csv_rule = (
@@ -1314,11 +1492,17 @@ def api_storyboard_from_script():
         content = (response.choices[0].message.content or '').strip()
 
         if output_mode == 'markdown':
-            return jsonify({'success': True, 'markdown': content})
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+            return ApiResponse.success({'markdown': content})
+        return jsonify({'success': True, 'markdown': content})
         if output_mode == 'csv':
             csv_part = _csv_ensure_halfwidth_punctuation(content)
             csv_part = _csv_normalize_storyboard_description_newlines(csv_part)
-            return jsonify({'success': True, 'csv': csv_part})
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+            return ApiResponse.success({'csv': csv_part})
+        return jsonify({'success': True, 'csv': csv_part})
 
         if STORYBOARD_CSV_DELIMITER in content:
             parts = content.split(STORYBOARD_CSV_DELIMITER, 1)
@@ -1336,6 +1520,9 @@ def api_storyboard_from_script():
 
         csv_part = _csv_ensure_halfwidth_punctuation(csv_part)
         csv_part = _csv_normalize_storyboard_description_newlines(csv_part)
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'markdown': markdown_part, 'csv': csv_part})
         return jsonify({
             'success': True,
             'markdown': markdown_part,
@@ -1343,6 +1530,9 @@ def api_storyboard_from_script():
         })
     except Exception as e:
         log_operation('生成分镜失败', str(e), 'WARNING')
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1430,8 +1620,14 @@ def api_storyboard_queue_list():
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if not project_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("请选择当前项目")
         return jsonify({'success': False, 'error': '请选择当前项目'}), 400
     tasks = _load_storyboard_queue(user_id, project_id)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'tasks': tasks})
     return jsonify({'success': True, 'tasks': tasks})
 
 
@@ -1442,6 +1638,9 @@ def api_storyboard_queue_upload():
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if not project_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("请选择当前项目")
         return jsonify({'success': False, 'error': '请选择当前项目'}), 400
     prompt_file = (request.form.get('prompt_file') or 'storyboard.md').strip()
     if 'files[]' in request.files:
@@ -1450,6 +1649,9 @@ def api_storyboard_queue_upload():
         files = [request.files.get('file')] if request.files.get('file') else []
     files = [f for f in files if f and f.filename]
     if not files:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("请选择至少一个文件")
         return jsonify({'success': False, 'error': '请选择至少一个文件'}), 400
     tasks = _load_storyboard_queue(user_id, project_id)
     for f in files:
@@ -1478,6 +1680,9 @@ def api_storyboard_queue_upload():
             'script': script[:50000],
         })
     _save_storyboard_queue(user_id, project_id, tasks)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'tasks': tasks, 'added': len(files)})
     return jsonify({'success': True, 'tasks': tasks, 'added': len(files)})
 
 
@@ -1488,10 +1693,16 @@ def api_storyboard_queue_delete(task_id):
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if not project_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("请选择当前项目")
         return jsonify({'success': False, 'error': '请选择当前项目'}), 400
     tasks = _load_storyboard_queue(user_id, project_id)
     tasks = [t for t in tasks if t.get('id') != task_id]
     _save_storyboard_queue(user_id, project_id, tasks)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'tasks': tasks})
     return jsonify({'success': True, 'tasks': tasks})
 
 
@@ -1502,10 +1713,16 @@ def api_storyboard_queue_process_one():
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if not project_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("请选择当前项目")
         return jsonify({'success': False, 'error': '请选择当前项目'}), 400
     tasks = _load_storyboard_queue(user_id, project_id)
     pending = [t for t in tasks if t.get('status') == 'pending']
     if not pending:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'processed': False, 'tasks': tasks, 'message': '暂无等待中的任务'})
         return jsonify({'success': True, 'processed': False, 'tasks': tasks, 'message': '暂无等待中的任务'})
     task = pending[0]
     task_id = task.get('id')
@@ -1518,6 +1735,9 @@ def api_storyboard_queue_process_one():
         task['completed_at'] = datetime.now().isoformat()
         task['error'] = '文件内容为空'
         _save_storyboard_queue(user_id, project_id, tasks)
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
         return jsonify({'success': True, 'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
     try:
         markdown_part, csv_part = _run_storyboard_generate_both(script, task.get('prompt_file') or 'storyboard.md')
@@ -1526,6 +1746,9 @@ def api_storyboard_queue_process_one():
         task['completed_at'] = datetime.now().isoformat()
         task['error'] = str(e)
         _save_storyboard_queue(user_id, project_id, tasks)
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
         return jsonify({'success': True, 'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
     out_dir = get_user_output_folder(user_id, project_id)
     base = Path(task.get('filename', 'script')).stem
@@ -1544,6 +1767,9 @@ def api_storyboard_queue_process_one():
         task['completed_at'] = datetime.now().isoformat()
         task['error'] = f'写入文件失败: {e}'
         _save_storyboard_queue(user_id, project_id, tasks)
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
         return jsonify({'success': True, 'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
     task['status'] = 'completed'
     task['completed_at'] = datetime.now().isoformat()
@@ -1555,6 +1781,9 @@ def api_storyboard_queue_process_one():
     if 'script' in task:
         del task['script']
     _save_storyboard_queue(user_id, project_id, tasks)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
     return jsonify({'success': True, 'processed': True, 'task_id': task_id, 'task': task, 'tasks': tasks})
 
 
@@ -1622,14 +1851,20 @@ def api_script_generate():
         prompt = (data.get('prompt') or '').strip()
         min_seconds = int(data.get('min_seconds') or 90)
         max_seconds = int(data.get('max_seconds') or 150)
-        
+
         log_request('POST', '/api/script-generate', user_id, f'文本长度: {len(text)}')
-        
+
         if not text:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请输入小说文本")
             return jsonify({'success': False, 'error': '请输入小说文本'}), 400
         if min_seconds < 60 or max_seconds < min_seconds:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("分集时长设置不合法")
             return jsonify({'success': False, 'error': '分集时长设置不合法'}), 400
-        
+
         result = _generate_script_content(text, prompt, min_seconds, max_seconds)
         script_id = _persist_script_result(
             user_id,
@@ -1642,12 +1877,18 @@ def api_script_generate():
             base_script_id=base_script_id
         )
         episodes = database.list_script_episodes(script_id, user_id, project_id)
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({**result, 'script_id': script_id, 'episode_records': episodes})
         return jsonify({'success': True, **result, 'script_id': script_id, 'episode_records': episodes})
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('剧本生成失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1660,19 +1901,28 @@ def api_storyboard_generate():
         data = request.get_json() or {}
         script = (data.get('script') or '').strip()
         prompt = (data.get('prompt') or '').strip()
-        
+
         log_request('POST', '/api/storyboard-generate', user_id, f'剧本长度: {len(script)}')
-        
+
         if not script:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请输入剧本文本")
             return jsonify({'success': False, 'error': '请输入剧本文本'}), 400
-        
+
         result = _generate_storyboard_content(script, prompt)
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success(result)
         return jsonify({'success': True, **result})
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('分镜生成失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1734,8 +1984,14 @@ def api_script_generate_async():
     min_seconds = int(data.get('min_seconds') or 90)
     max_seconds = int(data.get('max_seconds') or 150)
     if not text:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("请输入小说文本")
         return jsonify({'success': False, 'error': '请输入小说文本'}), 400
     if min_seconds < 60 or max_seconds < min_seconds:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("分集时长设置不合法")
         return jsonify({'success': False, 'error': '分集时长设置不合法'}), 400
     base_script_id = data.get('script_id')
     payload = {
@@ -1751,6 +2007,9 @@ def api_script_generate_async():
     thread = threading.Thread(target=_run_script_task, args=(task_id, payload))
     thread.daemon = True
     thread.start()
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'task_id': task_id})
     return jsonify({'success': True, 'task_id': task_id})
 
 
@@ -1764,6 +2023,9 @@ def api_storyboard_generate_async():
     script = (data.get('script') or '').strip()
     prompt = (data.get('prompt') or '').strip()
     if not script:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("请输入剧本文本")
         return jsonify({'success': False, 'error': '请输入剧本文本'}), 400
     payload = {
         'script': script,
@@ -1773,6 +2035,9 @@ def api_storyboard_generate_async():
     thread = threading.Thread(target=_run_storyboard_task, args=(task_id, payload))
     thread.daemon = True
     thread.start()
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'task_id': task_id})
     return jsonify({'success': True, 'task_id': task_id})
 
 
@@ -1784,6 +2049,9 @@ def api_get_task(task_id):
     project_id = get_current_project_id()
     task = database.get_generation_task(user_id, project_id, task_id)
     if not task:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.not_found("任务不存在")
         return jsonify({'success': False, 'error': '任务不存在'}), 404
     result = None
     payload = None
@@ -1797,8 +2065,7 @@ def api_get_task(task_id):
             payload = json.loads(task['payload_json'])
         except Exception:
             payload = None
-    return jsonify({
-        'success': True,
+    response_data = {
         'task': {
             'id': task['id'],
             'task_type': task['task_type'],
@@ -1808,6 +2075,13 @@ def api_get_task(task_id):
             'payload': payload,
             'error': task.get('error')
         }
+    }
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success(response_data['task'])
+    return jsonify({
+        'success': True,
+        **response_data
     })
 
 
@@ -1819,8 +2093,14 @@ def api_script_saves():
     project_id = get_current_project_id()
     if request.method == 'GET':
         if not project_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.success({'records': []})
             return jsonify({'success': True, 'records': []})
         records = database.list_script_records(user_id, project_id)
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'records': records})
         return jsonify({'success': True, 'records': records})
     data = request.get_json() or {}
     title = (data.get('title') or '').strip()
@@ -1845,6 +2125,9 @@ def api_script_saves():
         episodes,
         record_id=record_id
     )
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'id': record_id})
     return jsonify({'success': True, 'id': record_id})
 
 
@@ -1854,9 +2137,15 @@ def api_script_save_detail(record_id):
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if not project_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("请先选择项目")
         return jsonify({'success': False, 'error': '请先选择项目'}), 400
     record = database.get_script_record(user_id, project_id, record_id)
     if not record:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.not_found("记录不存在")
         return jsonify({'success': False, 'error': '记录不存在'}), 404
     episodes = []
     if record.get('episodes_json'):
@@ -1865,6 +2154,9 @@ def api_script_save_detail(record_id):
         except Exception:
             episodes = []
     record['episodes'] = episodes
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success(record)
     return jsonify({'success': True, 'record': record})
 
 
@@ -1875,16 +2167,34 @@ def api_script_episodes():
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if not project_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'episodes': []})
         return jsonify({'success': True, 'episodes': []})
     script_id = request.args.get('script_id')
     if not script_id:
         episodes = database.list_all_script_episodes(user_id, project_id)
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'episodes': episodes})
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'episodes': episodes})
         return jsonify({'success': True, 'episodes': episodes})
     try:
         script_id = int(script_id)
     except ValueError:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("script_id 非法")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("script_id 非法")
         return jsonify({'success': False, 'error': 'script_id 非法'}), 400
     episodes = database.list_script_episodes(script_id, user_id, project_id)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'episodes': episodes})
     return jsonify({'success': True, 'episodes': episodes})
 
 
@@ -1901,15 +2211,30 @@ def api_update_script_episode(episode_id):
     title = data.get('title')
     duration_seconds = data.get('duration_seconds')
     if content is None:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("缺少内容")
         return jsonify({'success': False, 'error': '缺少内容'}), 400
     if not script_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("缺少 script_id")
         return jsonify({'success': False, 'error': '缺少 script_id'}), 400
     try:
         script_id = int(script_id)
     except ValueError:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("script_id 非法")
         return jsonify({'success': False, 'error': 'script_id 非法'}), 400
     url = _upload_episode_text(content, user_id, project_id, script_id, episode_index)
     if not url:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error("OSS 上传失败")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error("OSS 上传失败")
         return jsonify({'success': False, 'error': 'OSS 上传失败'}), 500
     summary = _summarize_episode(content)
     database.update_script_episode(
@@ -1921,6 +2246,9 @@ def api_update_script_episode(episode_id):
         episode_index=episode_index,
         duration_seconds=duration_seconds
     )
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'content_url': url, 'summary': summary})
     return jsonify({'success': True, 'content_url': url, 'summary': summary})
 
 
@@ -1933,6 +2261,9 @@ def api_import_script_episodes():
     script_id = request.form.get('script_id')
     files = request.files.getlist('files')
     if not files:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("未选择文件")
         return jsonify({'success': False, 'error': '未选择文件'}), 400
     if script_id:
         try:
@@ -1974,6 +2305,9 @@ def api_import_script_episodes():
         })
     if rows:
         database.save_script_episodes(script_id, user_id, project_id, rows)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'script_id': script_id, 'count': len(rows)})
     return jsonify({'success': True, 'script_id': script_id, 'count': len(rows)})
 
 
@@ -1985,12 +2319,27 @@ def api_get_script_episode_content(episode_id):
     project_id = get_current_project_id()
     ep = database.get_script_episode(episode_id, user_id, project_id)
     if not ep:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.not_found("记录不存在")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.not_found("记录不存在")
         return jsonify({'success': False, 'error': '记录不存在'}), 404
     content_url = ep.get('content_url')
     if not content_url:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.not_found("内容地址为空")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.not_found("内容地址为空")
         return jsonify({'success': False, 'error': '内容地址为空'}), 404
     content = _fetch_text_from_url(content_url)
     if content is None:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error("内容读取失败")
         return jsonify({'success': False, 'error': '内容读取失败'}), 500
     return Response(content, mimetype='text/plain; charset=utf-8')
 
@@ -2001,6 +2350,9 @@ def api_delete_script_episode(episode_id):
     """删除单集记录"""
     user_id = session.get('user_id')
     database.delete_script_episode(episode_id, user_id)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success()
     return jsonify({'success': True})
 
 
@@ -2012,8 +2364,17 @@ def api_storyboard_saves():
     project_id = get_current_project_id()
     if request.method == 'GET':
         if not project_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.success({'records': []})
             return jsonify({'success': True, 'records': []})
         records = database.list_storyboard_records(user_id, project_id)
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'records': records})
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'records': records})
         return jsonify({'success': True, 'records': records})
     data = request.get_json() or {}
     title = (data.get('title') or '').strip()
@@ -2044,6 +2405,9 @@ def api_storyboard_saves():
         series_id=series_id,
         create_version=create_version
     )
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'id': record_id})
     return jsonify({'success': True, 'id': record_id})
 
 
@@ -2053,9 +2417,15 @@ def api_storyboard_save_detail(record_id):
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if not project_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("请先选择项目")
         return jsonify({'success': False, 'error': '请先选择项目'}), 400
     record = database.get_storyboard_record(user_id, project_id, record_id)
     if not record:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.not_found("记录不存在")
         return jsonify({'success': False, 'error': '记录不存在'}), 404
     storyboard_json = {}
     if record.get('storyboard_json'):
@@ -2064,6 +2434,9 @@ def api_storyboard_save_detail(record_id):
         except Exception:
             storyboard_json = {}
     record['storyboard_json'] = storyboard_json
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success(record)
     return jsonify({'success': True, 'record': record})
 
 
@@ -2074,8 +2447,14 @@ def api_storyboard_series():
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if not project_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'records': []})
         return jsonify({'success': True, 'records': []})
     records = database.list_storyboard_series(user_id, project_id)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'records': records})
     return jsonify({'success': True, 'records': records})
 
 
@@ -2086,8 +2465,14 @@ def api_storyboard_versions(series_id):
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if not project_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'records': []})
         return jsonify({'success': True, 'records': []})
     records = database.list_storyboard_versions(user_id, project_id, series_id)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'records': records})
     return jsonify({'success': True, 'records': records})
 
 
@@ -2104,6 +2489,9 @@ def api_storyboard_sample_images():
 
         episodes = storyboard.get('episodes') if isinstance(storyboard, dict) else None
         if not isinstance(episodes, list) or len(episodes) == 0:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("分镜数据为空")
             return jsonify({'success': False, 'error': '分镜数据为空'}), 400
 
         images = []
@@ -2152,8 +2540,20 @@ def api_storyboard_sample_images():
                 })
                 count += 1
 
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'images': images})
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'images': images})
         return jsonify({'success': True, 'images': images})
     except Exception as e:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -2166,21 +2566,36 @@ def api_storyboard_episodes():
     if request.method == 'GET':
         script_episode_id = request.args.get('script_episode_id')
         if not script_episode_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("缺少 script_episode_id")
             return jsonify({'success': False, 'error': '缺少 script_episode_id'}), 400
         try:
             script_episode_id = int(script_episode_id)
         except ValueError:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("script_episode_id 非法")
             return jsonify({'success': False, 'error': 'script_episode_id 非法'}), 400
         record = database.get_storyboard_episode(user_id, project_id, script_episode_id)
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'record': record})
         return jsonify({'success': True, 'record': record})
 
     data = request.get_json() or {}
     script_episode_id = data.get('script_episode_id')
     if not script_episode_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("缺少 script_episode_id")
         return jsonify({'success': False, 'error': '缺少 script_episode_id'}), 400
     try:
         script_episode_id = int(script_episode_id)
     except ValueError:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("script_episode_id 非法")
         return jsonify({'success': False, 'error': 'script_episode_id 非法'}), 400
     prompt = data.get('prompt') or ''
     storyboard_json = data.get('storyboard_json') or {}
@@ -2195,6 +2610,9 @@ def api_storyboard_episodes():
         storyboard_text,
         images_json
     )
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'id': record_id})
     return jsonify({'success': True, 'id': record_id})
 
 
@@ -2204,8 +2622,14 @@ def api_script_templates_list():
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if not project_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'templates': []})
         return jsonify({'success': True, 'templates': []})
     templates = database.get_script_templates(user_id, project_id)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success({'templates': templates})
     return jsonify({'success': True, 'templates': templates})
 
 
@@ -2215,16 +2639,28 @@ def api_script_templates_create():
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if not project_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("请先选择项目")
         return jsonify({'success': False, 'error': '请先选择项目'}), 400
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
     prompt = (data.get('prompt') or '').strip()
     if not name or not prompt:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("模板名称与提示词不能为空")
         return jsonify({'success': False, 'error': '模板名称与提示词不能为空'}), 400
     try:
         template_id = database.create_script_template(user_id, project_id, name, prompt)
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'template_id': template_id})
         return jsonify({'success': True, 'template_id': template_id})
     except Exception:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("模板名称已存在")
         return jsonify({'success': False, 'error': '模板名称已存在'}), 400
 
 
@@ -2234,8 +2670,14 @@ def api_script_templates_delete(template_id):
     user_id = session.get('user_id')
     project_id = get_current_project_id()
     if not project_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("请先选择项目")
         return jsonify({'success': False, 'error': '请先选择项目'}), 400
     database.delete_script_template(user_id, template_id, project_id)
+    if NEW_MODULES_AVAILABLE:
+        from app.utils import ApiResponse
+        return ApiResponse.success()
     return jsonify({'success': True})
 
 # ==================== 主页路由 ====================
@@ -2490,30 +2932,6 @@ def generate():
     try:
         user_id = session.get('user_id')
         project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
-        project_id = get_current_project_id()
         # 获取表单数据
         prompt = request.form.get('prompt', '').strip()
         aspect_ratio = request.form.get('aspect_ratio', '9:16')
@@ -2530,6 +2948,9 @@ def generate():
         
         if not prompt:
             log_operation('生成失败', f'用户ID: {user_id}, 原因: 缺少提示词', 'WARNING')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请输入提示词")
             return jsonify({'error': '请输入提示词'}), 400
         
         # 获取尺寸
@@ -2589,6 +3010,9 @@ def generate():
         base_url = os.environ.get('ARK_BASE_URL', 'https://ark.cn-beijing.volces.com/api/v3')
         
         if not api_key:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.server_error("ARK_API_KEY 未配置")
             return jsonify({'error': 'ARK_API_KEY 未配置'}), 500
         
         # 初始化 OpenAI 客户端（兼容方舟大模型）
@@ -2969,12 +3393,18 @@ def generate_stream_resume():
         from_index = 0
     
     if not generation_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("generation_id 缺失")
         return jsonify({'error': 'generation_id 缺失'}), 400
     
     with single_generation_lock:
         channel = single_generation_channels.get(generation_id)
     
     if not channel or channel.get('user_id') != user_id:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.not_found("生成任务不存在或已过期")
         return jsonify({'error': '生成任务不存在或已过期'}), 404
     
     return Response(
@@ -2994,11 +3424,14 @@ def get_sample_images():
         user_id = session.get('user_id')
         project_id = get_current_project_id()
         if not project_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.success({'images': []})
             return jsonify({'success': True, 'images': []})
         category = request.args.get('category')
         log_request('GET', '/api/sample-images', user_id, f'类别: {category or "全部"}')
         print(f"[API] /api/sample-images 请求 - 用户ID: {user_id}, 类别: {category}")
-        
+
         # 先从 OSS 列表中读取（如果配置了 OSS）
         try:
             sample_images = list_sample_images_from_oss(user_id, project_id)
@@ -3056,17 +3489,22 @@ def get_sample_images():
 
         log_operation('获取示例图', f'用户ID: {user_id}, 类别: {category or "全部"}, 数量: {len(sample_images)}')
         print(f"[API] 准备返回响应 - 用户ID: {user_id}, 类别: {category or "全部"}, 图片数量: {len(sample_images)}")
-        
-        response_data = {
+
+        print(f"[API] 响应数据: success=True, images_count={len(sample_images)}")
+
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'images': sample_images})
+        return jsonify({
             'success': True,
             'images': sample_images
-        }
-        print(f"[API] 响应数据: success={response_data['success']}, images_count={len(response_data['images'])}")
-        
-        return jsonify(response_data)
+        })
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('获取示例图失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({
             'success': False,
             'error': str(e),
@@ -3082,11 +3520,20 @@ def get_image_styles():
         if os.path.exists(styles_file):
             with open(styles_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+                if NEW_MODULES_AVAILABLE:
+                    from app.utils import ApiResponse
+                    return ApiResponse.success({'styles': data.get('styles', [])})
                 return jsonify({'success': True, 'styles': data.get('styles', [])})
         else:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.not_found("风格文件不存在")
             return jsonify({'success': False, 'error': '风格文件不存在'}), 404
     except Exception as e:
         log_operation('获取风格列表失败', f'错误: {str(e)}', 'ERROR')
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/recent-images')
@@ -3097,17 +3544,20 @@ def get_recent_images():
         user_id = session.get('user_id')
         project_id = get_current_project_id()
         if not project_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.success({'images': []})
             return jsonify({'success': True, 'images': []})
+
         limit = int(request.args.get('limit', 50))
         log_request('GET', '/api/recent-images', user_id, f'数量: {limit}')
         records = database.get_all_records(user_id, project_id, limit=limit, offset=0)
-        
+
         # 提取图片信息，只返回OSS URL的图片（API可以访问的）
         recent_images = []
         for record in records:
             image_path = record.get('image_path', '')
             if image_path and image_path.startswith('https://'):
-                # 只包含OSS URL的图片
                 recent_images.append({
                     'url': image_path,
                     'filename': record.get('filename', 'generated.jpg'),
@@ -3116,8 +3566,12 @@ def get_recent_images():
                     'key': f"recent_{record.get('id')}",
                     'category': 'recent'
                 })
-        
+
         log_operation('获取最近生成图片', f'用户ID: {user_id}, 数量: {len(recent_images)}')
+
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'images': recent_images})
         return jsonify({'success': True, 'images': recent_images})
     
     except Exception as e:
@@ -3125,6 +3579,9 @@ def get_recent_images():
         log_operation('获取最近生成图片失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/batch')
@@ -3217,11 +3674,23 @@ def api_config_prompts_list():
     """列出 config 目录下所有 .md 文件"""
     try:
         if not CONFIG_DIR.exists():
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.success({'files': []})
             return jsonify({'success': True, 'files': []})
         files = [f.name for f in CONFIG_DIR.iterdir() if f.is_file() and f.suffix.lower() == '.md']
         files.sort()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'files': files})
         return jsonify({'success': True, 'files': files})
     except Exception as e:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -3231,13 +3700,28 @@ def api_config_prompts_get(filename):
     """获取指定 .md 文件内容"""
     try:
         if not _config_md_filename_safe(filename):
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("文件名不合法")
             return jsonify({'success': False, 'error': '文件名不合法'}), 400
         path = CONFIG_DIR / filename
         if not path.exists() or not path.is_file():
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.not_found("文件不存在")
             return jsonify({'success': False, 'error': '文件不存在'}), 404
         content = path.read_text(encoding='utf-8')
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'filename': filename, 'content': content})
         return jsonify({'success': True, 'filename': filename, 'content': content})
     except Exception as e:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -3250,12 +3734,26 @@ def api_config_prompts_save():
         filename = (data.get('filename') or '').strip()
         content = data.get('content') or ''
         if not _config_md_filename_safe(filename):
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("文件名须为 xxx.md 且不含路径")
             return jsonify({'success': False, 'error': '文件名须为 xxx.md 且不含路径'}), 400
+
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         path = CONFIG_DIR / filename
         path.write_text(content, encoding='utf-8')
+
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'filename': filename}, "文件已保存")
         return jsonify({'success': True, 'filename': filename})
     except Exception as e:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -3265,13 +3763,29 @@ def api_config_prompts_delete(filename):
     """删除 config 下的 .md 文件"""
     try:
         if not _config_md_filename_safe(filename):
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("文件名不合法")
             return jsonify({'success': False, 'error': '文件名不合法'}), 400
         path = CONFIG_DIR / filename
         if not path.exists() or not path.is_file():
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.not_found("文件不存在")
             return jsonify({'success': False, 'error': '文件不存在'}), 404
         path.unlink()
+
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'filename': filename}, "文件已删除")
         return jsonify({'success': True, 'filename': filename})
     except Exception as e:
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -3294,6 +3808,9 @@ def batch_generate():
         filename_base = data.get('filename', 'batch')
         
         if not prompt:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请输入提示词")
             return jsonify({'success': False, 'error': '请输入提示词'}), 400
         
         # 获取尺寸
@@ -3310,6 +3827,9 @@ def batch_generate():
         base_url = os.environ.get('ARK_BASE_URL', 'https://ark.cn-beijing.volces.com/api/v3')
         
         if not api_key:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.server_error("ARK_API_KEY 未配置")
             return jsonify({'success': False, 'error': 'ARK_API_KEY 未配置'}), 500
         
         # 初始化 OpenAI 客户端
@@ -3498,8 +4018,14 @@ def batch_generate():
                 continue
         
         if not generated_images:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.server_error("图片生成失败")
             return jsonify({'success': False, 'error': '图片生成失败'}), 500
         
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'images': generated_images, 'batch_id': batch_id})
         return jsonify({
             'success': True,
             'images': generated_images,
@@ -3510,6 +4036,9 @@ def batch_generate():
         print(f"批量生成错误: {e}")
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/video-tasks', methods=['GET'])
@@ -3520,6 +4049,12 @@ def api_video_tasks_list():
         user_id = session.get('user_id')
         project_id = get_current_project_id()
         if not project_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.success({
+                    'items': [], 'tasks': [], 'total': 0,
+                    'page': int(request.args.get('page', 1)), 'page_size': int(request.args.get('page_size', 10))
+                })
             return jsonify({
                 'success': True, 'items': [], 'tasks': [], 'total': 0,
                 'page': int(request.args.get('page', 1)), 'page_size': int(request.args.get('page_size', 10))
@@ -3739,7 +4274,17 @@ def api_video_tasks_list():
             
             total_db_tasks = database.get_video_tasks(user_id, project_id, status=status, start_date=start_date, end_date=end_date, limit=10000, offset=0)
             total = len(total_db_tasks)
-            
+
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.success({
+                    'items': tasks,
+                    'tasks': tasks,
+                    'total': total,
+                    'page': page,
+                    'page_size': page_size,
+                    'message': '服务器查询失败，仅显示数据库中的任务'
+                })
             return jsonify({
                 'success': True,
                 'items': tasks,
@@ -3755,6 +4300,13 @@ def api_video_tasks_list():
         log_operation('查询视频任务异常', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e), data={
+                'items': [],
+                'tasks': [],
+                'total': 0
+            })
         return jsonify({
             'success': False,
             'error': str(e),
@@ -4546,54 +5098,78 @@ def api_video_task_delete(task_id):
         user_id = session.get('user_id')
         project_id = get_current_project_id()
         if not project_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请先选择项目")
             return jsonify({'success': False, 'error': '请先选择项目'}), 400
         db_task = database.get_video_task_by_id(task_id)
         if not db_task or db_task.get('user_id') != user_id or db_task.get('project_id') != project_id:
-            return jsonify({'success': False, 'error': '任务不存在或不属于当前项目'}), 403
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.forbidden("任务不存在或不属于当前项目")
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+            return ApiResponse.bad_request("任务不存在或不属于当前项目")
+        return jsonify({'success': False, 'error': '任务不存在或不属于当前项目'}), 403
         log_request('DELETE', f'/api/video-tasks/{task_id}', user_id)
         # 检查是否配置了 ARK_API_KEY
         ark_api_key = os.environ.get('ARK_API_KEY')
         if not ark_api_key:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("视频任务功能需要配置 ARK_API_KEY 环境变量")
             return jsonify({
                 'success': False,
                 'error': '视频任务功能需要配置 ARK_API_KEY 环境变量'
             }), 400
-        
+
         # 如果配置了 API Key，但 SDK 未安装
         try:
             from volcenginesdkarkruntime import Ark
         except ImportError:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("需要安装火山方舟 SDK: pip install volcenginesdkarkruntime")
             return jsonify({
                 'success': False,
                 'error': '需要安装火山方舟 SDK: pip install volcenginesdkarkruntime'
             }), 400
-        
+
         # 初始化客户端
         client = Ark(api_key=ark_api_key)
-        
+
         # 删除任务
         try:
             resp = client.content_generation.tasks.delete(task_id=task_id)
             resp_dict = convert_to_dict(resp)
-            
+
             log_operation('删除视频任务成功', f'用户ID: {user_id}, 任务ID: {task_id}')
-            
+
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.success({'message': '任务删除成功'})
             return jsonify({
                 'success': True,
                 'message': '任务删除成功'
             })
-            
+
         except Exception as e:
             log_operation('删除视频任务失败', f'用户ID: {user_id}, 任务ID: {task_id}, 错误: {str(e)}', 'ERROR')
             import traceback
             traceback.print_exc()
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.server_error(f'删除任务失败: {str(e)}')
             return jsonify({'success': False, 'error': f'删除任务失败: {str(e)}'}), 500
-    
+
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('删除视频任务异常', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/video-generate', methods=['POST'])
@@ -4629,14 +5205,23 @@ def api_video_generate():
                    f'类型: {generate_type}, 提示词长度: {len(prompt)}, 分辨率: {resolution}, 比例: {ratio}')
         
         if not prompt:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请输入提示词")
             return jsonify({'success': False, 'error': '请输入提示词'}), 400
         
         if duration < 2 or duration > 12:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("视频长度必须在2-12秒之间")
             return jsonify({'success': False, 'error': '视频长度必须在2-12秒之间'}), 400
         
         # 检查是否配置了 ARK_API_KEY
         ark_api_key = os.environ.get('ARK_API_KEY')
         if not ark_api_key:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("视频生成功能需要配置 ARK_API_KEY 环境变量")
             return jsonify({
                 'success': False,
                 'error': '视频生成功能需要配置 ARK_API_KEY 环境变量'
@@ -4646,6 +5231,9 @@ def api_video_generate():
         try:
             from volcenginesdkarkruntime import Ark
         except ImportError:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("需要安装火山方舟 SDK: pip install volcenginesdkarkruntime")
             return jsonify({
                 'success': False,
                 'error': '需要安装火山方舟 SDK: pip install volcenginesdkarkruntime'
@@ -4665,6 +5253,9 @@ def api_video_generate():
             if first_frame_file and first_frame_file.filename:
                 # 如果上传了文件，上传到OSS
                 if not oss_enabled:
+                    if NEW_MODULES_AVAILABLE:
+                        from app.utils import ApiResponse
+                        return ApiResponse.bad_request("首帧图片上传需要配置OSS")
                     return jsonify({'success': False, 'error': '首帧图片上传需要配置OSS'}), 400
                 # 保存临时文件并上传到OSS
                 user_upload_folder = get_user_upload_folder(user_id, project_id)
@@ -4673,18 +5264,27 @@ def api_video_generate():
                 first_frame_file.save(filepath)
                 first_frame_url = upload_to_aliyun_oss(filepath, user_id=user_id, project_id=project_id)
                 if not first_frame_url:
+                    if NEW_MODULES_AVAILABLE:
+                        from app.utils import ApiResponse
+                        return ApiResponse.server_error("首帧图片上传到OSS失败")
                     return jsonify({'success': False, 'error': '首帧图片上传到OSS失败'}), 500
             else:
                 # 如果没有上传文件，尝试从data中获取URL（从库中选择的图片）
                 first_frame_url = data.get('first_frame_url', '').strip()
                 if not first_frame_url:
-                    return jsonify({'success': False, 'error': '请选择或上传首帧图片'}), 400
+                    if NEW_MODULES_AVAILABLE:
+                        from app.utils import ApiResponse
+            return ApiResponse.bad_request("请选择或上传首帧图片")
+        return jsonify({'success': False, 'error': '请选择或上传首帧图片'}), 400
         
         if generate_type == 'first_last_frame':
             last_frame_file = request.files.get('last_frame')
             if last_frame_file and last_frame_file.filename:
                 # 如果上传了文件，上传到OSS
                 if not oss_enabled:
+                    if NEW_MODULES_AVAILABLE:
+                        from app.utils import ApiResponse
+                        return ApiResponse.bad_request("尾帧图片上传需要配置OSS")
                     return jsonify({'success': False, 'error': '尾帧图片上传需要配置OSS'}), 400
                 # 保存临时文件并上传到OSS
                 user_upload_folder = get_user_upload_folder(user_id, project_id)
@@ -4693,11 +5293,17 @@ def api_video_generate():
                 last_frame_file.save(filepath)
                 last_frame_url = upload_to_aliyun_oss(filepath, user_id=user_id, project_id=project_id)
                 if not last_frame_url:
+                    if NEW_MODULES_AVAILABLE:
+                        from app.utils import ApiResponse
+                        return ApiResponse.server_error("尾帧图片上传到OSS失败")
                     return jsonify({'success': False, 'error': '尾帧图片上传到OSS失败'}), 500
             else:
                 # 如果没有上传文件，尝试从data中获取URL（从库中选择的图片）
                 last_frame_url = data.get('last_frame_url', '').strip()
                 if not last_frame_url:
+                    if NEW_MODULES_AVAILABLE:
+                        from app.utils import ApiResponse
+                        return ApiResponse.bad_request("请选择或上传尾帧图片")
                     return jsonify({'success': False, 'error': '请选择或上传尾帧图片'}), 400
         
         # 处理参考图（支持1-4张）
@@ -4705,6 +5311,9 @@ def api_video_generate():
         if generate_type == 'reference_image':
             reference_image_count = int(data.get('reference_image_count', 0))
             if reference_image_count < 1 or reference_image_count > 4:
+                if NEW_MODULES_AVAILABLE:
+                    from app.utils import ApiResponse
+                    return ApiResponse.bad_request("参考图片数量必须在1-4张之间")
                 return jsonify({'success': False, 'error': '参考图片数量必须在1-4张之间'}), 400
             
             # 处理多张参考图
@@ -4715,6 +5324,9 @@ def api_video_generate():
                 
                 if reference_file and reference_file.filename:
                     if not oss_enabled:
+                        if NEW_MODULES_AVAILABLE:
+                            from app.utils import ApiResponse
+                            return ApiResponse.bad_request("参考图片上传需要配置OSS")
                         return jsonify({'success': False, 'error': '参考图片上传需要配置OSS'}), 400
                     # 保存临时文件并上传到OSS
                     user_upload_folder = get_user_upload_folder(user_id, project_id)
@@ -4723,6 +5335,9 @@ def api_video_generate():
                     reference_file.save(filepath)
                     reference_image_url = upload_to_aliyun_oss(filepath, user_id=user_id, project_id=project_id)
                     if not reference_image_url:
+                        if NEW_MODULES_AVAILABLE:
+                            from app.utils import ApiResponse
+                            return ApiResponse.server_error(f'参考图片{i+1}上传到OSS失败')
                         return jsonify({'success': False, 'error': f'参考图片{i+1}上传到OSS失败'}), 500
                     reference_image_urls.append(reference_image_url)
                 else:
@@ -4730,6 +5345,9 @@ def api_video_generate():
                     reference_image_url_key = f'reference_image_url_{i}'
                     reference_image_url = data.get(reference_image_url_key, '').strip()
                     if not reference_image_url:
+                        if NEW_MODULES_AVAILABLE:
+                            from app.utils import ApiResponse
+                            return ApiResponse.bad_request(f'请选择或上传参考图片{i+1}')
                         return jsonify({'success': False, 'error': f'请选择或上传参考图片{i+1}'}), 400
                     reference_image_urls.append(reference_image_url)
         
@@ -4814,6 +5432,9 @@ def api_video_generate():
             
             if not task_id:
                 log_operation('视频生成失败', f'用户ID: {user_id}, 无法获取任务ID', 'ERROR')
+                if NEW_MODULES_AVAILABLE:
+                    from app.utils import ApiResponse
+                    return ApiResponse.server_error("创建任务失败，无法获取任务ID")
                 return jsonify({'success': False, 'error': '创建任务失败，无法获取任务ID'}), 500
             
             # 保存任务记录到本地数据库
@@ -4864,13 +5485,19 @@ def api_video_generate():
             log_operation('视频生成任务创建失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
             import traceback
             traceback.print_exc()
-            return jsonify({'success': False, 'error': f'创建任务失败: {str(e)}'}), 500
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+            return ApiResponse.server_error(f'创建任务失败: {str(e)}')
+        return jsonify({'success': False, 'error': f'创建任务失败: {str(e)}'}), 500
     
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('视频生成异常', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(f'生成失败: {str(e)}')
         return jsonify({'success': False, 'error': f'生成失败: {str(e)}'}), 500
 
 @app.route('/api/content-library', methods=['GET'])
@@ -4881,6 +5508,9 @@ def api_content_library():
         user_id = session.get('user_id')
         project_id = get_current_project_id()
         if not project_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.success({'assets': [], 'type': request.args.get('type', 'person')})
             return jsonify({'success': True, 'assets': [], 'type': request.args.get('type', 'person')})
         library_type = request.args.get('type', 'person')  # person, scene, image, video
         log_request('GET', '/api/content-library', user_id, f'类型: {library_type}')
@@ -4937,6 +5567,9 @@ def api_content_library():
         log_operation('获取内容库失败', f'用户ID: {user_id}, 类型: {library_type}, 错误: {str(e)}', 'ERROR')
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/delete-image-asset', methods=['POST'])
@@ -4947,10 +5580,16 @@ def delete_image_asset():
         user_id = session.get('user_id')
         project_id = get_current_project_id()
         if not project_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请先选择项目")
             return jsonify({'success': False, 'error': '请先选择项目'}), 400
         data = request.get_json()
         asset_id = data.get('id')
         if not asset_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("缺少资源ID")
             return jsonify({'success': False, 'error': '缺少资源ID'}), 400
         if asset_id.startswith('record_'):
             record_id = asset_id.replace('record_', '')
@@ -4958,10 +5597,16 @@ def delete_image_asset():
         else:
             database.delete_image_asset(int(asset_id), user_id, project_id)
         log_operation('删除图片资源', f'用户ID: {user_id}, 项目ID: {project_id}, 资源ID: {asset_id}')
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success()
         return jsonify({'success': True})
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('删除图片资源失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/delete-video-asset', methods=['POST'])
@@ -4972,17 +5617,29 @@ def delete_video_asset():
         user_id = session.get('user_id')
         project_id = get_current_project_id()
         if not project_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请先选择项目")
             return jsonify({'success': False, 'error': '请先选择项目'}), 400
         data = request.get_json()
         asset_id = data.get('id')
         if not asset_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("缺少资源ID")
             return jsonify({'success': False, 'error': '缺少资源ID'}), 400
         database.delete_video_asset(int(asset_id), user_id, project_id)
         log_operation('删除视频资源', f'用户ID: {user_id}, 项目ID: {project_id}, 资源ID: {asset_id}')
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success()
         return jsonify({'success': True})
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('删除视频资源失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/records')
@@ -5007,7 +5664,10 @@ def get_records():
         total = database.get_total_count(user_id, project_id)
         
         log_operation('获取记录', f'用户ID: {user_id}, 记录数: {len(records)}/{total}')
-        
+
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'records': records, 'total': total})
         return jsonify({
             'success': True,
             'records': records,
@@ -5016,6 +5676,9 @@ def get_records():
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('获取记录失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e), data={'records': [], 'total': 0})
         return jsonify({
             'success': False,
             'error': str(e),
@@ -5031,10 +5694,16 @@ def delete_record(record_id):
         user_id = session.get('user_id')
         project_id = get_current_project_id()
         if not project_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请先选择项目")
             return jsonify({'success': False, 'error': '请先选择项目'}), 400
         log_request('DELETE', f'/api/records/{record_id}', user_id)
         database.delete_record(record_id, user_id, project_id)
         log_operation('删除记录', f'用户ID: {user_id}, 项目ID: {project_id}, 记录ID: {record_id}')
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success()
         return jsonify({'success': True})
     except Exception as e:
         user_id = session.get('user_id')
@@ -5049,12 +5718,18 @@ def batch_delete_records():
         user_id = session.get('user_id')
         project_id = get_current_project_id()
         if not project_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请先选择项目")
             return jsonify({'success': False, 'message': '请先选择项目'}), 400
         data = request.get_json()
         record_ids = data.get('ids', [])
         log_request('POST', '/api/batch-delete', user_id, f'记录数: {len(record_ids)}')
         if not record_ids:
             log_operation('批量删除记录', f'用户ID: {user_id}, 未选择记录', 'WARNING')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("未选择要删除的记录")
             return jsonify({'success': False, 'message': '未选择要删除的记录'})
         deleted_count = 0
         failed_count = 0
@@ -5066,10 +5741,16 @@ def batch_delete_records():
                 log_operation('删除单条记录失败', f'用户ID: {user_id}, 记录ID: {record_id}, 错误: {str(e)}', 'WARNING')
                 failed_count += 1
         log_operation('批量删除记录', f'用户ID: {user_id}, 项目ID: {project_id}, 成功: {deleted_count}, 失败: {failed_count}')
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success({'deleted': deleted_count, 'failed': failed_count})
         return jsonify({'success': True, 'deleted': deleted_count, 'failed': failed_count})
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('批量删除记录失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/upload-sample-image', methods=['POST'])
@@ -5083,13 +5764,610 @@ def upload_sample_image():
         
         if 'file' not in request.files:
             log_operation('上传样本图失败', f'用户ID: {user_id}, 错误: 没有上传文件', 'WARNING')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("没有上传文件")
             return jsonify({'success': False, 'error': '没有上传文件'}), 400
+
+        # 支持多文件：同一字段名 file 可重复提交（FormData.append('file', f) 多次）
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.bad_request("没有上传文件")
+        return jsonify({'success': False, 'error': '没有上传文件'}), 400
 
         # 支持多文件：同一字段名 file 可重复提交（FormData.append('file', f) 多次）
         files = request.files.getlist('file')
         files = [f for f in files if f and getattr(f, 'filename', '')]
         if not files:
             log_operation('上传样本图失败', f'用户ID: {user_id}, 错误: 文件名为空', 'WARNING')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("文件名为空")
             return jsonify({'success': False, 'error': '文件名为空'}), 400
 
         # 验证文件类型
@@ -5099,6 +6377,9 @@ def upload_sample_image():
         bucket, endpoint_full = get_oss_bucket()
         if not bucket:
             log_operation('上传样本图失败', f'用户ID: {user_id}, 错误: OSS配置不完整', 'ERROR')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.server_error("OSS 配置不完整")
             return jsonify({'success': False, 'error': 'OSS 配置不完整'}), 500
 
         category = request.form.get('category', 'person')
@@ -5179,13 +6460,19 @@ def upload_sample_image():
             'filename': first.get('filename'),
             'key': first.get('key')
         }
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success(resp)
         return jsonify(resp)
-    
+
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('上传样本图失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(f'上传失败: {str(e)}')
         return jsonify({'success': False, 'error': f'上传失败: {str(e)}'}), 500
 
 
@@ -5198,6 +6485,9 @@ def download_file():
         file_url = request.args.get('url', '')
         
         if not file_url:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("缺少文件URL")
             return jsonify({'success': False, 'error': '缺少文件URL'}), 400
         
         log_request('GET', '/api/download-file', user_id, f'URL: {file_url[:100]}...')
@@ -5225,13 +6515,19 @@ def download_file():
             )
         except requests.RequestException as e:
             log_operation('下载文件失败', f'用户ID: {user_id}, URL: {file_url[:100]}..., 错误: {str(e)}', 'ERROR')
-            return jsonify({'success': False, 'error': f'下载失败: {str(e)}'}), 500
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+            return ApiResponse.server_error(f'下载失败: {str(e)}')
+        return jsonify({'success': False, 'error': f'下载失败: {str(e)}'}), 500
             
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('下载文件异常', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(f'下载失败: {str(e)}')
         return jsonify({'success': False, 'error': f'下载失败: {str(e)}'}), 500
 
 @app.route('/api/delete-sample-image', methods=['POST'])
@@ -5243,11 +6539,14 @@ def delete_sample_image():
         data = request.json
         key = data.get('key')
         log_request('POST', '/api/delete-sample-image', user_id, f'key: {key}')
-        
+
         if not key:
             log_operation('删除样本图失败', f'用户ID: {user_id}, 错误: 缺少文件key', 'WARNING')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("缺少文件 key")
             return jsonify({'success': False, 'error': '缺少文件 key'}), 400
-        
+
         # 验证 key 是否属于当前用户（支持 person/scene 两类）
         project_id = get_current_project_id()
         allowed_prefixes = []
@@ -5259,25 +6558,40 @@ def delete_sample_image():
         allowed_prefixes.extend([f'sample/person/user_{user_id}/', f'sample/scene/user_{user_id}/'])
         if not any(key.startswith(p) for p in allowed_prefixes):
             log_operation('删除样本图失败', f'用户ID: {user_id}, 错误: 无权删除此文件 {key}', 'WARNING')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.forbidden("无权删除此文件")
             return jsonify({'success': False, 'error': '无权删除此文件'}), 403
-        
+
         # 获取 OSS 配置
         bucket, endpoint_full = get_oss_bucket()
         if not bucket:
             log_operation('删除样本图失败', f'用户ID: {user_id}, 错误: OSS配置不完整', 'ERROR')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.server_error("OSS 配置不完整")
             return jsonify({'success': False, 'error': 'OSS 配置不完整'}), 500
-        
+
         # 删除文件
         bucket.delete_object(key)
         log_operation('删除样本图', f'用户ID: {user_id}, 文件: {key.split("/")[-1]}')
-        
+
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success(None, "样本图已删除")
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.success()
         return jsonify({'success': True})
-    
+
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('删除样本图失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -5290,36 +6604,65 @@ def delete_library_asset():
         key = data.get('key')
         user_id = session.get('user_id')
         project_id = get_current_project_id()
+
         if not project_id:
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请先选择项目")
             return jsonify({'success': False, 'error': '请先选择项目'}), 400
+
         log_request('POST', '/api/delete-library-asset', user_id, f'key: {key}')
         if not key:
             log_operation('删除库资源失败', f'用户ID: {user_id}, 错误: 缺少key', 'WARNING')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("缺少 key")
             return jsonify({'success': False, 'error': '缺少 key'}), 400
+
         if key.startswith('db_person_'):
             aid = int(key.split('_')[-1])
             conn_asset = database.get_person_assets(user_id, project_id)
             if not any(a.get('id') == aid for a in conn_asset):
+                if NEW_MODULES_AVAILABLE:
+                    from app.utils import ApiResponse
+                    return ApiResponse.forbidden("该资源不属于当前项目或不存在")
                 return jsonify({'success': False, 'error': '该资源不属于当前项目或不存在'}), 403
             database.delete_person_asset(aid, user_id, project_id)
             log_operation('删除人物库资源', f'用户ID: {user_id}, 项目ID: {project_id}, 资源ID: {aid}')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.success(None, "人物库资源已删除")
             return jsonify({'success': True})
+
         elif key.startswith('db_scene_'):
             aid = int(key.split('_')[-1])
             conn_asset = database.get_scene_assets(user_id, project_id)
             if not any(a.get('id') == aid for a in conn_asset):
+                if NEW_MODULES_AVAILABLE:
+                    from app.utils import ApiResponse
+                    return ApiResponse.forbidden("该资源不属于当前项目或不存在")
                 return jsonify({'success': False, 'error': '该资源不属于当前项目或不存在'}), 403
             database.delete_scene_asset(aid, user_id, project_id)
             log_operation('删除场景库资源', f'用户ID: {user_id}, 项目ID: {project_id}, 资源ID: {aid}')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.success(None, "场景库资源已删除")
             return jsonify({'success': True})
+
         else:
             log_operation('删除库资源失败', f'用户ID: {user_id}, 错误: 不支持的key类型 {key}', 'WARNING')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("不支持的 key 类型")
             return jsonify({'success': False, 'error': '不支持的 key 类型'}), 400
     except Exception as e:
         user_id = session.get('user_id')
         log_operation('删除库资源失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -5337,6 +6680,9 @@ def add_to_person_library():
 
         if not url:
             log_operation('添加人物库资源失败', f'用户ID: {user_id}, 错误: 缺少url', 'WARNING')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("缺少 url")
             return jsonify({'success': False, 'error': '缺少 url'}), 400
 
         # 尝试将文件上传到 OSS（如果配置了 OSS）
@@ -5385,7 +6731,10 @@ def add_to_person_library():
                     public_url = '/' + dest_path.replace('\\', '/')
             else:
                 log_operation('添加人物库资源失败', f'用户ID: {user_id}, 错误: 无法下载远程图片', 'WARNING')
-                return jsonify({'success': False, 'error': '无法下载远程图片'}), 400
+                if NEW_MODULES_AVAILABLE:
+                    from app.utils import ApiResponse
+            return ApiResponse.bad_request("无法下载远程图片")
+        return jsonify({'success': False, 'error': '无法下载远程图片'}), 400
 
         # 写入数据库记录
         try:
@@ -5400,6 +6749,9 @@ def add_to_person_library():
         log_operation('添加人物库资源失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -5417,6 +6769,9 @@ def add_to_scene_library():
 
         if not url:
             log_operation('添加场景库资源失败', f'用户ID: {user_id}, 错误: 缺少url', 'WARNING')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("缺少 url")
             return jsonify({'success': False, 'error': '缺少 url'}), 400
 
         bucket, endpoint_full = get_oss_bucket()
@@ -5461,7 +6816,10 @@ def add_to_scene_library():
                     public_url = '/' + dest_path.replace('\\', '/')
             else:
                 log_operation('添加场景库资源失败', f'用户ID: {user_id}, 错误: 无法下载远程图片', 'WARNING')
-                return jsonify({'success': False, 'error': '无法下载远程图片'}), 400
+                if NEW_MODULES_AVAILABLE:
+                    from app.utils import ApiResponse
+            return ApiResponse.bad_request("无法下载远程图片")
+        return jsonify({'success': False, 'error': '无法下载远程图片'}), 400
 
         try:
             database.save_scene_asset(user_id, filename, public_url, meta={'source_url': url}, project_id=project_id)
@@ -5475,6 +6833,9 @@ def add_to_scene_library():
         log_operation('添加场景库资源失败', f'用户ID: {user_id}, 错误: {str(e)}', 'ERROR')
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/batch-generate-all', methods=['POST'])
@@ -5491,6 +6852,9 @@ def batch_generate_all():
         
         if not tasks:
             log_operation('批量生成失败', f'用户ID: {user_id}, 原因: 没有任务', 'WARNING')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("没有任务")
             return jsonify({'success': False, 'error': '没有任务'}), 400
         
         # 生成批次ID
@@ -5579,6 +6943,9 @@ def batch_generate_all():
         print(f"批量生成启动失败: {e}")
         import traceback
         traceback.print_exc()
+        if NEW_MODULES_AVAILABLE:
+            from app.utils import ApiResponse
+            return ApiResponse.server_error(str(e))
         return jsonify({'success': False, 'error': str(e)}), 500
 
 def process_single_batch_task(task, batch_id, user_id, project_id):
@@ -5764,12 +7131,18 @@ def get_batch_progress(batch_id):
     with batch_progress_lock:
         if batch_id not in batch_progress:
             log_operation('查询批量进度失败', f'用户ID: {user_id}, 批次ID: {batch_id}, 错误: 批次不存在', 'WARNING')
-            return jsonify({'success': False, 'error': '批次ID不存在'}), 404
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+            return ApiResponse.bad_request("批次ID不存在")
+        return jsonify({'success': False, 'error': '批次ID不存在'}), 404
         
         # 验证批次属于当前用户
         if batch_progress[batch_id].get('user_id') != user_id:
             log_operation('查询批量进度失败', f'用户ID: {user_id}, 批次ID: {batch_id}, 错误: 无权访问', 'WARNING')
-            return jsonify({'success': False, 'error': '无权访问此批次'}), 403
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+            return ApiResponse.forbidden("无权访问此批次")
+        return jsonify({'success': False, 'error': '无权访问此批次'}), 403
         
         progress = batch_progress[batch_id].copy()
         # 只返回最近100条日志
@@ -5785,7 +7158,12 @@ def get_batch_progress(batch_id):
 
 def user_has_project(user_id, project_id):
     projects = database.get_user_projects(user_id)
-    return any(p.get('id') == project_id for p in projects)
+    # 支持字符串或整数 project_id
+    try:
+        pid = int(project_id)
+    except (ValueError, TypeError):
+        return False
+    return any(p.get('id') == pid for p in projects)
 
 @app.route('/output/<int:user_id>/<int:project_id>/<filename>')
 @login_required
@@ -5819,6 +7197,9 @@ def analyze_script():
         
         if not script:
             log_operation('剧本分析失败', f'用户ID: {user_id}, 原因: 缺少脚本', 'WARNING')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.bad_request("请输入剧本文本")
             return jsonify({'success': False, 'error': '请输入剧本文本'}), 400
         
         # 获取火山引擎 API Key
@@ -5827,6 +7208,9 @@ def analyze_script():
         
         if not api_key:
             log_operation('剧本分析失败', 'API Key未配置', 'ERROR')
+            if NEW_MODULES_AVAILABLE:
+                from app.utils import ApiResponse
+                return ApiResponse.server_error("ARK_API_KEY 未配置")
             return jsonify({'success': False, 'error': 'ARK_API_KEY 未配置'}), 500
         
         # 初始化 OpenAI 兼容客户端

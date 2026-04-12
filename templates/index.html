@@ -332,11 +332,12 @@
                     <a href="/records" className="sidebar-nav-item"><span className="sidebar-nav-icon">📊</span><span className="sidebar-nav-text">生图任务</span></a>
                     <a href="/video-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
                     <a href="/video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
+                    <a href="/omni-video" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎥</span><span className="sidebar-nav-text">全能视频</span></a>
+                    <a href="/omni-video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">🗂️</span><span className="sidebar-nav-text">全能任务</span></a>
                     <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
                     <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
                     <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">📋</span><span className="sidebar-nav-text">转换工具</span></a>
                     <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
-                    <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">🔄</span><span className="sidebar-nav-text">工具</span></a>
                     {window.__APP_CONTEXT__?.is_system_admin && (
                         <>
                             <div className="sidebar-nav-divider"></div>
@@ -380,7 +381,7 @@
             const [seed, setSeed] = useState(0);
             const [outputFilename, setOutputFilename] = useState('');
             const [styles, setStyles] = useState([]);
-            const [sampleCategory, setSampleCategory] = useState('person');
+            const [sampleCategory, setSampleCategory] = useState('image_material');
             const [sampleImages, setSampleImages] = useState([]);
             const [selectedSample, setSelectedSample] = useState([]);
             const [uploadedFiles, setUploadedFiles] = useState([]);
@@ -463,6 +464,13 @@
                 if (sampleCategory === 'recent') {
                     fetch(`/api/recent-images?limit=50${projectParam}`, opts).then(res => res.json()).then(data => {
                         if (data.success) setSampleImages(data.images || []);
+                        else setSampleImages([]);
+                    });
+                    return;
+                }
+                if (sampleCategory === 'image_material') {
+                    fetch(`/api/content-library?type=image_material${projectParam}`, opts).then(res => res.json()).then(data => {
+                        if (data.success) setSampleImages(data.assets || []);
                         else setSampleImages([]);
                     });
                     return;
@@ -722,8 +730,7 @@
                                 <div className="panel">
                                     <div className="panel-title">示例图库</div>
                                     <div className="form-row three">
-                                        <button className={`btn ${sampleCategory === 'person' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSampleCategory('person')}>人物</button>
-                                        <button className={`btn ${sampleCategory === 'scene' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSampleCategory('scene')}>场景</button>
+                                        <button className={`btn ${sampleCategory === 'image_material' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSampleCategory('image_material')}>图片素材</button>
                                         <button className={`btn ${sampleCategory === 'recent' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSampleCategory('recent')}>最近</button>
                                     </div>
                                     <div className="sample-grid" style={{ marginTop: '10px' }}>
@@ -1585,6 +1592,14 @@
                 <span class="sidebar-nav-icon">📹</span>
                 <span class="sidebar-nav-text">视频任务</span>
             </a>
+            <a href="/omni-video" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🎥</span>
+                <span class="sidebar-nav-text">全能视频</span>
+            </a>
+            <a href="/omni-video-tasks" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🗂️</span>
+                <span class="sidebar-nav-text">全能任务</span>
+            </a>
             <a href="/script-generate" class="sidebar-nav-item">
                 <span class="sidebar-nav-icon">📜</span>
                 <span class="sidebar-nav-text">剧本生成</span>
@@ -1600,10 +1615,6 @@
             <a href="/content-management" class="sidebar-nav-item">
                 <span class="sidebar-nav-icon">📚</span>
                 <span class="sidebar-nav-text">内容管理</span>
-            </a>
-            <a href="/txt2csv" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🔄</span>
-                <span class="sidebar-nav-text">工具</span>
             </a>
             {% if user.username == 'system_admin' %}
             <div class="sidebar-nav-divider"></div>
@@ -1692,8 +1703,7 @@
                         <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
                             <div class="sample-images-title">🖼️ 选择示例图片（从OSS）</div>
                             <div style="margin-left: auto; display:flex; gap:8px;">
-                                <button type="button" id="samplePersonBtn" class="btn btn-primary">人物库</button>
-                                <button type="button" id="sampleSceneBtn" class="btn">场景库</button>
+                                <button type="button" id="sampleImageMaterialBtn" class="btn btn-primary">图片素材</button>
                                 <button type="button" id="sampleRecentBtn" class="btn">最近生成</button>
                             </div>
                         </div>
@@ -3089,26 +3099,22 @@
             });
         }
         
-        // 示例图类别（person/scene）
-        let sampleCategory = 'person';
+        // 示例图类别（image_material/recent）
+        let sampleCategory = 'image_material';
 
         
 
         function switchSampleCategory(cat) {
             sampleCategory = cat;
             // 清除所有按钮的 btn-primary 类，然后只给当前选中的按钮添加
-            const btnP = document.getElementById('samplePersonBtn');
-            const btnS = document.getElementById('sampleSceneBtn');
+            const btnImage = document.getElementById('sampleImageMaterialBtn');
             const btnR = document.getElementById('sampleRecentBtn');
             
-            btnP.classList.remove('btn-primary');
-            btnS.classList.remove('btn-primary');
+            btnImage.classList.remove('btn-primary');
             btnR.classList.remove('btn-primary');
             
-            if (cat === 'person') {
-                btnP.classList.add('btn-primary');
-            } else if (cat === 'scene') {
-                btnS.classList.add('btn-primary');
+            if (cat === 'image_material') {
+                btnImage.classList.add('btn-primary');
             } else if (cat === 'recent') {
                 btnR.classList.add('btn-primary');
             }
@@ -3183,7 +3189,9 @@
             grid.innerHTML = '<div class="sample-images-loading">加载中...</div>';
             
             try {
-                const apiUrl = '/api/sample-images?category=' + encodeURIComponent(category || 'person');
+                const apiUrl = category === 'image_material'
+                    ? '/api/content-library?type=image_material'
+                    : '/api/sample-images?category=' + encodeURIComponent(category || 'image_material');
                 console.log('请求URL:', apiUrl);
                 
                 // 添加超时处理（30秒超时）
@@ -3217,11 +3225,12 @@
                     throw new Error(data.error || '服务器返回错误');
                 }
 
-                if (data.images && data.images.length > 0) {
-                    console.log('加载到', data.images.length, '张图片');
-                    sampleImages = data.images;
+                const images = data.images || data.assets || [];
+                if (images && images.length > 0) {
+                    console.log('加载到', images.length, '张图片');
+                    sampleImages = images;
                     grid.innerHTML = '';
-                    data.images.forEach((img, index) => {
+                    images.forEach((img, index) => {
                         const div = document.createElement('div');
                         div.className = 'sample-image-item';
                         // 点击图片区域：放大；点击其他区域：选择/取消选择
@@ -3578,12 +3587,10 @@
             }
             
             // 初始化类别按钮
-            const btnP = document.getElementById('samplePersonBtn');
-            const btnS = document.getElementById('sampleSceneBtn');
+            const btnImage = document.getElementById('sampleImageMaterialBtn');
             const btnR = document.getElementById('sampleRecentBtn');
-            if (btnP && btnS && btnR) {
-                btnP.addEventListener('click', () => switchSampleCategory('person'));
-                btnS.addEventListener('click', () => switchSampleCategory('scene'));
+            if (btnImage && btnR) {
+                btnImage.addEventListener('click', () => switchSampleCategory('image_material'));
                 btnR.addEventListener('click', () => switchSampleCategory('recent'));
             } else {
                 console.warn('示例图按钮元素未找到');
@@ -3630,10 +3637,9 @@
                     // 如果 recent 类别没有图片或数量很少，再加载默认类别
                     if (sampleImages.length < 5) {
                         console.log('最近生成图片较少，继续加载默认类别');
-                        sampleCategory = 'person';
-                        if (btnP && btnS && btnR) {
-                            btnP.classList.add('btn-primary');
-                            btnS.classList.remove('btn-primary');
+                        sampleCategory = 'image_material';
+                        if (btnImage && btnR) {
+                            btnImage.classList.add('btn-primary');
                             btnR.classList.remove('btn-primary');
                         }
                         await loadSampleImages(sampleCategory);
