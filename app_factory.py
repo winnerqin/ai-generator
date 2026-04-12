@@ -58,6 +58,26 @@ def _sanitize_headers(headers: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
+def _safe_response_body(response) -> str:
+    """Return a loggable response body preview for text-like responses."""
+    if getattr(response, "direct_passthrough", False):
+        return "<direct_passthrough>"
+    content_type = (response.headers.get("Content-Type") or "").lower()
+    if not any(
+        token in content_type
+        for token in ("application/json", "text/", "application/javascript", "application/xml")
+    ):
+        return f"<binary content-type={content_type or 'unknown'}>"
+    try:
+        body = response.get_data(as_text=True)
+    except Exception as exc:  # pragma: no cover - defensive logging fallback
+        return f"<unavailable: {exc}>"
+    max_len = 8000
+    if len(body) > max_len:
+        return f"{body[:max_len]}...<truncated {len(body) - max_len} chars>"
+    return body
+
+
 def setup_request_logging(app: Flask) -> None:
     """Register lightweight request logging handlers."""
 
@@ -68,20 +88,22 @@ def setup_request_logging(app: Flask) -> None:
 
         g.start_time = time.time()
         app.logger.info(
-            "[REQUEST] %s %s headers=%s",
+            "[REQUEST] method=%s path=%s full_path=%s remote=%s headers=%s",
             request.method,
             request.path,
+            request.full_path,
+            request.remote_addr,
             _sanitize_headers(dict(request.headers)),
         )
 
         if request.is_json:
             payload = request.get_json(silent=True)
             if payload is not None:
-                app.logger.debug("[REQUEST JSON] %s", payload)
+                app.logger.info("[REQUEST JSON] %s", payload)
         elif request.form:
-            app.logger.debug("[REQUEST FORM] %s", dict(request.form))
+            app.logger.info("[REQUEST FORM] %s", dict(request.form))
         elif request.args:
-            app.logger.debug("[REQUEST ARGS] %s", dict(request.args))
+            app.logger.info("[REQUEST ARGS] %s", dict(request.args))
 
     @app.after_request
     def log_response_info(response):
@@ -90,11 +112,13 @@ def setup_request_logging(app: Flask) -> None:
 
         duration = time.time() - getattr(g, "start_time", time.time())
         app.logger.info(
-            "[RESPONSE] %s %s status=%s duration=%.3fs",
+            "[RESPONSE] method=%s path=%s status=%s duration=%.3fs headers=%s body=%s",
             request.method,
             request.path,
             response.status_code,
             duration,
+            dict(response.headers),
+            _safe_response_body(response),
         )
         return response
 

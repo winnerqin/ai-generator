@@ -38,13 +38,79 @@ class OmniVideoClient:
         rendered = path.format(**kwargs)
         return f"{self.base_url}{rendered}"
 
-    def create_task(self, payload: dict[str, Any]) -> dict[str, Any]:
-        response = requests.post(
-            self._url(self.create_path),
-            headers=self._headers(),
-            json=payload,
-            timeout=60,
+    def _sanitize_headers(self, headers: dict[str, Any]) -> dict[str, Any]:
+        sanitized: dict[str, Any] = {}
+        for key, value in headers.items():
+            sanitized[key] = "***" if key.lower() == "authorization" else value
+        return sanitized
+
+    def _format_payload(self, payload: Any) -> str:
+        try:
+            return json.dumps(payload, ensure_ascii=False)
+        except Exception:
+            return str(payload)
+
+    def _log_request(
+        self,
+        action: str,
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, Any],
+        payload: Any = None,
+        params: dict[str, Any] | None = None,
+        timeout: Any = None,
+    ) -> None:
+        logger.info(
+            "[omni-video][%s][request] method=%s url=%s headers=%s params=%s payload=%s timeout=%s",
+            action,
+            method,
+            url,
+            self._sanitize_headers(headers),
+            self._format_payload(params or {}),
+            self._format_payload(payload),
+            timeout,
         )
+
+    def _log_response(self, action: str, response: requests.Response) -> None:
+        logger.info(
+            "[omni-video][%s][response] status=%s headers=%s body=%s",
+            action,
+            response.status_code,
+            dict(response.headers),
+            response.text,
+        )
+
+    def _raise_timeout(self, action: str, exc: requests.Timeout, **context: Any) -> None:
+        logger.error(
+            "[omni-video][%s][timeout] context=%s",
+            action,
+            json.dumps(context, ensure_ascii=False),
+        )
+        raise ValueError(f"Seedance {action} 请求超时，请稍后重试。") from exc
+
+    def create_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+        url = self._url(self.create_path)
+        headers = self._headers()
+        timeout = (15, 180)
+        self._log_request(
+            "create_task",
+            method="POST",
+            url=url,
+            headers=headers,
+            payload=payload,
+            timeout=timeout,
+        )
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=timeout,
+            )
+        except requests.Timeout as exc:
+            self._raise_timeout("create_task", exc, payload=payload)
+        self._log_response("create_task", response)
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
@@ -61,11 +127,26 @@ class OmniVideoClient:
         return response.json()
 
     def get_task(self, task_id: str) -> dict[str, Any]:
-        response = requests.get(
-            self._url(self.query_path, task_id=task_id),
-            headers=self._headers(),
-            timeout=30,
+        url = self._url(self.query_path, task_id=task_id)
+        headers = self._headers()
+        timeout = (10, 60)
+        self._log_request(
+            "get_task",
+            method="GET",
+            url=url,
+            headers=headers,
+            params={"task_id": task_id},
+            timeout=timeout,
         )
+        try:
+            response = requests.get(
+                url,
+                headers=headers,
+                timeout=timeout,
+            )
+        except requests.Timeout as exc:
+            self._raise_timeout("get_task", exc, task_id=task_id)
+        self._log_response("get_task", response)
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
@@ -82,12 +163,28 @@ class OmniVideoClient:
         return response.json()
 
     def list_tasks(self, page: int = 1, page_size: int = 20) -> dict[str, Any]:
-        response = requests.get(
-            self._url(self.list_path),
-            headers=self._headers(),
-            params={"page": page, "page_size": page_size},
-            timeout=30,
+        url = self._url(self.list_path)
+        headers = self._headers()
+        params = {"page": page, "page_size": page_size}
+        timeout = (10, 60)
+        self._log_request(
+            "list_tasks",
+            method="GET",
+            url=url,
+            headers=headers,
+            params=params,
+            timeout=timeout,
         )
+        try:
+            response = requests.get(
+                url,
+                headers=headers,
+                params=params,
+                timeout=timeout,
+            )
+        except requests.Timeout as exc:
+            self._raise_timeout("list_tasks", exc, page=page, page_size=page_size)
+        self._log_response("list_tasks", response)
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
@@ -105,12 +202,28 @@ class OmniVideoClient:
         return response.json()
 
     def cancel_task(self, task_id: str) -> dict[str, Any]:
-        response = requests.post(
-            self._url(self.cancel_path, task_id=task_id),
-            headers=self._headers(),
-            json={"action": "cancel"},
-            timeout=30,
+        url = self._url(self.cancel_path, task_id=task_id)
+        headers = self._headers()
+        payload = {"action": "cancel"}
+        timeout = (10, 60)
+        self._log_request(
+            "cancel_task",
+            method="POST",
+            url=url,
+            headers=headers,
+            payload=payload,
+            timeout=timeout,
         )
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=timeout,
+            )
+        except requests.Timeout as exc:
+            self._raise_timeout("cancel_task", exc, task_id=task_id)
+        self._log_response("cancel_task", response)
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
