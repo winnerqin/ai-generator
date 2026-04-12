@@ -374,3 +374,59 @@ def test_build_payload_resolves_local_upload_reference_urls(monkeypatch, tmp_pat
         ("demo.jpg", 1, 2, "image"),
         ("demo.mp4", 1, 2, "video"),
     ]
+
+
+def test_build_payload_encodes_public_reference_urls():
+    import importlib
+
+    omni_module = importlib.import_module("app.services.omni_video_service")
+
+    payload = omni_module.build_omni_video_payload(
+        {
+            "prompt": "pet joins the battle",
+            "model": "doubao-seedance-2-0-fast-260128",
+            "resolution": "480p",
+            "aspect_ratio": "9:16",
+            "duration": 6,
+            "reference_urls": [
+                "https://cdn.example.com/material/last frame (2).jpg",
+                "https://cdn.example.com/media/demo.mp4",
+            ],
+        }
+    )
+
+    assert payload["reference_urls"][0] == "https://cdn.example.com/material/last%20frame%20(2).jpg"
+    assert payload["content"][1]["image_url"]["url"] == "https://cdn.example.com/material/last%20frame%20(2).jpg"
+    assert payload["content"][2]["video_url"]["url"] == "https://cdn.example.com/media/demo.mp4"
+
+
+def test_build_payload_rejects_site_upload_urls_without_oss(monkeypatch, tmp_path):
+    import importlib
+
+    omni_module = importlib.import_module("app.services.omni_video_service")
+
+    upload_root = tmp_path / "uploads"
+    image_path = upload_root / "user_1" / "material_image" / "demo.jpg"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    image_path.write_bytes(b"img")
+
+    monkeypatch.setattr(omni_module.config, "UPLOAD_FOLDER", str(upload_root))
+    monkeypatch.setattr(omni_module.oss_service, "is_available", lambda: False)
+
+    try:
+        omni_module.build_omni_video_payload(
+            {
+                "prompt": "pet joins the battle",
+                "model": "doubao-seedance-2-0-fast-260128",
+                "resolution": "480p",
+                "aspect_ratio": "9:16",
+                "duration": 6,
+                "reference_urls": [
+                    "http://short.wyydym.cc/uploads/user_1/material_image/demo.jpg",
+                ],
+            }
+        )
+    except ValueError as exc:
+        assert "OSS" in str(exc)
+    else:
+        raise AssertionError("site upload urls should require OSS-backed resolution")

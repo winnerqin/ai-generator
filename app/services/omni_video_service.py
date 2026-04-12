@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse, urlunparse
 
 import database
 from app.config import config
@@ -29,7 +29,7 @@ def _normalize_reference_urls(reference_urls: list[str] | None) -> list[str]:
 
 
 def _infer_upload_file_type(url: str) -> str:
-    lower = url.lower()
+    lower = urlparse(url).path.lower() if url.startswith(("http://", "https://")) else url.lower()
     if any(lower.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")):
         return "image"
     if any(lower.endswith(ext) for ext in (".mp4", ".mov", ".webm", ".avi", ".mkv")):
@@ -37,6 +37,15 @@ def _infer_upload_file_type(url: str) -> str:
     if any(lower.endswith(ext) for ext in (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac")):
         return "document"
     return "document"
+
+
+def _encode_public_url(url: str) -> str:
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return url
+    encoded_path = quote(parsed.path, safe="/%._-~()")
+    encoded_query = quote(parsed.query, safe="=&%._-~")
+    return urlunparse(parsed._replace(path=encoded_path, query=encoded_query))
 
 
 def _resolve_reference_url(
@@ -49,12 +58,15 @@ def _resolve_reference_url(
     value = (url or "").strip()
     if not value:
         return value
-    if value.startswith(("http://", "https://")):
-        return value
 
     local_path: Path | None = None
     public_path: str | None = None
-    if value.startswith("/uploads/"):
+    parsed_url = urlparse(value) if value.startswith(("http://", "https://")) else None
+    if parsed_url and parsed_url.path.startswith("/uploads/"):
+        relative_path = parsed_url.path.removeprefix("/uploads/").lstrip("/\\")
+        local_path = Path(config.UPLOAD_FOLDER) / relative_path
+        public_path = parsed_url.path
+    elif value.startswith("/uploads/"):
         relative_path = value.removeprefix("/uploads/").lstrip("/\\")
         local_path = Path(config.UPLOAD_FOLDER) / relative_path
         public_path = value
@@ -75,10 +87,12 @@ def _resolve_reference_url(
             file_type=_infer_upload_file_type(value),
         )
         if oss_url:
-            return oss_url
+            return _encode_public_url(oss_url)
 
-    if public_path and public_origin:
-        return f"{public_origin.rstrip('/')}{public_path}"
+    if parsed_url and parsed_url.scheme and parsed_url.netloc:
+        if public_path:
+            raise ValueError("站内上传素材需要先同步到 OSS 后才能作为全能参考素材使用。")
+        return _encode_public_url(value)
 
     raise ValueError("参考素材必须使用可公开访问的 URL。请先启用 OSS，或使用可被外网访问的素材地址。")
 
