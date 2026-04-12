@@ -31,6 +31,5 @@ exclude =
 max-complexity = 15
 per-file-ignores =
     __init__.py:F401,F403
-    web_app.py:E501,W503,C901
     app_factory.py:E501,W503
 select = B,C,E,F,W,T4,B9

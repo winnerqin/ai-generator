@@ -221,7 +221,7 @@ app = create_app()
 
 if __name__ == "__main__":
     debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
-    port = int(os.environ.get("FLASK_PORT", 5000))
+    port = int(os.environ.get("FLASK_PORT", 8090))
     host = os.environ.get("FLASK_HOST", "0.0.0.0")
 
     logger.info(

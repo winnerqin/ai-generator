@@ -1,175 +1,120 @@
-# 即梦4.0 API 图片生成工具
+# AI Generator
 
-一个简单易用的Python工具，用于调用即梦4.0 API生成高质量图片。
+基于 Flask 的多用户 AI 内容生产平台，当前主入口为 `app_factory.py`。
 
-## 功能特点
+项目已经完成从旧单体结构向模块化结构迁移，当前运行核心集中在：
 
-- 🚀 支持文本生成图片
-- 📁 批量生成功能，支持多组提示词
-- 🎨 多种尺寸选择，最高支持4K分辨率
-- 💾 自动保存生成的图片
-- 🔧 丰富的参数配置（种子、水印、文本影响程度等）
-- 🔐 支持火山引擎API的HMAC-SHA256签名认证
-- 🌐 提供Flask网页界面，方便直观操作
-- 👥 **多用户支持**，每个用户拥有独立的数据和文件空间
+- `app_factory.py`：应用入口
+- `app/`：模块化 API、服务层、工具层
+- `templates/` + `static/`：前端页面与资源
+- `database.py`：SQLite 为主的数据访问层，保留 MySQL 迁移能力
+- `tests/`：回归测试
 
-## 安装指南
+## 功能概览
 
-### 前置要求
+- 单图生成
+- 批量生成
+- 生图任务记录
+- 视频生成与视频任务
+- 全能视频与全能任务
+- 剧本生成与剧本分析
+- 分镜生成与分镜工作室
+- 转换工具
+- 内容管理
+- 管理员后台与系统统计
 
-- Python 3.7+
-- 火山引擎账号及Access Key/Secret Key（可从[火山引擎](https://www.volcengine.com/)获取）
+## 运行环境
 
-### 安装步骤
+- Python 3.10+
+- Windows / PowerShell 已验证
+- SQLite 默认开箱可用
+- 可选接入：
+  - 火山方舟 / Seedance
+  - 阿里云 OSS
+  - MySQL
 
-1. 克隆或下载本项目
-```bash
-git clone https://github.com/qiuhe2023/jimeng4_image_generator.git
-cd jimeng4_image_generator
-```
+## 安装依赖
 
-2. 安装依赖包
-```bash
+创建并激活虚拟环境后安装运行依赖：
+
+```powershell
+python -m venv .\venv
+.\venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. 配置API密钥
-   - 复制`.env.example`文件为`.env`
-   - 编辑`.env`文件，填入您的火山引擎Access Key和Secret Key
-```bash
-cp .env.example .env
-nano .env
+如需测试与格式化工具，再安装开发依赖：
+
+```powershell
+pip install -r requirements.dev.txt
 ```
 
-## 使用说明
+## 环境变量
 
-### 命令行使用
+先复制示例配置：
 
-```bash
-# 使用单个提示词生成图片
-python main.py --prompt "A beautiful landscape with mountains and lake at sunset"
-
-# 指定尺寸生成图片
-python main.py --prompt "A futuristic city skyline" --size 2560x1440
-
-# 生成多张图片
-python main.py --prompt "A cute cat" --count 3
-
-# 不添加水印
-python main.py --prompt "A portrait of a knight" --no-watermark
+```powershell
+Copy-Item .env.example .env
 ```
 
-### 批量生成
+常用配置项：
 
-```bash
-# 从文件加载提示词批量生成
-python main.py --file example_prompts.txt
+- `SECRET_KEY`：Flask 会话密钥
+- `FLASK_HOST`：默认 `0.0.0.0`
+- `FLASK_PORT`：默认 `8090`
+- `FLASK_DEBUG`：是否开启调试
+- `DB_TYPE`：`sqlite` 或 `mysql`
+- `DB_PATH`：SQLite 文件路径
+- `ARK_API_KEY`：Seedance / 方舟接口密钥
+- `OSS_ENABLED`：是否启用 OSS
+- `OSS_ENDPOINT`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET`
 
-# 指定输出目录
-python main.py --file example_prompts.txt --output my_artworks
+## 启动方式
+
+推荐直接使用主入口：
+
+```powershell
+.\venv\Scripts\python.exe .\app_factory.py
 ```
 
-### 高级用法
+默认访问地址：
 
-```bash
-# 指定随机种子（可复现结果）
-python main.py --prompt "A sushi platter" --seed 12345
-
-# 调整文本影响程度
-python main.py --prompt "A dragon flying over a castle" --scale 0.8
-
-# 通过命令行参数指定密钥
-python main.py --prompt "A cozy cabin" --access-key YOUR_ACCESS_KEY --secret-key YOUR_SECRET_KEY
+```text
+http://127.0.0.1:8090
 ```
 
-### 命令行参数说明
+也可以通过环境变量覆盖：
 
-| 参数 | 缩写 | 说明 | 默认值 |
-|------|------|------|--------|
-| `--prompt` | `-p` | 图片生成提示词 | 无 |
-| `--file` | `-f` | 包含提示词的文本文件路径 | 无 |
-| `--size` | `-s` | 图片尺寸，如'2048x2048' | `2048x2048` |
-| `--count` | `-c` | 生成图片数量 | `1` |
-| `--output` | `-o` | 输出目录 | `output` |
-| `--access-key` | `-ak` | 火山引擎Access Key | 从环境变量获取 |
-| `--secret-key` | `-sk` | 火山引擎Secret Key | 从环境变量获取 |
-| `--no-watermark` | 无 | 不添加水印 | `False` |
-| `--seed` | 无 | 随机种子，-1表示随机 | `-1` |
-| `--scale` | 无 | 文本影响程度，0-1之间 | `0.5` |
-
-## 网页界面使用
-
-本项目提供了一个基于Flask的网页界面，方便用户通过浏览器操作：
-
-1. 启动Web服务
-```bash
-python web_app.py
+```powershell
+$env:FLASK_HOST="0.0.0.0"
+$env:FLASK_PORT="8090"
+$env:FLASK_DEBUG="false"
+.\venv\Scripts\python.exe .\app_factory.py
 ```
 
-2. 创建用户账号
-   
-   **方式一：使用管理脚本（推荐）**
-   ```bash
-   # 创建新用户
-   python manage_users.py add username password
-   
-   # 列出所有用户
-   python manage_users.py list
-   
-   # 修改用户密码
-   python manage_users.py password username new_password
-   
-   # 删除用户
-   python manage_users.py delete username
-   ```
-   
-   **方式二：使用默认测试账号**
-   - 用户名：`admin`
-   - 密码：`admin123`
+## 用户与项目
 
-3. 登录系统
-   - 使用注册的账号登录
-   - 登录后可访问所有功能
+- 登录后会根据 `user_projects` 自动选择当前项目
+- 当前版本已具备“按项目切换”的基础能力
+- 绝大多数业务数据仍是“用户 + 项目”双重过滤
+- 也就是说：默认更偏向“用户在项目内工作”，不是“项目成员完全共享内容”
 
-4. 功能页面：
-   - 🎨 **单图生成**：输入提示词生成单张图片
-   - 📦 **批量生成**：从Excel导入多个任务批量生成
-   - 📊 **生成记录**：查看历史记录，支持批量下载和删除
-   - 🖼️ **示例图管理**：上传和管理参考图片
+## 测试
 
-5. 多用户特性：
-   - 每个用户拥有独立的数据空间
-   - 生成的图片保存在各自的目录中（`output/用户ID/`）
-   - 上传的示例图保存在（`uploads/用户ID/`）
-   - OSS示例图按用户隔离（`sample/user_用户ID/`）
-   - 用户之间数据完全隔离，互不干扰
-   - 注册功能已禁用，需由管理员手动创建账号
+运行全部测试：
 
-## 项目结构
-
-```
-jimeng4_image_generator/
-├── app.py              # Flask Web服务
-├── main.py             # 核心功能实现
-├── requirements.txt    # 项目依赖
-├── .env.example        # 环境变量示例
-├── example_prompts.txt # 示例提示词
-├── templates/          # 网页模板
-│   └── index.html      # 主页面
-└── static/             # 静态资源
-    ├── style.css       # 样式文件
-    └── script.js       # JavaScript交互
+```powershell
+.\venv\Scripts\python.exe -m pytest -q
 ```
 
-## 注意事项
+## 保留脚本
 
-1. API密钥安全：请妥善保管您的Access Key和Secret Key，不要泄露给他人
-2. 生成限制：免费额度可能有限，请合理使用
-3. 提示词技巧：
-   - 尽量详细描述您想要的图像
-   - 可以指定艺术风格、色彩、构图等
-   - 中英文均可，建议不超过300个汉字
+仓库保留了少量仍有实际用途的辅助文件：
 
-## 许可证
+- `manage_users.py`：用户管理脚本
+- `config/storyboard.md`
+- `config/txt2csv.md`
+- `docs/MIGRATE_TO_MYSQL.md`
+- `scripts/schema_mysql.sql`
 
-MIT License
+其余旧单体、迁移报告、调试脚本和重复说明文档已清理。
