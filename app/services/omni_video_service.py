@@ -90,11 +90,12 @@ def _resolve_reference_url(
             return _encode_public_url(oss_url)
 
     if parsed_url and parsed_url.scheme and parsed_url.netloc:
-        if public_path:
-            raise ValueError("站内上传素材需要先同步到 OSS 后才能作为全能参考素材使用。")
         return _encode_public_url(value)
 
-    raise ValueError("参考素材必须使用可公开访问的 URL。请先启用 OSS，或使用可被外网访问的素材地址。")
+    if public_path and public_origin:
+        return _encode_public_url(f"{public_origin.rstrip('/')}{public_path}")
+
+    raise ValueError("参考素材必须使用可公开访问的 URL，或提供可拼接本地上传地址的服务域名。")
 
 
 def _coerce_bool(value: Any, default: bool = True) -> bool:

@@ -400,7 +400,7 @@ def test_build_payload_encodes_public_reference_urls():
     assert payload["content"][2]["video_url"]["url"] == "https://cdn.example.com/media/demo.mp4"
 
 
-def test_build_payload_rejects_site_upload_urls_without_oss(monkeypatch, tmp_path):
+def test_build_payload_allows_site_upload_urls_without_oss(monkeypatch, tmp_path):
     import importlib
 
     omni_module = importlib.import_module("app.services.omni_video_service")
@@ -413,20 +413,23 @@ def test_build_payload_rejects_site_upload_urls_without_oss(monkeypatch, tmp_pat
     monkeypatch.setattr(omni_module.config, "UPLOAD_FOLDER", str(upload_root))
     monkeypatch.setattr(omni_module.oss_service, "is_available", lambda: False)
 
-    try:
-        omni_module.build_omni_video_payload(
-            {
-                "prompt": "pet joins the battle",
-                "model": "doubao-seedance-2-0-fast-260128",
-                "resolution": "480p",
-                "aspect_ratio": "9:16",
-                "duration": 6,
-                "reference_urls": [
-                    "http://short.wyydym.cc/uploads/user_1/material_image/demo.jpg",
-                ],
-            }
-        )
-    except ValueError as exc:
-        assert "OSS" in str(exc)
-    else:
-        raise AssertionError("site upload urls should require OSS-backed resolution")
+    payload = omni_module.build_omni_video_payload(
+        {
+            "prompt": "pet joins the battle",
+            "model": "doubao-seedance-2-0-fast-260128",
+            "resolution": "480p",
+            "aspect_ratio": "9:16",
+            "duration": 6,
+            "_public_origin": "http://short.wyydym.cc",
+            "reference_urls": [
+                "http://short.wyydym.cc/uploads/user_1/material_image/demo.jpg",
+            ],
+        }
+    )
+
+    assert payload["reference_urls"] == [
+        "http://short.wyydym.cc/uploads/user_1/material_image/demo.jpg",
+    ]
+    assert payload["content"][1]["image_url"]["url"] == (
+        "http://short.wyydym.cc/uploads/user_1/material_image/demo.jpg"
+    )
