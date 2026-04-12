@@ -58,78 +58,8 @@
 </head>
 <body class="react-theme sidebar-compact">
     <div class="app-shell">
-        <nav class="sidebar-nav" id="sidebarNav">
-            <div class="sidebar-nav-header">
-                <div class="sidebar-nav-title">Ai创作工具</div>
-                <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收起/展开">
-                    <span id="toggleIcon">◀</span>
-                </button>
-            </div>
-            <div class="sidebar-nav-menu">
-                <a href="/" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🎨</span>
-                    <span class="sidebar-nav-text">单图生成</span>
-                </a>
-                <a href="/batch" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📝</span>
-                    <span class="sidebar-nav-text">批量生成</span>
-                </a>
-                <a href="/records" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📳</span>
-                    <span class="sidebar-nav-text">生图任务</span>
-                </a>
-                <a href="/video-generate" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🎀</span>
-                    <span class="sidebar-nav-text">视频生成</span>
-                </a>
-                <a href="/video-tasks" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📴</span>
-                    <span class="sidebar-nav-text">视频任务</span>
-                </a>
-                <a href="/omni-video" class="sidebar-nav-item active">
-                    <span class="sidebar-nav-icon">🎥</span>
-                    <span class="sidebar-nav-text">全能视频</span>
-                </a>
-                <a href="/omni-video-tasks" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🗂️</span>
-                    <span class="sidebar-nav-text">全能任务</span>
-                </a>
-                <a href="/script-generate" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📐</span>
-                    <span class="sidebar-nav-text">剧本生成</span>
-                </a>
-                <a href="/storyboard-studio" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🎬</span>
-                    <span class="sidebar-nav-text">分镜制作</span>
-                </a>
-                <a href="/txt2csv" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📵</span>
-                    <span class="sidebar-nav-text">转换工具</span>
-                </a>
-                <a href="/content-management" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📚</span>
-                    <span class="sidebar-nav-text">内容管理</span>
-                </a>
-                {% if user.username == 'system_admin' %}
-                <div class="sidebar-nav-divider"></div>
-                <a href="/admin" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🛠️</span>
-                    <span class="sidebar-nav-text">系统管理</span>
-                </a>
-                <a href="/stats" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📱</span>
-                    <span class="sidebar-nav-text">系统统计</span>
-                </a>
-                {% endif %}
-            </div>
-            <div class="sidebar-nav-user">
-                <div class="sidebar-nav-user-info">
-                    <div class="sidebar-nav-user-avatar">👁</div>
-                    <div class="sidebar-nav-user-name">{{ user.username }}</div>
-                    <a href="/logout" class="sidebar-nav-logout">登出</a>
-                </div>
-            </div>
-        </nav>
+        {% set active_page = 'omni_video' %}
+        {% include "_shared_sidebar.html" %}
         <main class="main-content">
             <div class="page-wrap">
 
@@ -163,7 +93,7 @@
                             <label for="aspectRatio">比例</label>
                             <select id="aspectRatio">
                                 <option value="16:9">16:9</option>
-                                <option value="9:16">9:16</option>
+                                <option value="9:16" selected>9:16</option>
                                 <option value="1:1">1:1</option>
                                 <option value="4:3">4:3</option>
                                 <option value="3:4">3:4</option>
@@ -282,6 +212,7 @@
     </div>
 
     <script src="/static/sidebar-nav.js"></script>
+    <script src="/static/sidebar-shared.js"></script>
     <script>
         const pickerConfigs = {
             image_material: { label: '图片素材', max: 9, hint: '可从原人物/场景素材中多选，最多 9 个。' },
@@ -490,6 +421,66 @@
             selectedAssets.push(normalized);
         }
 
+        function inferAssetTypeFromUrl(url) {
+            const value = String(url || '').toLowerCase();
+            if (/\.(mp3|wav|m4a|aac|ogg)(\?|$)/.test(value)) return 'audio';
+            if (/\.(mp4|webm|mov|mkv)(\?|$)/.test(value)) return 'video';
+            return 'image';
+        }
+
+        function buildPrefillAsset(url, index) {
+            const type = inferAssetTypeFromUrl(url);
+            return {
+                id: `prefill-${index}`,
+                url,
+                filename: '',
+                type,
+                meta: {},
+            };
+        }
+
+        function applyRegeneratePrefill() {
+            let raw = null;
+            try {
+                raw = localStorage.getItem('omniVideoRegenerateData');
+            } catch (_error) {
+                return;
+            }
+            if (!raw) return;
+
+            try {
+                const data = JSON.parse(raw);
+                document.getElementById('prompt').value = data.prompt || '';
+                if (data.model) document.getElementById('model').value = data.model;
+                if (data.resolution) document.getElementById('resolution').value = data.resolution;
+                if (data.aspect_ratio) document.getElementById('aspectRatio').value = data.aspect_ratio;
+                document.getElementById('seed').value = data.seed ?? -1;
+                document.getElementById('generateAudio').checked = data.generate_audio !== false;
+
+                if (data.frame_count) {
+                    document.getElementById('frameCount').value = data.frame_count;
+                    document.getElementById('duration').value = '-1';
+                } else {
+                    document.getElementById('frameCount').value = '';
+                    document.getElementById('duration').value = String(data.duration ?? -1);
+                }
+
+                selectedAssets = Array.isArray(data.reference_urls)
+                    ? data.reference_urls.filter(Boolean).map((url, index) => buildPrefillAsset(url, index))
+                    : [];
+                renderSelectedAssets();
+                syncDurationState();
+            } catch (_error) {
+                // Ignore malformed prefill data and continue with defaults.
+            } finally {
+                try {
+                    localStorage.removeItem('omniVideoRegenerateData');
+                } catch (_error) {
+                    // Ignore storage cleanup failures.
+                }
+            }
+        }
+
         async function uploadMedia(files) {
             const list = Array.from(files || []);
             for (const file of list) {
@@ -610,6 +601,7 @@
 
         renderSelectedAssets();
         syncDurationState();
+        applyRegeneratePrefill();
     </script>
 </body>
 </html>

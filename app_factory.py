@@ -11,11 +11,12 @@ from __future__ import annotations
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import database
 from dotenv import load_dotenv
-from flask import Flask, g, render_template, request, session
+from flask import Flask, abort, g, render_template, request, send_file, session
 
 load_dotenv()
 
@@ -186,6 +187,25 @@ def register_remaining_routes(app: Flask) -> None:
     def index():
         user = {"username": session.get("username", ""), "id": session.get("user_id")}
         return render_template("index.html", user=user)
+
+    @app.route("/uploads/<path:relative_path>")
+    @login_required
+    def uploaded_file(relative_path: str):
+        upload_root = Path(app.config["UPLOAD_FOLDER"]).resolve()
+        file_path = (upload_root / relative_path).resolve()
+        try:
+            file_path.relative_to(upload_root)
+        except ValueError:
+            abort(403)
+
+        user_id = session.get("user_id")
+        username = session.get("username")
+        normalized = relative_path.replace("\\", "/")
+        if username != "system_admin" and f"user_{user_id}/" not in normalized and f"user_{user_id}\\" not in relative_path:
+            abort(403)
+        if not file_path.exists():
+            abort(404)
+        return send_file(file_path)
 
     page_routes = [
         ("/batch", "batch.html", "\u6279\u91cf\u751f\u6210"),

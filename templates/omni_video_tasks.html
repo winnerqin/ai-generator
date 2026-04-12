@@ -14,8 +14,9 @@
         .page-title { font-size: 1.6rem; font-weight: 700; margin-bottom: 8px; }
         .page-subtitle { color: #aeb8d9; margin-bottom: 18px; }
         .panel { border-radius: 16px; padding: 18px; margin-bottom: 16px; }
-        .filters { display: grid; grid-template-columns: 1.2fr 0.8fr 0.9fr 0.9fr auto auto; gap: 12px; align-items: end; }
+        .filters { display: grid; grid-template-columns: 1.2fr 0.8fr 0.72fr 0.72fr auto auto auto; gap: 12px; align-items: end; }
         .filters input, .filters select { width: 100%; box-sizing: border-box; }
+        .filters input[type="date"] { max-width: 150px; }
         .inline-options { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .task-table-wrap { overflow-x: auto; }
         .task-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; min-width: 1320px; }
@@ -44,78 +45,8 @@
 </head>
 <body class="react-theme sidebar-compact">
     <div class="app-shell">
-        <nav class="sidebar-nav" id="sidebarNav">
-            <div class="sidebar-nav-header">
-                <div class="sidebar-nav-title">Ai创作工具</div>
-                <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收起/展开">
-                    <span id="toggleIcon">◀</span>
-                </button>
-            </div>
-            <div class="sidebar-nav-menu">
-                <a href="/" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🎨</span>
-                    <span class="sidebar-nav-text">单图生成</span>
-                </a>
-                <a href="/batch" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📝</span>
-                    <span class="sidebar-nav-text">批量生成</span>
-                </a>
-                <a href="/records" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📳</span>
-                    <span class="sidebar-nav-text">生图任务</span>
-                </a>
-                <a href="/video-generate" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🎀</span>
-                    <span class="sidebar-nav-text">视频生成</span>
-                </a>
-                <a href="/video-tasks" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📴</span>
-                    <span class="sidebar-nav-text">视频任务</span>
-                </a>
-                <a href="/omni-video" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🎥</span>
-                    <span class="sidebar-nav-text">全能视频</span>
-                </a>
-                <a href="/omni-video-tasks" class="sidebar-nav-item active">
-                    <span class="sidebar-nav-icon">🗂️</span>
-                    <span class="sidebar-nav-text">全能任务</span>
-                </a>
-                <a href="/script-generate" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📐</span>
-                    <span class="sidebar-nav-text">剧本生成</span>
-                </a>
-                <a href="/storyboard-studio" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🎬</span>
-                    <span class="sidebar-nav-text">分镜制作</span>
-                </a>
-                <a href="/txt2csv" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📵</span>
-                    <span class="sidebar-nav-text">转换工具</span>
-                </a>
-                <a href="/content-management" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📚</span>
-                    <span class="sidebar-nav-text">内容管理</span>
-                </a>
-                {% if user.username == 'system_admin' %}
-                <div class="sidebar-nav-divider"></div>
-                <a href="/admin" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🛠️</span>
-                    <span class="sidebar-nav-text">系统管理</span>
-                </a>
-                <a href="/stats" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📱</span>
-                    <span class="sidebar-nav-text">系统统计</span>
-                </a>
-                {% endif %}
-            </div>
-            <div class="sidebar-nav-user">
-                <div class="sidebar-nav-user-info">
-                    <div class="sidebar-nav-user-avatar">👁</div>
-                    <div class="sidebar-nav-user-name">{{ user.username }}</div>
-                    <a href="/logout" class="sidebar-nav-logout">登出</a>
-                </div>
-            </div>
-        </nav>
+        {% set active_page = 'omni_video_tasks' %}
+        {% include "_shared_sidebar.html" %}
         <main class="main-content">
             <div class="page-wrap">
 
@@ -149,6 +80,7 @@
                     <input id="endDate" type="date">
                 </div>
                 <button id="reloadBtn" class="btn btn-primary">查询任务</button>
+                <button id="resetBtn" class="btn btn-secondary">重置</button>
                 <a class="btn btn-secondary" href="/omni-video">创建新任务</a>
             </div>
             <div class="inline-options" style="margin-top: 12px;">
@@ -212,6 +144,7 @@
     </div>
 
     <script src="/static/sidebar-nav.js"></script>
+    <script src="/static/sidebar-shared.js"></script>
     <script>
         const PAGE_SIZE = 10;
         const AUTO_REFRESH_MS = 5 * 60 * 1000;
@@ -316,6 +249,7 @@
                         <div class="actions">
                             <button class="btn btn-secondary" onclick="viewTask('${encodeURIComponent(task.task_id || '')}')">${currentTaskId === task.task_id && detailExpanded ? '收起' : '查看'}</button>
                             <button class="btn btn-secondary" onclick="previewTask('${encodeURIComponent(task.task_id || '')}')">预览</button>
+                            <button class="btn btn-secondary" onclick="regenerateTask('${encodeURIComponent(task.task_id || '')}')">重新生成</button>
                             <button class="btn btn-danger" ${canDelete(task) ? '' : 'disabled'} onclick="${canDelete(task) ? `deleteTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">删除</button>
                         </div>
                     </td>
@@ -463,6 +397,52 @@
             await loadTasks(currentPage);
         }
 
+        function taskToPrefill(task) {
+            const payload = task.input_payload_json || {};
+            return {
+                prompt: task.prompt || payload.prompt || '',
+                model: task.model || payload.model || '',
+                resolution: task.resolution || payload.resolution || '',
+                duration: payload.duration ?? task.duration ?? -1,
+                frame_count: payload.frame_count ?? null,
+                aspect_ratio: task.aspect_ratio || payload.aspect_ratio || payload.ratio || '9:16',
+                seed: task.seed ?? payload.seed ?? -1,
+                generate_audio: payload.generate_audio ?? true,
+                reference_urls: task.reference_urls_json || payload.reference_urls || [],
+            };
+        }
+
+        async function regenerateTask(taskId) {
+            const decodedTaskId = decodeURIComponent(taskId);
+            let task = currentItems.find((item) => item.task_id === decodedTaskId);
+            if (!task || !(task.input_payload_json || task.reference_urls_json)) {
+                try {
+                    task = await fetchTask(taskId);
+                } catch (error) {
+                    alert(error.message || '加载任务失败');
+                    return;
+                }
+            }
+
+            try {
+                localStorage.setItem('omniVideoRegenerateData', JSON.stringify(taskToPrefill(task)));
+            } catch (_error) {
+                alert('无法保存任务参数，请稍后重试');
+                return;
+            }
+
+            window.location.href = '/omni-video';
+        }
+
+        function resetFilters() {
+            document.getElementById('search').value = '';
+            document.getElementById('status').value = '';
+            document.getElementById('startDate').value = '';
+            document.getElementById('endDate').value = '';
+            currentPage = 1;
+            loadTasks(1);
+        }
+
         function setupAutoRefresh() {
             if (autoRefreshTimer) {
                 clearInterval(autoRefreshTimer);
@@ -478,6 +458,7 @@
         }
 
         document.getElementById('reloadBtn').addEventListener('click', () => loadTasks(1));
+        document.getElementById('resetBtn').addEventListener('click', resetFilters);
         document.getElementById('search').addEventListener('keydown', (event) => {
             if (event.key === 'Enter') loadTasks(1);
         });

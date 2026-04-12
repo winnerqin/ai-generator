@@ -304,6 +304,7 @@
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="/static/sidebar-react.js"></script>
     {% raw %}
     <script type="text/babel">
         const { useEffect, useMemo, useState } = React;
@@ -318,56 +319,7 @@
             { value: '16:9', label: '16:9 (宽屏)' }
         ];
 
-        const Sidebar = ({ username, projects, currentProjectId, onProjectChange }) => (
-            <nav className="sidebar-nav" id="sidebarNav">
-                <div className="sidebar-nav-header">
-                    <div className="sidebar-nav-title">Ai创作工具</div>
-                    <button className="sidebar-nav-toggle" onClick={() => toggleSidebar()} title="收缩/展开">
-                        <span id="toggleIcon">‹</span>
-                    </button>
-                </div>
-                <div className="sidebar-nav-menu">
-                    <a href="/" className="sidebar-nav-item active"><span className="sidebar-nav-icon">🎨</span><span className="sidebar-nav-text">单图生成</span></a>
-                    <a href="/batch" className="sidebar-nav-item"><span className="sidebar-nav-icon">📦</span><span className="sidebar-nav-text">批量生成</span></a>
-                    <a href="/records" className="sidebar-nav-item"><span className="sidebar-nav-icon">📊</span><span className="sidebar-nav-text">生图任务</span></a>
-                    <a href="/video-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
-                    <a href="/video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
-                    <a href="/omni-video" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎥</span><span className="sidebar-nav-text">全能视频</span></a>
-                    <a href="/omni-video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">🗂️</span><span className="sidebar-nav-text">全能任务</span></a>
-                    <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
-                    <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
-                    <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">📋</span><span className="sidebar-nav-text">转换工具</span></a>
-                    <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
-                    {window.__APP_CONTEXT__?.is_system_admin && (
-                        <>
-                            <div className="sidebar-nav-divider"></div>
-                            <a href="/admin" className="sidebar-nav-item"><span className="sidebar-nav-icon">🛠️</span><span className="sidebar-nav-text">系统管理</span></a>
-                            <a href="/stats" className="sidebar-nav-item"><span className="sidebar-nav-icon">📈</span><span className="sidebar-nav-text">系统统计</span></a>
-                        </>
-                    )}
-                </div>
-                <div className="sidebar-nav-user">
-                    <div className="sidebar-nav-user-info">
-                        <div className="sidebar-nav-user-avatar">👤</div>
-                        <div className="sidebar-nav-user-name">{username}</div>
-                        <a href="/logout" className="sidebar-nav-logout">登出</a>
-                    </div>
-                    <div style={{ marginTop: '8px' }}>
-                        <label style={{ fontSize: '0.85em', color: '#cbd4f5' }}>当前项目</label>
-                        <select
-                            style={{ width: '100%', padding: '6px', borderRadius: '6px' }}
-                            value={currentProjectId || ''}
-                            onChange={(e) => onProjectChange(e.target.value)}
-                        >
-                            {projects.length === 0 && <option>加载中...</option>}
-                            {projects.map(p => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                </div>
-            </nav>
-        );
+        const Sidebar = (props) => <window.AppSidebar {...props} activePage="index" />;
 
         function App() {
             const [projects, setProjects] = useState([]);
@@ -1564,84 +1516,7 @@
 <body>
     <div id="reactApp"></div>
     <!-- 左侧导航栏 -->
-    <nav class="sidebar-nav" id="sidebarNav">
-        <div class="sidebar-nav-header">
-            <div class="sidebar-nav-title">Ai创作工具</div>
-            <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收缩/展开">
-                <span id="toggleIcon">‹</span>
-            </button>
-        </div>
-        <div class="sidebar-nav-menu">
-            <a href="/" class="sidebar-nav-item active">
-                <span class="sidebar-nav-icon">🎨</span>
-                <span class="sidebar-nav-text">单图生成</span>
-            </a>
-            <a href="/batch" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📦</span>
-                <span class="sidebar-nav-text">批量生成</span>
-            </a>
-            <a href="/records" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📊</span>
-                <span class="sidebar-nav-text">生图任务</span>
-            </a>
-            <a href="/video-generate" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🎬</span>
-                <span class="sidebar-nav-text">视频生成</span>
-            </a>
-            <a href="/video-tasks" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📹</span>
-                <span class="sidebar-nav-text">视频任务</span>
-            </a>
-            <a href="/omni-video" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🎥</span>
-                <span class="sidebar-nav-text">全能视频</span>
-            </a>
-            <a href="/omni-video-tasks" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🗂️</span>
-                <span class="sidebar-nav-text">全能任务</span>
-            </a>
-            <a href="/script-generate" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📜</span>
-                <span class="sidebar-nav-text">剧本生成</span>
-            </a>
-            <a href="/storyboard-studio" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🧩</span>
-                <span class="sidebar-nav-text">分镜制作</span>
-            </a>
-            <a href="/txt2csv" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📋</span>
-                <span class="sidebar-nav-text">转换工具</span>
-            </a>
-            <a href="/content-management" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📚</span>
-                <span class="sidebar-nav-text">内容管理</span>
-            </a>
-            {% if user.username == 'system_admin' %}
-            <div class="sidebar-nav-divider"></div>
-            <a href="/admin" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">🛠️</span>
-                <span class="sidebar-nav-text">系统管理</span>
-            </a>
-            <a href="/stats" class="sidebar-nav-item">
-                <span class="sidebar-nav-icon">📈</span>
-                <span class="sidebar-nav-text">系统统计</span>
-            </a>
-            {% endif %}
-        </div>
-        <div class="sidebar-nav-user">
-            <div class="sidebar-nav-user-info">
-                <div class="sidebar-nav-user-avatar">👤</div>
-                <div class="sidebar-nav-user-name">{{ user.username }}</div>
-                <a href="/logout" class="sidebar-nav-logout">登出</a>
-            </div>
-            <div style="margin-top: 8px;">
-                <label style="font-size: 0.85em; color: #666;">当前项目</label>
-                <select id="projectSelect" style="width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #ddd;">
-                    <option>加载中...</option>
-                </select>
-            </div>
-        </div>
-    </nav>
+    
     
     <div class="main-content">
         <div class="container">

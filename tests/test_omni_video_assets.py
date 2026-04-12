@@ -250,9 +250,10 @@ def test_upload_media_asset_to_video_library(auth_client, monkeypatch):
 def test_upload_media_asset_to_image_material_library(auth_client, monkeypatch):
     import database
 
+    auth_client.application.config["UPLOAD_FOLDER"] = "C:/repo/uploads"
     monkeypatch.setattr(
         "app.api.content.file_upload_service.save_uploaded_file",
-        lambda **kwargs: (True, "https://oss.example.com/material.png", None),
+        lambda **kwargs: (True, "C:/repo/uploads/user_1/project_1/material_image/material.png", None),
     )
     monkeypatch.setattr(
         database,
@@ -271,7 +272,74 @@ def test_upload_media_asset_to_image_material_library(auth_client, monkeypatch):
     assert response.status_code == 200
     data = response.get_json()
     assert data["success"] is True
-    assert data["asset"]["type"] == "image_material"
+    assert data["asset"]["type"] == "image"
+    assert data["asset"]["url"].startswith("/uploads/")
+
+
+def test_add_image_to_image_material(auth_client, monkeypatch):
+    import database
+
+    captured = {}
+
+    def _save_person_asset(user_id, filename, url, meta=None, project_id=None):
+        captured["filename"] = filename
+        captured["url"] = url
+        captured["meta"] = meta
+        return 41
+
+    monkeypatch.setattr(database, "save_person_asset", _save_person_asset)
+
+    response = auth_client.post(
+        "/api/add-to-image-material",
+        json={
+            "filename": "generated.png",
+            "url": "/uploads/user_1/project_1/material_image/generated.png",
+            "meta": {"source": "generated"},
+        },
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["id"] == 41
+    assert captured["filename"] == "generated.png"
+    assert captured["meta"]["library_group"] == "image_material"
+    assert captured["meta"]["source_library"] == "image_library"
+
+
+def test_add_image_to_image_material_is_idempotent(auth_client, monkeypatch):
+    import database
+
+    monkeypatch.setattr(
+        database,
+        "get_person_assets",
+        lambda user_id, project_id=None: [
+            {
+                "id": 41,
+                "filename": "generated.png",
+                "url": "/uploads/user_1/project_1/material_image/generated.png",
+                "meta": {"library_group": "image_material"},
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        database,
+        "save_person_asset",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not insert duplicate asset")),
+    )
+
+    response = auth_client.post(
+        "/api/add-to-image-material",
+        json={
+            "filename": "generated.png",
+            "url": "/uploads/user_1/project_1/material_image/generated.png",
+            "meta": {"source": "generated"},
+        },
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["id"] == 41
+    assert data["message"] == "该图片已在图片素材中"
 
 
 def test_rename_video_library_asset(auth_client, monkeypatch):

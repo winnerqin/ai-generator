@@ -22,16 +22,45 @@
         .asset-card { border-radius: 14px; overflow: hidden; border: 1px solid rgba(86,111,255,0.2); background: rgba(255,255,255,0.02); }
         .asset-preview { height: 160px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.15); cursor: pointer; }
         .asset-preview img, .asset-preview video { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .asset-preview-audio { font-size: 42px; opacity: 0.85; }
         .asset-info { padding: 10px; display: grid; gap: 6px; font-size: 0.88rem; }
         .asset-actions { display: flex; gap: 8px; flex-wrap: wrap; }
         .empty-hint { color: #9ca8cf; }
+        .small-hint { color: #9ca8cf; font-size: 0.82rem; }
         .preview-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.88); display: none; align-items: center; justify-content: center; z-index: 2000; }
-        .preview-inner { width: min(960px, 92vw); max-height: 88vh; padding: 18px; border-radius: 16px; background: rgba(8,13,24,0.95); }
-        .preview-close { float: right; }
-        .preview-media { margin-top: 12px; }
+        .preview-inner { position: relative; width: min(960px, 92vw); max-height: 88vh; padding: 18px; border-radius: 16px; background: rgba(8,13,24,0.95); }
+        .preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .preview-media { margin-top: 12px; min-height: 240px; display: flex; align-items: center; justify-content: center; }
         .preview-media img, .preview-media video { width: 100%; max-height: 70vh; object-fit: contain; }
         .preview-audio { width: 100%; margin-top: 18px; }
-        .small-hint { color: #9ca8cf; font-size: 0.82rem; }
+        .preview-audio-icon { text-align: center; font-size: 64px; }
+        .preview-nav {
+            position: absolute;
+            top: 72px;
+            right: 10px;
+            bottom: 10px;
+            left: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            pointer-events: none;
+        }
+        .preview-nav-btn {
+            width: 48px;
+            height: 48px;
+            border: none;
+            border-radius: 999px;
+            background: rgba(8,13,24,0.72);
+            color: #fff;
+            font-size: 1.4rem;
+            line-height: 1;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+        .preview-nav-btn:disabled {
+            opacity: 0.35;
+            cursor: default;
+        }
         @media (max-width: 900px) {
             .toolbar { grid-template-columns: 1fr; }
         }
@@ -39,126 +68,65 @@
 </head>
 <body class="react-theme sidebar-compact">
     <div class="app-shell">
-        <nav class="sidebar-nav" id="sidebarNav">
-            <div class="sidebar-nav-header">
-                <div class="sidebar-nav-title">Ai创作工具</div>
-                <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收起/展开">
-                    <span id="toggleIcon">◀</span>
-                </button>
-            </div>
-            <div class="sidebar-nav-menu">
-                <a href="/" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🎨</span>
-                    <span class="sidebar-nav-text">单图生成</span>
-                </a>
-                <a href="/batch" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📝</span>
-                    <span class="sidebar-nav-text">批量生成</span>
-                </a>
-                <a href="/records" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📳</span>
-                    <span class="sidebar-nav-text">生图任务</span>
-                </a>
-                <a href="/video-generate" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🎀</span>
-                    <span class="sidebar-nav-text">视频生成</span>
-                </a>
-                <a href="/video-tasks" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📴</span>
-                    <span class="sidebar-nav-text">视频任务</span>
-                </a>
-                <a href="/omni-video" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🎥</span>
-                    <span class="sidebar-nav-text">全能视频</span>
-                </a>
-                <a href="/omni-video-tasks" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🗂️</span>
-                    <span class="sidebar-nav-text">全能任务</span>
-                </a>
-                <a href="/script-generate" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📐</span>
-                    <span class="sidebar-nav-text">剧本生成</span>
-                </a>
-                <a href="/storyboard-studio" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🎬</span>
-                    <span class="sidebar-nav-text">分镜制作</span>
-                </a>
-                <a href="/txt2csv" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📵</span>
-                    <span class="sidebar-nav-text">转换工具</span>
-                </a>
-                <a href="/content-management" class="sidebar-nav-item active">
-                    <span class="sidebar-nav-icon">📚</span>
-                    <span class="sidebar-nav-text">内容管理</span>
-                </a>
-                {% if user.username == 'system_admin' %}
-                <div class="sidebar-nav-divider"></div>
-                <a href="/admin" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">🛠️</span>
-                    <span class="sidebar-nav-text">系统管理</span>
-                </a>
-                <a href="/stats" class="sidebar-nav-item">
-                    <span class="sidebar-nav-icon">📱</span>
-                    <span class="sidebar-nav-text">系统统计</span>
-                </a>
-                {% endif %}
-            </div>
-            <div class="sidebar-nav-user">
-                <div class="sidebar-nav-user-info">
-                    <div class="sidebar-nav-user-avatar">👁</div>
-                    <div class="sidebar-nav-user-name">{{ user.username }}</div>
-                    <a href="/logout" class="sidebar-nav-logout">登出</a>
-                </div>
-            </div>
-        </nav>
+        {% set active_page = 'content_management' %}
+        {% include "_shared_sidebar.html" %}
         <main class="main-content">
             <div class="page-wrap">
+                <div class="page-title">内容管理</div>
+                <div class="page-subtitle">统一管理图片素材、音/视频素材、图片库和视频库。全能视频生成成功后会自动保存到视频库。</div>
 
-        <div class="page-title">内容管理</div>
-        <div class="page-subtitle">统一管理图片素材、图片库、视频库与音/视频素材。全能视频生成成功后会自动保存到视频库。</div>
-
-        <div class="panel">
-            <div class="tabs" id="tabBar"></div>
-        </div>
-
-        <div class="panel">
-            <div class="toolbar">
-                <div>
-                    <label for="searchInput">搜索素材</label>
-                    <input id="searchInput" type="text" placeholder="按文件名搜索">
+                <div class="panel">
+                    <div class="tabs" id="tabBar"></div>
                 </div>
-                <button class="btn btn-secondary" id="refreshBtn">刷新</button>
-                <button class="btn btn-secondary" id="uploadTrigger">上传素材</button>
-            </div>
-            <input id="uploadInput" type="file" multiple style="display:none;">
-        </div>
 
-        <div class="panel">
-            <div id="assetGrid" class="asset-grid"></div>
-        </div>
+                <div class="panel">
+                    <div class="toolbar">
+                        <div>
+                            <label for="searchInput">搜索素材</label>
+                            <input id="searchInput" type="text" placeholder="按文件名搜索">
+                        </div>
+                        <button class="btn btn-secondary" id="refreshBtn">刷新</button>
+                        <button class="btn btn-secondary" id="uploadTrigger">上传素材</button>
+                    </div>
+                    <input id="uploadInput" type="file" multiple style="display:none;">
+                </div>
+
+                <div class="panel">
+                    <div id="assetGrid" class="asset-grid"></div>
+                </div>
             </div>
         </main>
     </div>
 
     <div id="previewModal" class="preview-modal">
         <div class="preview-inner">
-            <button class="btn btn-secondary preview-close" id="previewClose">关闭</button>
-            <div id="previewTitle" style="font-weight:600;"></div>
+            <div class="preview-header">
+                <div id="previewTitle" style="font-weight:600;"></div>
+                <button class="btn btn-secondary" id="previewClose">关闭</button>
+            </div>
             <div id="previewMedia" class="preview-media"></div>
+            <div class="preview-nav">
+                <button class="preview-nav-btn" id="previewPrev" aria-label="上一项">&lt;</button>
+                <button class="preview-nav-btn" id="previewNext" aria-label="下一项">&gt;</button>
+            </div>
         </div>
     </div>
 
     <script src="/static/sidebar-nav.js"></script>
+    <script src="/static/sidebar-shared.js"></script>
     <script>
         const tabs = [
             { key: 'image_material', label: '图片素材' },
+            { key: 'media', label: '音/视频素材' },
             { key: 'image', label: '图片库' },
             { key: 'video', label: '视频库' },
-            { key: 'media', label: '音/视频素材' },
         ];
 
         let currentTab = 'image_material';
         let allAssets = [];
+        let previewAssets = [];
+        let previewIndex = -1;
+        let touchStartX = 0;
 
         function assetTypeLabel(asset) {
             return { image: '图片', video: '视频', audio: '音频' }[asset.type] || asset.type || '-';
@@ -188,12 +156,16 @@
             return asset.type === 'video';
         }
 
+        function canAddToMaterial(asset) {
+            return currentTab === 'image' && asset.type === 'image';
+        }
+
         function previewMarkup(asset) {
             if (asset.type === 'video') {
                 return `<video src="${asset.url}" preload="metadata"></video>`;
             }
             if (asset.type === 'audio') {
-                return '<div style="font-size:52px;">♪</div>';
+                return '<div class="asset-preview-audio">♫</div>';
             }
             return `<img src="${asset.url}" alt="${asset.filename || 'asset'}">`;
         }
@@ -202,6 +174,7 @@
             const keyword = document.getElementById('searchInput').value.trim();
             const grid = document.getElementById('assetGrid');
             const assets = allAssets.filter((asset) => matchesFilter(asset, keyword));
+            previewAssets = assets;
 
             if (!assets.length) {
                 grid.innerHTML = '<div class="empty-hint">当前分类下暂无素材。</div>';
@@ -217,6 +190,7 @@
                         <div class="small-hint">${asset.created_at || '-'}</div>
                         <div class="asset-actions">
                             <button class="btn btn-secondary" data-preview="${asset.id}">预览</button>
+                            ${canAddToMaterial(asset) ? `<button class="btn btn-secondary" data-add-material="${asset.id}">添加到素材</button>` : ''}
                             <button class="btn btn-secondary" data-download="${asset.id}">下载</button>
                             ${canRename(asset) ? `<button class="btn btn-secondary" data-rename="${asset.id}">重命名</button>` : ''}
                             <button class="btn btn-danger" data-delete="${asset.id}">删除</button>
@@ -227,6 +201,9 @@
 
             grid.querySelectorAll('[data-preview]').forEach((button) => {
                 button.addEventListener('click', () => openPreview(button.getAttribute('data-preview')));
+            });
+            grid.querySelectorAll('[data-add-material]').forEach((button) => {
+                button.addEventListener('click', () => addToImageMaterial(button.getAttribute('data-add-material')));
             });
             grid.querySelectorAll('[data-download]').forEach((button) => {
                 button.addEventListener('click', () => downloadAsset(button.getAttribute('data-download')));
@@ -258,23 +235,39 @@
         }
 
         function openPreview(assetId) {
-            const asset = allAssets.find((item) => String(item.id) === String(assetId));
+            const asset = previewAssets.find((item) => String(item.id) === String(assetId))
+                || allAssets.find((item) => String(item.id) === String(assetId));
             if (!asset) return;
+
+            previewIndex = previewAssets.findIndex((item) => String(item.id) === String(assetId));
             document.getElementById('previewTitle').textContent = `${asset.filename || '-'} / ${assetTypeLabel(asset)}`;
             const media = document.getElementById('previewMedia');
+
             if (asset.type === 'video') {
                 media.innerHTML = `<video controls autoplay src="${asset.url}" poster="${asset.meta?.cover_url || ''}"></video>`;
             } else if (asset.type === 'audio') {
-                media.innerHTML = `<div style="text-align:center;font-size:64px;">♪</div><audio class="preview-audio" controls autoplay src="${asset.url}"></audio>`;
+                media.innerHTML = '<div class="preview-audio-icon">♫</div>';
+                media.innerHTML += `<audio class="preview-audio" controls autoplay src="${asset.url}"></audio>`;
             } else {
                 media.innerHTML = `<img src="${asset.url}" alt="${asset.filename || 'asset'}">`;
             }
+
+            document.getElementById('previewPrev').disabled = previewIndex <= 0;
+            document.getElementById('previewNext').disabled = previewIndex < 0 || previewIndex >= previewAssets.length - 1;
             document.getElementById('previewModal').style.display = 'flex';
+        }
+
+        function navigatePreview(offset) {
+            if (previewIndex < 0) return;
+            const nextIndex = previewIndex + offset;
+            if (nextIndex < 0 || nextIndex >= previewAssets.length) return;
+            openPreview(previewAssets[nextIndex].id);
         }
 
         function closePreview() {
             document.getElementById('previewModal').style.display = 'none';
             document.getElementById('previewMedia').innerHTML = '';
+            previewIndex = -1;
         }
 
         function downloadAsset(assetId) {
@@ -291,8 +284,9 @@
         async function renameAsset(assetId) {
             const asset = allAssets.find((item) => String(item.id) === String(assetId));
             if (!asset) return;
+
             const nextName = prompt('请输入新的文件名', asset.filename || '');
-            if (!nextName || nextName === asset.filename) return;
+            if (!nextName || nextName.trim() === asset.filename) return;
 
             const resp = await fetch('/api/rename-library-asset', {
                 method: 'POST',
@@ -325,6 +319,23 @@
             await loadAssets();
         }
 
+        async function addToImageMaterial(assetId) {
+            const asset = allAssets.find((item) => String(item.id) === String(assetId));
+            if (!asset) return;
+
+            const resp = await fetch('/api/add-to-image-material', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: asset.filename, url: asset.url, meta: asset.meta || {} }),
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                alert(data.error || '添加到素材失败');
+                return;
+            }
+            alert(data.message || '已添加到图片素材');
+        }
+
         async function uploadFiles(files) {
             const list = Array.from(files || []);
             if (!list.length) return;
@@ -332,20 +343,29 @@
             for (const file of list) {
                 const formData = new FormData();
                 formData.append('file', file);
+                let resp;
+
                 if (currentTab === 'image_material') {
                     formData.append('type', 'image_material');
-                    await fetch('/api/upload-media-asset', { method: 'POST', body: formData });
+                    resp = await fetch('/api/upload-media-asset', { method: 'POST', body: formData });
                 } else if (currentTab === 'media') {
                     formData.append('type', 'media');
-                    await fetch('/api/upload-media-asset', { method: 'POST', body: formData });
+                    resp = await fetch('/api/upload-media-asset', { method: 'POST', body: formData });
                 } else if (currentTab === 'video') {
                     formData.append('type', 'video');
-                    await fetch('/api/upload-media-asset', { method: 'POST', body: formData });
+                    resp = await fetch('/api/upload-media-asset', { method: 'POST', body: formData });
                 } else {
-                    alert('图片库暂不支持手动上传，请从生成结果添加。');
+                    alert('图片库暂不支持手动上传，请从生成结果中添加。');
+                    return;
+                }
+
+                const data = await resp.json();
+                if (!resp.ok || !data.success) {
+                    alert(data.error || `上传失败: ${file.name}`);
                     return;
                 }
             }
+
             await loadAssets();
         }
 
@@ -354,8 +374,25 @@
         document.getElementById('uploadTrigger').addEventListener('click', () => document.getElementById('uploadInput').click());
         document.getElementById('uploadInput').addEventListener('change', (event) => uploadFiles(event.target.files));
         document.getElementById('previewClose').addEventListener('click', closePreview);
+        document.getElementById('previewPrev').addEventListener('click', () => navigatePreview(-1));
+        document.getElementById('previewNext').addEventListener('click', () => navigatePreview(1));
         document.getElementById('previewModal').addEventListener('click', (event) => {
             if (event.target === event.currentTarget) closePreview();
+        });
+        document.getElementById('previewModal').addEventListener('touchstart', (event) => {
+            touchStartX = event.changedTouches[0].clientX;
+        }, { passive: true });
+        document.getElementById('previewModal').addEventListener('touchend', (event) => {
+            const deltaX = event.changedTouches[0].clientX - touchStartX;
+            if (Math.abs(deltaX) < 50) return;
+            if (deltaX > 0) navigatePreview(-1);
+            else navigatePreview(1);
+        });
+        window.addEventListener('keydown', (event) => {
+            if (document.getElementById('previewModal').style.display !== 'flex') return;
+            if (event.key === 'Escape') closePreview();
+            if (event.key === 'ArrowLeft') navigatePreview(-1);
+            if (event.key === 'ArrowRight') navigatePreview(1);
         });
 
         renderTabs();

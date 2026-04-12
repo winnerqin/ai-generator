@@ -3,7 +3,7 @@
     position: fixed;
     left: 0;
     top: 0;
-    width: 250px;
+    width: 200px;
     height: 100vh;
     background: #1e3a5f; /* 深蓝色 */
     box-shadow: 2px 0 10px rgba(0,0,0,0.2);
@@ -27,7 +27,7 @@
 }
 
 .sidebar-compact .sidebar-nav-item {
-    padding: 0 20px;
+    padding: 0 12px;
     height: 44px;
     min-height: 44px;
     line-height: 1.2;
@@ -43,11 +43,11 @@
 }
 
 .sidebar-nav.collapsed {
-    width: 70px;
+    width: 56px;
 }
 
 .sidebar-nav-header {
-    padding: 0 20px;
+    padding: 0 12px;
     height: 70px;
     min-height: 70px;
     box-sizing: border-box;
@@ -65,7 +65,7 @@
     overflow: hidden;
     transition: opacity 0.3s;
     /* 与菜单项文字左对齐：菜单项为 padding 20px + icon 24px + gap 10px = 54px，header 已有 padding 20px，故补 34px */
-    padding-left: 34px;
+    padding-left: 10px;
     box-sizing: border-box;
 }
 
@@ -104,7 +104,7 @@
 .sidebar-nav-item {
     display: flex;
     align-items: center;
-    padding: 0 20px;
+    padding: 0 12px;
     height: 44px;
     min-height: 44px;
     box-sizing: border-box;
@@ -147,6 +147,7 @@
     flex-shrink: 0;
     margin-right: 8px;
     line-height: 1;
+    filter: saturate(1.05);
 }
 
 .sidebar-nav.collapsed .sidebar-nav-icon {
@@ -167,7 +168,7 @@
 
 .sidebar-nav-user > div + div select {
     width: auto !important;
-    min-width: 120px;
+    min-width: 96px;
     height: 30px;
     padding: 4px 8px !important;
 }
@@ -187,7 +188,7 @@
 .sidebar-nav-divider {
     height: 1px;
     background: rgba(255,255,255,0.1);
-    margin: 10px 20px;
+    margin: 10px 12px;
 }
 
 .sidebar-nav-user {
@@ -195,7 +196,7 @@
     bottom: 0;
     left: 0;
     right: 0;
-    padding: 15px 20px;
+    padding: 12px;
     border-top: 1px solid rgba(255,255,255,0.1);
     background: rgba(0,0,0,0.2);
 }
@@ -269,7 +270,7 @@
 
 /* 主内容区域 */
 .main-content {
-    margin-left: 250px;
+    margin-left: 200px;
     transition: margin-left 0.3s ease;
     min-height: 100vh;
     background: #f5f5f5; /* 浅灰色 */
@@ -277,13 +278,13 @@
 }
 
 .sidebar-nav.collapsed ~ .main-content {
-    margin-left: 70px;
+    margin-left: 56px;
 }
 
 /* 响应式设计 */
 @media (max-width: 768px) {
     .sidebar-nav {
-        width: 70px;
+        width: 56px;
     }
     
     .sidebar-nav.collapsed {
@@ -291,7 +292,7 @@
     }
     
     .main-content {
-        margin-left: 70px;
+        margin-left: 56px;
     }
     
     .sidebar-nav.collapsed ~ .main-content {

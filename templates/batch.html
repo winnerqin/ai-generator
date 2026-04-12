@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>批量生成 - Ai创作工具</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/sidebar-nav.css">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <style>
         .app-shell { display: flex; min-height: 100vh; }
@@ -48,6 +49,7 @@
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="/static/sidebar-react.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     {% raw %}
     <script type="text/babel">
@@ -64,56 +66,7 @@
             filename: `batch_${index + 1}`
         });
 
-        const Sidebar = ({ username, projects, currentProjectId, onProjectChange }) => (
-            <nav className="sidebar-nav" id="sidebarNav">
-                <div className="sidebar-nav-header">
-                    <div className="sidebar-nav-title">Ai创作工具</div>
-                    <button className="sidebar-nav-toggle" onClick={() => toggleSidebar()} title="收缩/展开">
-                        <span id="toggleIcon">‹</span>
-                    </button>
-                </div>
-                <div className="sidebar-nav-menu">
-                    <a href="/" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎨</span><span className="sidebar-nav-text">单图生成</span></a>
-                    <a href="/batch" className="sidebar-nav-item active"><span className="sidebar-nav-icon">📦</span><span className="sidebar-nav-text">批量生成</span></a>
-                    <a href="/records" className="sidebar-nav-item"><span className="sidebar-nav-icon">📊</span><span className="sidebar-nav-text">生图任务</span></a>
-                    <a href="/video-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
-                    <a href="/video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
-                    <a href="/omni-video" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎥</span><span className="sidebar-nav-text">全能视频</span></a>
-                    <a href="/omni-video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">🗂️</span><span className="sidebar-nav-text">全能任务</span></a>
-                    <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
-                    <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
-                    <a href="/txt2csv" className="sidebar-nav-item"><span className="sidebar-nav-icon">📋</span><span className="sidebar-nav-text">转换工具</span></a>
-                    <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
-                    {window.__APP_CONTEXT__?.is_system_admin && (
-                        <>
-                            <div className="sidebar-nav-divider"></div>
-                            <a href="/admin" className="sidebar-nav-item"><span className="sidebar-nav-icon">🛠️</span><span className="sidebar-nav-text">系统管理</span></a>
-                            <a href="/stats" className="sidebar-nav-item"><span className="sidebar-nav-icon">📈</span><span className="sidebar-nav-text">系统统计</span></a>
-                        </>
-                    )}
-                </div>
-                <div className="sidebar-nav-user">
-                    <div className="sidebar-nav-user-info">
-                        <div className="sidebar-nav-user-avatar">👤</div>
-                        <div className="sidebar-nav-user-name">{username}</div>
-                        <a href="/logout" className="sidebar-nav-logout">登出</a>
-                    </div>
-                    <div style={{ marginTop: '8px' }}>
-                        <label style={{ fontSize: '0.85em', color: '#cbd4f5' }}>当前项目</label>
-                        <select
-                            style={{ width: '100%', padding: '6px', borderRadius: '6px' }}
-                            value={currentProjectId || ''}
-                            onChange={(e) => onProjectChange(e.target.value)}
-                        >
-                            {projects.length === 0 && <option>加载中...</option>}
-                            {projects.map(p => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                </div>
-            </nav>
-        );
+        const Sidebar = (props) => <window.AppSidebar {...props} activePage="batch" />;
 
         function App() {
             const [projects, setProjects] = useState([]);

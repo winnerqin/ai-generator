@@ -1,0 +1,39 @@
+<nav class="sidebar-nav" id="sidebarNav">
+    <div class="sidebar-nav-header">
+        <div class="sidebar-nav-title">AI创作工具</div>
+        <button class="sidebar-nav-toggle" onclick="toggleSidebar()" title="收起/展开">
+            <span id="toggleIcon">•</span>
+        </button>
+    </div>
+    <div class="sidebar-nav-menu">
+        <a href="/" class="sidebar-nav-item {% if active_page == 'index' %}active{% endif %}"><span class="sidebar-nav-icon" aria-hidden="true">🎨</span><span class="sidebar-nav-text">单图生成</span></a>
+        <a href="/batch" class="sidebar-nav-item {% if active_page == 'batch' %}active{% endif %}"><span class="sidebar-nav-icon" aria-hidden="true">📦</span><span class="sidebar-nav-text">批量生成</span></a>
+        <a href="/records" class="sidebar-nav-item {% if active_page == 'records' %}active{% endif %}"><span class="sidebar-nav-icon" aria-hidden="true">🖼️</span><span class="sidebar-nav-text">生图任务</span></a>
+        <a href="/video-generate" class="sidebar-nav-item {% if active_page == 'video_generate' %}active{% endif %}"><span class="sidebar-nav-icon" aria-hidden="true">🎬</span><span class="sidebar-nav-text">视频生成</span></a>
+        <a href="/video-tasks" class="sidebar-nav-item {% if active_page == 'video_tasks' %}active{% endif %}"><span class="sidebar-nav-icon" aria-hidden="true">📹</span><span class="sidebar-nav-text">视频任务</span></a>
+        <a href="/omni-video" class="sidebar-nav-item {% if active_page == 'omni_video' %}active{% endif %}"><span class="sidebar-nav-icon" aria-hidden="true">🎥</span><span class="sidebar-nav-text">全能视频</span></a>
+        <a href="/omni-video-tasks" class="sidebar-nav-item {% if active_page == 'omni_video_tasks' %}active{% endif %}"><span class="sidebar-nav-icon" aria-hidden="true">🗂️</span><span class="sidebar-nav-text">全能任务</span></a>
+        <a href="/script-generate" class="sidebar-nav-item {% if active_page == 'script_generate' %}active{% endif %}"><span class="sidebar-nav-icon" aria-hidden="true">📝</span><span class="sidebar-nav-text">剧本生成</span></a>
+        <a href="/storyboard-studio" class="sidebar-nav-item {% if active_page == 'storyboard_studio' %}active{% endif %}"><span class="sidebar-nav-icon" aria-hidden="true">🧩</span><span class="sidebar-nav-text">分镜制作</span></a>
+        <a href="/txt2csv" class="sidebar-nav-item {% if active_page == 'txt2csv' %}active{% endif %}"><span class="sidebar-nav-icon" aria-hidden="true">🔁</span><span class="sidebar-nav-text">转换工具</span></a>
+        <a href="/content-management" class="sidebar-nav-item {% if active_page == 'content_management' %}active{% endif %}"><span class="sidebar-nav-icon" aria-hidden="true">🗃️</span><span class="sidebar-nav-text">内容管理</span></a>
+        {% if user.username == 'system_admin' %}
+        <div class="sidebar-nav-divider"></div>
+        <a href="/admin" class="sidebar-nav-item {% if active_page == 'admin' %}active{% endif %}"><span class="sidebar-nav-icon" aria-hidden="true">⚙️</span><span class="sidebar-nav-text">系统管理</span></a>
+        <a href="/stats" class="sidebar-nav-item {% if active_page == 'stats' %}active{% endif %}"><span class="sidebar-nav-icon" aria-hidden="true">📊</span><span class="sidebar-nav-text">系统统计</span></a>
+        {% endif %}
+    </div>
+    <div class="sidebar-nav-user">
+        <div class="sidebar-nav-user-info">
+            <div class="sidebar-nav-user-avatar">👤</div>
+            <div class="sidebar-nav-user-name">{{ user.username }}</div>
+            <a href="/logout" class="sidebar-nav-logout">登出</a>
+        </div>
+        <div class="sidebar-nav-project" id="sidebarProjectBox">
+            <label for="sidebarProjectSelect" class="sidebar-nav-project-label">当前项目</label>
+            <select id="sidebarProjectSelect" class="sidebar-nav-project-select">
+                <option value="">加载中...</option>
+            </select>
+        </div>
+    </div>
+</nav>

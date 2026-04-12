@@ -1,4 +1,4 @@
-"""Content management and asset library APIs."""
+﻿"""Content management and asset library APIs."""
 
 from __future__ import annotations
 
@@ -48,6 +48,25 @@ def _append_image_material_assets(target: list[dict], items: list[dict], prefix:
                 "meta": meta,
             }
         )
+
+
+def _public_asset_url(path_or_url: str) -> str:
+    if not path_or_url:
+        return path_or_url
+    if path_or_url.startswith(("http://", "https://", "/uploads/")):
+        return path_or_url
+
+    upload_root = Path(current_app.config.get("UPLOAD_FOLDER", "uploads")).resolve()
+    asset_path = Path(path_or_url).resolve()
+    try:
+        relative_path = asset_path.relative_to(upload_root)
+    except ValueError:
+        return path_or_url
+    return f"/uploads/{relative_path.as_posix()}"
+
+
+def _normalized_asset_url(path_or_url: str) -> str:
+    return _public_asset_url((path_or_url or "").strip())
 
 
 def _is_media_upload_asset(item: dict) -> bool:
@@ -159,6 +178,9 @@ def get_content_library():
     if library_type in ("audio", "all", "media"):
         _append_assets(assets, database.get_audio_assets(user_id, project_id), "db_audio", "audio")
 
+    for asset in assets:
+        asset["url"] = _public_asset_url(str(asset.get("url") or ""))
+
     return jsonify({"success": True, "assets": assets})
 
 
@@ -172,7 +194,7 @@ def upload_media_asset():
     file = request.files.get("file")
     library_type = (request.form.get("type") or "media").strip().lower()
     if not file:
-        return jsonify({"success": False, "error": "未选择文件"}), 400
+        return jsonify({"success": False, "error": "鏈€夋嫨鏂囦欢"}), 400
 
     filename = file.filename or ""
     mime_type = mimetypes.guess_type(filename)[0] or ""
@@ -182,7 +204,7 @@ def upload_media_asset():
         elif mime_type.startswith("video/"):
             library_type = "video"
         else:
-            return jsonify({"success": False, "error": "媒体库仅支持音频或视频文件"}), 400
+            return jsonify({"success": False, "error": "音视频素材仅支持音频或视频文件"}), 400
     elif library_type == "image_material":
         if not mime_type.startswith("image/"):
             return jsonify({"success": False, "error": "图片素材仅支持图片文件"}), 400
@@ -237,18 +259,56 @@ def upload_media_asset():
             project_id=project_id,
         )
 
+    public_url = _public_asset_url(path_or_url)
     return jsonify(
         {
             "success": True,
             "asset": {
                 "id": asset_id,
                 "filename": filename,
-                "url": path_or_url,
-                "type": library_type,
+                "url": public_url,
+                "type": "image" if library_type == "image_material" else library_type,
+                "meta": meta,
             },
-            "message": "素材上传成功",
+            "message": "绱犳潗涓婁紶鎴愬姛",
         }
     )
+@content_bp.route("/api/add-to-image-material", methods=["POST"])
+@login_required
+@handle_api_error
+def add_to_image_material():
+    user_id = session.get("user_id")
+    project_id = session.get("current_project_id")
+    data = request.get_json(silent=True) or {}
+    url = _normalized_asset_url(data.get("url") or "")
+    if not url:
+        return jsonify({"success": False, "error": "URL 不能为空"}), 400
+
+    meta = data.get("meta") or {}
+    if not isinstance(meta, dict):
+        meta = {}
+    meta["library_group"] = "image_material"
+    meta.setdefault("source_library", "image_library")
+
+    for existing_asset in database.get_person_assets(user_id, project_id):
+        existing_url = _normalized_asset_url(str(existing_asset.get("url") or ""))
+        if existing_url == url:
+            return jsonify(
+                {
+                    "success": True,
+                    "id": existing_asset.get("id"),
+                    "message": "该图片已在图片素材中",
+                }
+            )
+
+    library_id = database.save_person_asset(
+        user_id=user_id,
+        filename=(data.get("filename") or "").strip(),
+        url=url,
+        meta=meta,
+        project_id=project_id,
+    )
+    return jsonify({"success": True, "id": library_id, "message": "已添加到图片素材"})
 
 
 @content_bp.route("/api/add-to-person-library", methods=["POST"])
@@ -260,7 +320,7 @@ def add_to_person_library():
     data = request.get_json(silent=True) or {}
     url = data.get("url", "")
     if not url:
-        return jsonify({"success": False, "error": "URL 不能为空"}), 400
+        return jsonify({"success": False, "error": "URL 涓嶈兘涓虹┖"}), 400
 
     library_id = database.save_person_asset(
         user_id=user_id,
@@ -269,7 +329,7 @@ def add_to_person_library():
         meta=data.get("meta"),
         project_id=project_id,
     )
-    return jsonify({"success": True, "id": library_id, "message": "已添加到人物库"})
+    return jsonify({"success": True, "id": library_id, "message": "已添加到人物素材"})
 
 
 @content_bp.route("/api/add-to-scene-library", methods=["POST"])
@@ -281,7 +341,7 @@ def add_to_scene_library():
     data = request.get_json(silent=True) or {}
     url = data.get("url", "")
     if not url:
-        return jsonify({"success": False, "error": "URL 不能为空"}), 400
+        return jsonify({"success": False, "error": "URL 涓嶈兘涓虹┖"}), 400
 
     library_id = database.save_scene_asset(
         user_id=user_id,
@@ -290,7 +350,7 @@ def add_to_scene_library():
         meta=data.get("meta"),
         project_id=project_id,
     )
-    return jsonify({"success": True, "id": library_id, "message": "已添加到场景库"})
+    return jsonify({"success": True, "id": library_id, "message": "已添加到场景素材"})
 
 
 @content_bp.route("/api/delete-library-asset", methods=["POST"])
@@ -331,7 +391,7 @@ def rename_library_asset():
     filename = (data.get("filename") or "").strip()
 
     if not asset_id or not filename:
-        return jsonify({"success": False, "error": "缺少素材 ID 或文件名"}), 400
+        return jsonify({"success": False, "error": "缂哄皯绱犳潗 ID 鎴栨枃浠跺悕"}), 400
 
     try:
         if asset_id.startswith("db_video_"):
@@ -358,7 +418,7 @@ def create_image_style():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name:
-        return jsonify({"success": False, "error": "样式名称不能为空"}), 400
+        return jsonify({"success": False, "error": "鏍峰紡鍚嶇О涓嶈兘涓虹┖"}), 400
     return jsonify({"success": True, "id": 1, "message": "样式已创建"})
 
 
@@ -394,3 +454,4 @@ def get_output_file_simple(user_id: int, filename: str):
     if not file_path.exists():
         return jsonify({"success": False, "error": "文件不存在"}), 404
     return send_file(file_path)
+

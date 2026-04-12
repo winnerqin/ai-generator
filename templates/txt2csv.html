@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>工具 - Ai创作工具</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/sidebar-nav.css">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -84,101 +85,12 @@
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="/static/sidebar-react.js"></script>
     {% raw %}
     <script type="text/babel">
         const { useEffect, useState, useRef } = React;
 
-        const Sidebar = ({ username, projects, currentProjectId, onProjectChange }) => (
-            <nav className="sidebar-nav" id="sidebarNav">
-                <div className="sidebar-nav-header">
-                    <div className="sidebar-nav-title">Ai创作工具</div>
-                    <button className="sidebar-nav-toggle" onClick={() => toggleSidebar()} title="收缩/展开">
-                        <span id="toggleIcon">‹</span>
-                    </button>
-                </div>
-                <div className="sidebar-nav-menu">
-                    <a href="/" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎨</span><span className="sidebar-nav-text">单图生成</span></a>
-                    <a href="/batch" className="sidebar-nav-item"><span className="sidebar-nav-icon">📦</span><span className="sidebar-nav-text">批量生成</span></a>
-                    <a href="/records" className="sidebar-nav-item"><span className="sidebar-nav-icon">📊</span><span className="sidebar-nav-text">生图任务</span></a>
-                    <a href="/video-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎬</span><span className="sidebar-nav-text">视频生成</span></a>
-                    <a href="/video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">📹</span><span className="sidebar-nav-text">视频任务</span></a>
-                    <a href="/omni-video" className="sidebar-nav-item"><span className="sidebar-nav-icon">🎥</span><span className="sidebar-nav-text">全能视频</span></a>
-                    <a href="/omni-video-tasks" className="sidebar-nav-item"><span className="sidebar-nav-icon">🗂️</span><span className="sidebar-nav-text">全能任务</span></a>
-                    <a href="/script-generate" className="sidebar-nav-item"><span className="sidebar-nav-icon">📜</span><span className="sidebar-nav-text">剧本生成</span></a>
-                    <a href="/storyboard-studio" className="sidebar-nav-item"><span className="sidebar-nav-icon">🧩</span><span className="sidebar-nav-text">分镜制作</span></a>
-                    <a href="/txt2csv" className="sidebar-nav-item active"><span className="sidebar-nav-icon">📋</span><span className="sidebar-nav-text">转换工具</span></a>
-                    <a href="/content-management" className="sidebar-nav-item"><span className="sidebar-nav-icon">📚</span><span className="sidebar-nav-text">内容管理</span></a>
-                    {window.__APP_CONTEXT__?.is_system_admin && (
-                        <>
-                            <div className="sidebar-nav-divider"></div>
-                            <a href="/admin" className="sidebar-nav-item"><span className="sidebar-nav-icon">🛠️</span><span className="sidebar-nav-text">系统管理</span></a>
-                            <a href="/stats" className="sidebar-nav-item"><span className="sidebar-nav-icon">📈</span><span className="sidebar-nav-text">系统统计</span></a>
-                        </>
-                    )}
-                </div>
-                <div className="sidebar-nav-user">
-                    <div className="sidebar-nav-user-info">
-                        <div className="sidebar-nav-user-avatar">👤</div>
-                        <div className="sidebar-nav-user-name">{username}</div>
-                        <a href="/logout" className="sidebar-nav-logout">登出</a>
-                    </div>
-                    {projects.length > 0 && (
-                        <div style={{ marginTop: '8px' }}>
-                            <label style={{ fontSize: '0.85em', color: '#cbd4f5' }}>当前项目</label>
-                            <select
-                                style={{ width: '100%', padding: '6px', borderRadius: '6px' }}
-                                value={currentProjectId || ''}
-                                onChange={(e) => onProjectChange(e.target.value)}
-                            >
-                                {projects.map(p => (
-                                    <option key={p.id} value={p.id}>{p.name}</option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
-                </div>
-            </nav>
-        );
-
-        function csvToRows(csvText) {
-            if (!csvText || !csvText.trim()) return { headers: [], rows: [] };
-            const text = (csvText || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-            const all = [];
-            let row = [];
-            let field = '';
-            let inQuoted = false;
-            for (let i = 0; i < text.length; i++) {
-                const c = text[i];
-                if (inQuoted) {
-                    if (c === '"') {
-                        if (text[i + 1] === '"') { field += '"'; i++; }
-                        else inQuoted = false;
-                    } else {
-                        field += c;
-                    }
-                } else {
-                    if (c === '"') {
-                        inQuoted = true;
-                    } else if (c === ',') {
-                        row.push(field);
-                        field = '';
-                    } else if (c === '\n') {
-                        row.push(field);
-                        field = '';
-                        if (row.some(cell => (cell || '').length > 0)) all.push(row);
-                        row = [];
-                    } else {
-                        field += c;
-                    }
-                }
-            }
-            row.push(field);
-            if (row.some(cell => (cell || '').length > 0)) all.push(row);
-            if (all.length === 0) return { headers: [], rows: [] };
-            const headers = (all[0] || []).map(h => (h || '').trim());
-            const rows = all.slice(1);
-            return { headers, rows };
-        }
+        const Sidebar = (props) => <window.AppSidebar {...props} activePage="txt2csv" />;
 
         function App() {
             const [projects, setProjects] = useState([]);
