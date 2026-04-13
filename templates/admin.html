@@ -188,6 +188,14 @@
                 refresh();
             };
 
+            const deleteProject = async (projectId, projectName) => {
+                if (!confirm(`确定删除项目“${projectName || projectId}”吗？该操作不可恢复。`)) return;
+                const resp = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (!data.success) { setError(data.error || '删除项目失败'); return; }
+                refresh();
+            };
+
             return (
                 <div className="app-shell">
                     <Sidebar
@@ -282,6 +290,7 @@
                                                                 </select>
                                                                 <button type="button" className="btn-export" onClick={() => assignUser(p.id)}>授权</button>
                                                                 <button type="button" className="btn-export" style={{ color: '#ff9aa2', borderColor: 'rgba(255,120,120,0.5)' }} onClick={() => revokeUser(p.id)}>移除</button>
+                                                                <button type="button" className="btn-export" style={{ color: '#ff9aa2', borderColor: 'rgba(255,120,120,0.5)' }} onClick={() => deleteProject(p.id, p.name)}>删除项目</button>
                                                             </div>
                                                         </td>
                                                     </tr>
