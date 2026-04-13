@@ -57,6 +57,17 @@ def ensure_media_library_tables():
         )
     '''
     )
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS deleted_video_library_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            project_id INTEGER,
+            task_id TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''
+    )
 
     for table_name in ('image_library', 'video_library', 'audio_library'):
         cursor.execute(f"PRAGMA table_info({table_name})")
@@ -72,6 +83,9 @@ def ensure_media_library_tables():
     )
     cursor.execute(
         'CREATE INDEX IF NOT EXISTS idx_audio_user_project_created ON audio_library(user_id, project_id, created_at DESC)'
+    )
+    cursor.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_deleted_video_task_unique ON deleted_video_library_tasks(user_id, project_id, task_id)'
     )
 
     conn.commit()
@@ -364,6 +378,15 @@ def init_database():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS deleted_video_library_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            project_id INTEGER,
+            task_id TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     
     # 创建视频任务表
     cursor.execute('''
@@ -424,6 +447,7 @@ def init_database():
             frame_count INTEGER,
             resolution TEXT,
             aspect_ratio TEXT,
+            filename TEXT,
             seed INTEGER,
             token_usage INTEGER,
             usage_json TEXT,
@@ -471,6 +495,7 @@ def init_database():
     ensure_column('omni_video_tasks', 'frame_count', 'INTEGER')
     ensure_column('omni_video_tasks', 'token_usage', 'INTEGER')
     ensure_column('omni_video_tasks', 'usage_json', 'TEXT')
+    ensure_column('omni_video_tasks', 'filename', 'TEXT')
     
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_records_user_project_created ON generation_records(user_id, project_id, created_at DESC)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_person_user_project_created ON person_library(user_id, project_id, created_at DESC)')
@@ -478,6 +503,7 @@ def init_database():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_image_user_project_created ON image_library(user_id, project_id, created_at DESC)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_user_project_created ON video_library(user_id, project_id, created_at DESC)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_audio_user_project_created ON audio_library(user_id, project_id, created_at DESC)')
+    cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_deleted_video_task_unique ON deleted_video_library_tasks(user_id, project_id, task_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_user_project_created ON video_tasks(user_id, project_id, created_at DESC)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_omni_video_tasks_user_project_created ON omni_video_tasks(user_id, project_id, created_at DESC)')
     
@@ -1037,6 +1063,52 @@ def get_video_task_by_id(task_id):
     return None
 
 
+def mark_video_task_deleted_from_library(user_id, task_id, project_id=None):
+    """Remember that a generated video task was manually removed from the library."""
+    ensure_media_library_tables()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        '''
+        INSERT OR IGNORE INTO deleted_video_library_tasks (user_id, project_id, task_id, created_at)
+        VALUES (?, ?, ?, ?)
+        ''',
+        (user_id, project_id, task_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+    )
+    conn.commit()
+    conn.close()
+
+
+def is_video_task_deleted_from_library(user_id, task_id, project_id=None):
+    """Check whether a generated video task was manually removed from the library."""
+    ensure_media_library_tables()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute(
+            '''
+            SELECT 1
+            FROM deleted_video_library_tasks
+            WHERE user_id = ? AND task_id = ? AND project_id IS NULL
+            LIMIT 1
+            ''',
+            (user_id, task_id),
+        )
+    else:
+        cursor.execute(
+            '''
+            SELECT 1
+            FROM deleted_video_library_tasks
+            WHERE user_id = ? AND task_id = ? AND project_id = ?
+            LIMIT 1
+            ''',
+            (user_id, task_id, project_id),
+        )
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
+
+
 def _ensure_omni_video_task_schema(cursor):
     cursor.execute(
         '''
@@ -1064,6 +1136,7 @@ def _ensure_omni_video_task_schema(cursor):
             frame_count INTEGER,
             resolution TEXT,
             aspect_ratio TEXT,
+            filename TEXT,
             seed INTEGER,
             token_usage INTEGER,
             usage_json TEXT
@@ -1078,6 +1151,8 @@ def _ensure_omni_video_task_schema(cursor):
         cursor.execute("ALTER TABLE omni_video_tasks ADD COLUMN token_usage INTEGER")
     if "usage_json" not in columns:
         cursor.execute("ALTER TABLE omni_video_tasks ADD COLUMN usage_json TEXT")
+    if "filename" not in columns:
+        cursor.execute("ALTER TABLE omni_video_tasks ADD COLUMN filename TEXT")
 
 
 def _decode_omni_video_task(row):
@@ -1128,6 +1203,7 @@ def save_omni_video_task(data):
         data.get('frame_count'),
         data.get('resolution'),
         data.get('aspect_ratio'),
+        data.get('filename'),
         data.get('seed'),
         data.get('token_usage'),
         json.dumps(data.get('usage_json', {})),
@@ -1141,7 +1217,7 @@ def save_omni_video_task(data):
                 prompt = ?, input_payload_json = ?, raw_response_json = ?, result_json = ?,
                 fail_reason = ?, video_url = ?, cover_url = ?, first_frame_url = ?,
                 last_frame_url = ?, reference_urls_json = ?, duration = ?, frame_count = ?,
-                resolution = ?, aspect_ratio = ?, seed = ?, token_usage = ?, usage_json = ?
+                resolution = ?, aspect_ratio = ?, filename = ?, seed = ?, token_usage = ?, usage_json = ?
             WHERE task_id = ?
         ''',
             (
@@ -1165,6 +1241,7 @@ def save_omni_video_task(data):
                 data.get('frame_count'),
                 data.get('resolution'),
                 data.get('aspect_ratio'),
+                data.get('filename'),
                 data.get('seed'),
                 data.get('token_usage'),
                 json.dumps(data.get('usage_json', {})),
@@ -1179,8 +1256,8 @@ def save_omni_video_task(data):
                 user_id, task_id, project_id, created_at, updated_at, status, model, mode,
                 prompt, input_payload_json, raw_response_json, result_json, fail_reason,
                 video_url, cover_url, first_frame_url, last_frame_url, reference_urls_json,
-                duration, frame_count, resolution, aspect_ratio, seed, token_usage, usage_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                duration, frame_count, resolution, aspect_ratio, filename, seed, token_usage, usage_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''',
             params,
         )
@@ -1227,9 +1304,9 @@ def get_omni_video_tasks(user_id, project_id=None, status=None, search=None, sta
         query += ' AND status = ?'
         params.append(status)
     if search:
-        query += ' AND (task_id LIKE ? OR prompt LIKE ?)'
+        query += ' AND (task_id LIKE ? OR prompt LIKE ? OR filename LIKE ?)'
         like = f'%{search}%'
-        params.extend([like, like])
+        params.extend([like, like, like])
     if start_date:
         query += ' AND DATE(created_at) >= DATE(?)'
         params.append(start_date)
@@ -1259,9 +1336,9 @@ def count_omni_video_tasks(user_id, project_id=None, status=None, search=None, s
         query += ' AND status = ?'
         params.append(status)
     if search:
-        query += ' AND (task_id LIKE ? OR prompt LIKE ?)'
+        query += ' AND (task_id LIKE ? OR prompt LIKE ? OR filename LIKE ?)'
         like = f'%{search}%'
-        params.extend([like, like])
+        params.extend([like, like, like])
     if start_date:
         query += ' AND DATE(created_at) >= DATE(?)'
         params.append(start_date)

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 import logging
 
-from flask import Blueprint, jsonify, render_template, request, session
+import requests
+from flask import Blueprint, jsonify, render_template, request, send_file, session
 
 from app.decorators import handle_api_error, login_required
 from app.services.omni_video_service import omni_video_service
@@ -134,6 +136,57 @@ def get_omni_video_task(task_id: str):
         return jsonify({"success": False, "error": "任务不存在"}), 404
     logger.info("[omni-video][detail][response] task=%s", _safe_log_payload(task))
     return jsonify({"success": True, "task": task})
+
+
+@omni_video_bp.route("/api/omni-video/tasks/<task_id>/download", methods=["GET"])
+@login_required
+@handle_api_error
+def download_omni_video_task(task_id: str):
+    user_id = session.get("user_id")
+    project_id = session.get("current_project_id")
+    logger.info(
+        "[omni-video][download][request] user_id=%s project_id=%s task_id=%s",
+        user_id,
+        project_id,
+        task_id,
+    )
+
+    task = omni_video_service.get_task(user_id, project_id, task_id)
+    if not task:
+        return jsonify({"success": False, "error": "任务不存在"}), 404
+
+    video_url = task.get("video_url")
+    if not video_url:
+        return jsonify({"success": False, "error": "当前任务暂无可下载视频"}), 400
+
+    filename = task.get("download_filename") or f"{task_id}.mp4"
+    try:
+        response = requests.get(video_url, timeout=120)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        logger.exception(
+            "[omni-video][download][error] task_id=%s video_url=%s error=%s",
+            task_id,
+            video_url,
+            exc,
+        )
+        raise ValueError("视频下载失败，请稍后重试") from exc
+
+    mimetype = response.headers.get("Content-Type") or "video/mp4"
+    logger.info(
+        "[omni-video][download][response] task_id=%s status=%s content_type=%s content_length=%s filename=%s",
+        task_id,
+        response.status_code,
+        mimetype,
+        response.headers.get("Content-Length"),
+        filename,
+    )
+    return send_file(
+        BytesIO(response.content),
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name=filename,
+    )
 
 
 @omni_video_bp.route("/api/omni-video/tasks/<task_id>/refresh", methods=["POST"])

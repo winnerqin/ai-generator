@@ -176,6 +176,90 @@ def test_list_tasks_syncs_running_task_and_auto_saves_video(monkeypatch):
     assert saved_video["meta"]["task_id"] == "task-list-1"
 
 
+def test_list_tasks_does_not_recreate_deleted_library_video(monkeypatch):
+    import importlib
+
+    omni_module = importlib.import_module("app.services.omni_video_service")
+    from app.services.omni_video_service import OmniVideoService
+
+    service = OmniVideoService()
+    service.client = type(
+        "StubClient",
+        (),
+        {
+            "is_configured": lambda self: True,
+            "get_task": lambda self, task_id: {
+                "id": task_id,
+                "status": "succeeded",
+                "usage": {"total_tokens": 88},
+                "data": {
+                    "video_url": "https://example.com/output/list-demo.mp4",
+                    "resolution": "720P",
+                    "ratio": "16:9",
+                },
+            },
+        },
+    )()
+
+    task_state = {
+        "task_id": "task-list-deleted",
+        "user_id": 7,
+        "project_id": 3,
+        "status": "running",
+        "prompt": "list sync task",
+        "input_payload_json": {
+            "model": "doubao-seedance-2-0-fast-260128",
+            "prompt": "list sync task",
+            "resolution": "720P",
+            "aspect_ratio": "16:9",
+            "duration": 5,
+            "generate_audio": True,
+        },
+        "raw_response_json": {},
+        "result_json": {},
+        "reference_urls_json": [],
+        "duration": 5,
+        "frame_count": None,
+        "resolution": "720P",
+        "aspect_ratio": "16:9",
+        "seed": -1,
+        "token_usage": None,
+        "usage_json": {},
+    }
+
+    monkeypatch.setattr(
+        omni_module.database,
+        "get_omni_video_tasks",
+        lambda *args, **kwargs: [dict(task_state)],
+    )
+    monkeypatch.setattr(omni_module.database, "count_omni_video_tasks", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(
+        omni_module.database,
+        "get_omni_video_task",
+        lambda task_id, user_id=None, project_id=None: dict(task_state),
+    )
+    def fake_save_task(data):
+        task_state.update(data)
+        return 1
+
+    monkeypatch.setattr(omni_module.database, "save_omni_video_task", fake_save_task)
+    monkeypatch.setattr(omni_module.database, "get_video_by_task_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        omni_module.database,
+        "is_video_task_deleted_from_library",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        omni_module.database,
+        "save_video_asset",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not re-add deleted video")),
+    )
+
+    items, total = service.list_tasks(7, 3, page=1, page_size=20)
+    assert total == 1
+    assert items[0]["status"] == "succeeded"
+
+
 def test_get_task_extracts_video_url_from_content_blob(monkeypatch):
     import importlib
 

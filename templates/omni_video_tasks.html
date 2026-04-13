@@ -18,12 +18,15 @@
         .filters input, .filters select { width: 100%; box-sizing: border-box; }
         .filters input[type="date"] { max-width: 150px; }
         .inline-options { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .task-table-wrap { overflow-x: auto; }
-        .task-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; min-width: 1320px; }
+        .task-table-wrap { overflow-x: auto; overflow-y: hidden; padding-bottom: 8px; -webkit-overflow-scrolling: touch; }
+        .task-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; min-width: 1280px; }
         .task-table th, .task-table td { padding: 10px 12px; border-bottom: 1px solid rgba(86,111,255,0.18); text-align: left; vertical-align: top; }
         .task-table th { font-weight: 600; white-space: nowrap; }
+        .task-table td.filename-cell { min-width: 96px; max-width: 130px; word-break: break-all; }
         .status-pill { display: inline-block; padding: 4px 10px; border-radius: 999px; background: rgba(86,111,255,0.16); }
-        .actions { display: flex; gap: 8px; flex-wrap: nowrap; white-space: nowrap; }
+        .actions { display: grid; grid-template-columns: repeat(3, minmax(60px, 1fr)); gap: 6px; min-width: 210px; }
+        .actions .btn { width: 100%; padding-left: 8px; padding-right: 8px; }
+        .actions .btn[disabled] { opacity: 0.35; filter: grayscale(1); border-color: rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: #7d86a8; }
         .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .detail-card { border-radius: 14px; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(86,111,255,0.16); }
         .detail-card pre { white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; }
@@ -38,6 +41,7 @@
         .preview-video { width: 100%; max-height: 72vh; border-radius: 12px; background: rgba(0,0,0,0.24); }
         .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
         @media (max-width: 980px) {
+            .page-wrap { padding: 16px; }
             .filters { grid-template-columns: 1fr; }
             .detail-grid { grid-template-columns: 1fr; }
         }
@@ -57,7 +61,7 @@
             <div class="filters">
                 <div>
                     <label for="search">搜索任务</label>
-                    <input id="search" type="text" placeholder="按任务 ID 或提示词搜索">
+                    <input id="search" type="text" placeholder="按任务 ID、提示词或文件名搜索">
                 </div>
                 <div>
                     <label for="status">状态</label>
@@ -100,6 +104,7 @@
                         <th>状态</th>
                         <th>模型</th>
                         <th>分辨率</th>
+                        <th>文件名</th>
                         <th>Seed</th>
                         <th>时长(秒)</th>
                         <th>高宽比</th>
@@ -110,7 +115,7 @@
                     </tr>
                 </thead>
                 <tbody id="taskRows">
-                    <tr><td colspan="11">加载中...</td></tr>
+                    <tr><td colspan="12">加载中...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -184,6 +189,26 @@
             return usage.total_tokens ?? '-';
         }
 
+        function renderFilename(task) {
+            return task.filename || '';
+        }
+
+        function canDownload(task) {
+            return Boolean(task && task.video_url);
+        }
+
+        function downloadTask(taskId) {
+            const decodedTaskId = decodeURIComponent(taskId);
+            const task = currentItems.find((item) => item.task_id === decodedTaskId);
+            const filename = (task && (task.download_filename || task.filename)) || `${decodedTaskId}.mp4`;
+            const link = document.createElement('a');
+            link.href = `/api/omni-video/tasks/${encodeURIComponent(decodedTaskId)}/download`;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        }
+
         function canDelete(task) {
             const status = String(task.status || '').toLowerCase();
             return !['running', 'cancelled', 'canceled'].includes(status);
@@ -219,7 +244,7 @@
             debugLog('list response', data);
             const tbody = document.getElementById('taskRows');
             if (!data.success) {
-                tbody.innerHTML = '<tr><td colspan="11">加载失败</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="12">加载失败</td></tr>';
                 return;
             }
 
@@ -228,7 +253,7 @@
             updatePager();
 
             if (!currentItems.length) {
-                tbody.innerHTML = '<tr><td colspan="11">暂无任务</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="12">暂无任务</td></tr>';
                 collapseDetails('当前没有可查看的任务。');
                 return;
             }
@@ -239,6 +264,7 @@
                     <td><span class="status-pill">${escapeHtml(task.status || '-')}</span></td>
                     <td>${escapeHtml(task.model || '-')}</td>
                     <td>${escapeHtml(task.resolution || '-')}</td>
+                    <td class="filename-cell">${escapeHtml(renderFilename(task))}</td>
                     <td>${escapeHtml(task.seed ?? '-')}</td>
                     <td>${escapeHtml(renderDuration(task))}</td>
                     <td>${escapeHtml(task.aspect_ratio || '-')}</td>
@@ -249,7 +275,8 @@
                         <div class="actions">
                             <button class="btn btn-secondary" onclick="viewTask('${encodeURIComponent(task.task_id || '')}')">${currentTaskId === task.task_id && detailExpanded ? '收起' : '查看'}</button>
                             <button class="btn btn-secondary" onclick="previewTask('${encodeURIComponent(task.task_id || '')}')">预览</button>
-                            <button class="btn btn-secondary" onclick="regenerateTask('${encodeURIComponent(task.task_id || '')}')">重新生成</button>
+                            <button class="btn btn-secondary" ${canDownload(task) ? '' : 'disabled title="视频生成成功后可下载"'} onclick="${canDownload(task) ? `downloadTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">下载</button>
+                            <button class="btn btn-secondary" onclick="regenerateTask('${encodeURIComponent(task.task_id || '')}')">重做</button>
                             <button class="btn btn-danger" ${canDelete(task) ? '' : 'disabled'} onclick="${canDelete(task) ? `deleteTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">删除</button>
                         </div>
                     </td>
@@ -279,6 +306,7 @@
                     <div style="font-weight:600; margin-bottom: 8px;">基础信息</div>
                     <div class="meta-list">
                         <div><strong>任务 ID：</strong>${escapeHtml(task.task_id || '-')}</div>
+                        <div><strong>文件名：</strong>${escapeHtml(task.filename || '-')}</div>
                         <div><strong>状态：</strong>${escapeHtml(task.status || '-')}</div>
                         <div><strong>模型：</strong>${escapeHtml(task.model || requestPayload.model || '-')}</div>
                         <div><strong>提示词：</strong>${escapeHtml(task.prompt || '-')}</div>
@@ -403,6 +431,7 @@
                 prompt: task.prompt || payload.prompt || '',
                 model: task.model || payload.model || '',
                 resolution: task.resolution || payload.resolution || '',
+                filename_base: (payload.filename_base || task.filename || payload.filename || '').replace(/\.mp4$/i, ''),
                 duration: payload.duration ?? task.duration ?? -1,
                 frame_count: payload.frame_count ?? null,
                 aspect_ratio: task.aspect_ratio || payload.aspect_ratio || payload.ratio || '9:16',

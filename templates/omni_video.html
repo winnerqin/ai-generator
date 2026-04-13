@@ -18,6 +18,9 @@
         .field { display: grid; gap: 8px; margin-bottom: 14px; }
         .field input, .field select, .field textarea { width: 100%; box-sizing: border-box; }
         .field textarea { min-height: 110px; resize: vertical; }
+        .filename-input-wrap { position: relative; }
+        .filename-input-wrap input { padding-right: 56px; }
+        .filename-suffix { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #9ca8cf; font-size: 0.9rem; pointer-events: none; }
         .field-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
         .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
         .asset-card { border-radius: 12px; overflow: hidden; border: 1px solid rgba(86,111,255,0.2); background: rgba(255,255,255,0.02); cursor: pointer; }
@@ -72,6 +75,15 @@
                     <div class="field">
                         <label for="prompt">提示词</label>
                         <textarea id="prompt" placeholder="描述视频内容、镜头运动、风格、节奏和重点主体"></textarea>
+                    </div>
+
+                    <div class="field">
+                        <label for="filename">文件名</label>
+                        <div class="filename-input-wrap">
+                            <input id="filename" type="text" maxlength="120" placeholder="不填则默认使用任务ID">
+                            <span class="filename-suffix">.mp4</span>
+                        </div>
+                        <div class="small-hint">输入后会自动补全为 .mp4；未填写时下载文件名默认使用任务ID。</div>
                     </div>
 
                     <div class="field-row">
@@ -451,6 +463,7 @@
             try {
                 const data = JSON.parse(raw);
                 document.getElementById('prompt').value = data.prompt || '';
+                document.getElementById('filename').value = data.filename_base || data.filename || '';
                 if (data.model) document.getElementById('model').value = data.model;
                 if (data.resolution) document.getElementById('resolution').value = data.resolution;
                 if (data.aspect_ratio) document.getElementById('aspectRatio').value = data.aspect_ratio;
@@ -513,6 +526,7 @@
             const frameCountValue = document.getElementById('frameCount').value.trim();
             return {
                 prompt: document.getElementById('prompt').value.trim(),
+                filename: document.getElementById('filename').value.trim(),
                 model: document.getElementById('model').value,
                 resolution: document.getElementById('resolution').value,
                 duration: Number(document.getElementById('duration').value || -1),
@@ -529,6 +543,7 @@
             const video = document.getElementById('videoPreview');
             const inputPayload = task.input_payload_json || {};
             box.innerHTML = `
+                <div><strong>文件名：</strong>${task.filename || '-'}</div>
                 <div><strong>任务ID：</strong>${task.task_id || '-'}</div>
                 <div><strong>状态：</strong>${task.status || '-'}</div>
                 <div><strong>模型：</strong>${task.model || inputPayload.model || '-'}</div>

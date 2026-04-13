@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import mimetypes
+from io import BytesIO
 from pathlib import Path
 
+import requests
 from flask import Blueprint, current_app, jsonify, render_template, request, send_file, session
 
 import database
@@ -88,6 +90,44 @@ def _is_generated_video_asset(item: dict) -> bool:
     if meta.get("library_group") == "video":
         return True
     return bool(meta.get("task_id") or meta.get("source") == "omni_video" or meta.get("model"))
+
+
+def _get_database_asset(asset_id: str, user_id: int, project_id: int | None) -> dict | None:
+    sources = (
+        ("db_person_", database.get_person_assets),
+        ("db_scene_", database.get_scene_assets),
+        ("db_image_", database.get_image_assets),
+        ("db_video_", database.get_video_assets),
+        ("db_audio_", database.get_audio_assets),
+    )
+    for prefix, loader in sources:
+        if not asset_id.startswith(prefix):
+            continue
+        raw_id = asset_id.removeprefix(prefix)
+        for asset in loader(user_id, project_id):
+            if str(asset.get("id")) == raw_id:
+                return asset
+        return None
+    return None
+
+
+def _resolve_local_file_path(path_or_url: str) -> Path | None:
+    value = (path_or_url or "").strip()
+    if not value:
+        return None
+    if value.startswith(("http://", "https://")):
+        return None
+    if value.startswith("/uploads/"):
+        upload_root = Path(current_app.config.get("UPLOAD_FOLDER", "uploads")).resolve()
+        return (upload_root / value.removeprefix("/uploads/").lstrip("/\\")).resolve()
+    if value.startswith("/output/"):
+        output_root = Path(current_app.config.get("OUTPUT_FOLDER", "output")).resolve()
+        return (output_root / value.removeprefix("/output/").lstrip("/\\")).resolve()
+
+    candidate = Path(value)
+    if candidate.exists():
+        return candidate.resolve()
+    return None
 
 
 @content_bp.route("/content-management")
@@ -357,12 +397,14 @@ def add_to_scene_library():
 @login_required
 def delete_library_asset():
     user_id = session.get("user_id")
+    project_id = session.get("current_project_id")
     data = request.get_json(silent=True) or request.form.to_dict()
     asset_id = (data.get("id") or data.get("key") or "").strip()
     if not asset_id:
         return jsonify({"success": False, "error": "参数不完整"}), 400
 
     try:
+        asset = _get_database_asset(asset_id, user_id, project_id)
         if asset_id.startswith("db_person_"):
             database.delete_person_asset(int(asset_id.replace("db_person_", "")), user_id)
         elif asset_id.startswith("db_scene_"):
@@ -370,11 +412,23 @@ def delete_library_asset():
         elif asset_id.startswith("db_image_"):
             database.delete_image_asset(int(asset_id.replace("db_image_", "")), user_id)
         elif asset_id.startswith("db_video_"):
+            meta = (asset or {}).get("meta") or {}
+            task_id = (meta.get("task_id") or "").strip()
+            if task_id:
+                database.mark_video_task_deleted_from_library(user_id, task_id, project_id=project_id)
             database.delete_video_asset(int(asset_id.replace("db_video_", "")), user_id)
         elif asset_id.startswith("db_audio_"):
             database.delete_audio_asset(int(asset_id.replace("db_audio_", "")), user_id)
         else:
             file_upload_service.delete_file(asset_id, is_oss=True)
+
+        asset_url = str((asset or {}).get("url") or "").strip()
+        if asset_url.startswith(("http://", "https://")):
+            file_upload_service.delete_file(asset_url, is_oss=True)
+        else:
+            local_path = _resolve_local_file_path(asset_url)
+            if local_path and local_path.exists():
+                local_path.unlink()
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 500
 
@@ -409,6 +463,43 @@ def rename_library_asset():
     if not updated:
         return jsonify({"success": False, "error": "素材不存在"}), 404
     return jsonify({"success": True, "message": "重命名成功", "filename": filename})
+
+
+@content_bp.route("/api/download-library-asset", methods=["GET"])
+@login_required
+def download_library_asset():
+    user_id = session.get("user_id")
+    project_id = session.get("current_project_id")
+    asset_id = (request.args.get("id") or "").strip()
+    if not asset_id:
+        return jsonify({"success": False, "error": "缺少素材 ID"}), 400
+
+    asset = _get_database_asset(asset_id, user_id, project_id)
+    if not asset:
+        return jsonify({"success": False, "error": "素材不存在"}), 404
+
+    filename = (asset.get("filename") or "asset").strip() or "asset"
+    asset_url = str(asset.get("url") or "").strip()
+    local_path = _resolve_local_file_path(asset_url)
+    if local_path and local_path.exists():
+        return send_file(local_path, as_attachment=True, download_name=filename)
+
+    if not asset_url:
+        return jsonify({"success": False, "error": "素材无可下载地址"}), 400
+
+    try:
+        response = requests.get(_public_asset_url(asset_url), timeout=120)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        return jsonify({"success": False, "error": f"下载失败: {exc}"}), 502
+
+    mimetype = response.headers.get("Content-Type") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    return send_file(
+        BytesIO(response.content),
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name=filename,
+    )
 
 
 @content_bp.route("/api/image-styles", methods=["POST"])

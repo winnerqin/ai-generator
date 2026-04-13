@@ -355,3 +355,40 @@ def test_rename_video_library_asset(auth_client, monkeypatch):
     data = response.get_json()
     assert data["success"] is True
     assert data["filename"] == "renamed-video.mp4"
+
+
+def test_delete_video_library_asset_marks_omni_task_deleted(auth_client, monkeypatch):
+    import database
+
+    monkeypatch.setattr(
+        database,
+        "get_video_assets",
+        lambda user_id, project_id=None: [
+            {
+                "id": 9,
+                "filename": "demo.mp4",
+                "url": "https://example.com/output/demo.mp4",
+                "meta": {"task_id": "task-omni-9", "source": "omni_video"},
+            }
+        ],
+    )
+
+    marked = {}
+    monkeypatch.setattr(
+        database,
+        "mark_video_task_deleted_from_library",
+        lambda user_id, task_id, project_id=None: marked.update(
+            {"user_id": user_id, "task_id": task_id, "project_id": project_id}
+        ),
+    )
+    monkeypatch.setattr(database, "delete_video_asset", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(
+        "app.api.content.file_upload_service.delete_file",
+        lambda *args, **kwargs: True,
+    )
+
+    response = auth_client.post("/api/delete-library-asset", json={"id": "db_video_9"})
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert marked["task_id"] == "task-omni-9"

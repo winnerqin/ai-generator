@@ -28,6 +28,22 @@ def _normalize_reference_urls(reference_urls: list[str] | None) -> list[str]:
     return [url.strip() for url in reference_urls if isinstance(url, str) and url.strip()]
 
 
+def _normalize_filename(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    filename = str(value).strip()
+    if not filename:
+        return None
+
+    invalid_chars = '<>:"/\\|?*'
+    cleaned = "".join("_" if ch in invalid_chars else ch for ch in filename).strip().strip(".")
+    if not cleaned:
+        return None
+    if not cleaned.lower().endswith(".mp4"):
+        cleaned = f"{cleaned}.mp4"
+    return cleaned
+
+
 def _infer_upload_file_type(url: str) -> str:
     lower = urlparse(url).path.lower() if url.startswith(("http://", "https://")) else url.lower()
     if any(lower.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")):
@@ -176,6 +192,7 @@ def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
         "seed": data.get("seed"),
         "generate_audio": _coerce_bool(data.get("generate_audio"), default=True),
         "reference_urls": reference_urls,
+        "filename": _normalize_filename(data.get("filename")),
     }
 
     content: list[dict[str, Any]] = []
@@ -384,6 +401,7 @@ def _task_record_from_remote(
         "frame_count": _normalize_frame_count(local_payload, remote, result),
         "resolution": _normalize_text_field(local_payload, remote, result, "resolution"),
         "aspect_ratio": _normalize_text_field(local_payload, remote, result, "aspect_ratio", "ratio"),
+        "filename": _normalize_filename(local_payload.get("filename")),
         "seed": _normalize_seed(local_payload, remote, result),
         "token_usage": _normalize_token_usage(remote),
         "usage_json": usage,
@@ -412,6 +430,12 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
         task["video_url"] = _normalize_text_field({}, raw_response, result, "video_url", "url")
     if task.get("cover_url") in (None, ""):
         task["cover_url"] = _normalize_text_field({}, raw_response, result, "cover_url", "poster_url", "cover")
+    task["filename"] = _normalize_filename(task.get("filename") or local_payload.get("filename"))
+    task["download_filename"] = task["filename"] or (
+        _guess_video_filename(task.get("task_id") or "video", task.get("video_url") or "")
+        if task.get("task_id")
+        else None
+    )
 
     token_usage = task.get("token_usage")
     if token_usage in (None, ""):
@@ -434,6 +458,13 @@ class OmniVideoService:
         if status not in SUCCESS_STATUSES or not video_url:
             return
 
+        if database.is_video_task_deleted_from_library(
+            task["user_id"],
+            task["task_id"],
+            project_id=task.get("project_id"),
+        ):
+            return
+
         existing = database.get_video_by_task_id(
             task["user_id"],
             task["task_id"],
@@ -442,7 +473,7 @@ class OmniVideoService:
         if existing:
             return
 
-        filename = _guess_video_filename(task["task_id"], video_url)
+        filename = task.get("download_filename") or _guess_video_filename(task["task_id"], video_url)
         database.save_video_asset(
             user_id=task["user_id"],
             project_id=task.get("project_id"),
@@ -461,6 +492,7 @@ class OmniVideoService:
                 "seed": task.get("seed"),
                 "token_usage": task.get("token_usage"),
                 "cover_url": task.get("cover_url"),
+                "filename": task.get("filename"),
             },
         )
 

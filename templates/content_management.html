@@ -24,6 +24,7 @@
         .asset-preview img, .asset-preview video { width: 100%; height: 100%; object-fit: contain; display: block; }
         .asset-preview-audio { font-size: 42px; opacity: 0.85; }
         .asset-info { padding: 10px; display: grid; gap: 6px; font-size: 0.88rem; }
+        .asset-meta-line { display: flex; justify-content: space-between; gap: 8px; color: #9ca8cf; font-size: 0.82rem; }
         .asset-actions { display: flex; gap: 8px; flex-wrap: wrap; }
         .empty-hint { color: #9ca8cf; }
         .small-hint { color: #9ca8cf; font-size: 0.82rem; }
@@ -160,6 +161,30 @@
             return currentTab === 'image' && asset.type === 'image';
         }
 
+        function canEnhanceVideo(asset) {
+            return currentTab === 'video' && asset.type === 'video';
+        }
+
+        function renderResolution(asset) {
+            const meta = asset.meta || {};
+            if (asset.type === 'image') {
+                const width = meta.width;
+                const height = meta.height;
+                if (width && height) return `${width}x${height}`;
+                return '-';
+            }
+            if (asset.type === 'video') {
+                return meta.resolution || '-';
+            }
+            return '-';
+        }
+
+        function renderTypeWithResolution(asset) {
+            const typeLabel = assetTypeLabel(asset);
+            const resolution = renderResolution(asset);
+            return resolution && resolution !== '-' ? `${typeLabel} / ${resolution}` : typeLabel;
+        }
+
         function previewMarkup(asset) {
             if (asset.type === 'video') {
                 return `<video src="${asset.url}" preload="metadata"></video>`;
@@ -186,11 +211,10 @@
                     <div class="asset-preview" data-preview="${asset.id}">${previewMarkup(asset)}</div>
                     <div class="asset-info">
                         <div>${asset.filename || '-'}</div>
-                        <div class="small-hint">${assetTypeLabel(asset)}</div>
-                        <div class="small-hint">${asset.created_at || '-'}</div>
+                        <div class="asset-meta-line"><span>${renderTypeWithResolution(asset)}</span><span>${asset.created_at || '-'}</span></div>
                         <div class="asset-actions">
-                            <button class="btn btn-secondary" data-preview="${asset.id}">预览</button>
                             ${canAddToMaterial(asset) ? `<button class="btn btn-secondary" data-add-material="${asset.id}">添加到素材</button>` : ''}
+                            ${canEnhanceVideo(asset) ? `<button class="btn btn-secondary" data-enhance="${asset.id}">画质增强</button>` : ''}
                             <button class="btn btn-secondary" data-download="${asset.id}">下载</button>
                             ${canRename(asset) ? `<button class="btn btn-secondary" data-rename="${asset.id}">重命名</button>` : ''}
                             <button class="btn btn-danger" data-delete="${asset.id}">删除</button>
@@ -199,11 +223,18 @@
                 </div>
             `).join('');
 
-            grid.querySelectorAll('[data-preview]').forEach((button) => {
-                button.addEventListener('click', () => openPreview(button.getAttribute('data-preview')));
+            grid.querySelectorAll('[data-preview]').forEach((preview) => {
+                preview.addEventListener('click', () => openPreview(preview.getAttribute('data-preview')));
             });
             grid.querySelectorAll('[data-add-material]').forEach((button) => {
                 button.addEventListener('click', () => addToImageMaterial(button.getAttribute('data-add-material')));
+            });
+            grid.querySelectorAll('[data-enhance]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const asset = allAssets.find((item) => String(item.id) === String(button.getAttribute('data-enhance')));
+                    if (!asset) return;
+                    alert(`已为“${asset.filename || '该视频'}”预留画质增强入口，后续功能接入后可直接使用。`);
+                });
             });
             grid.querySelectorAll('[data-download]').forEach((button) => {
                 button.addEventListener('click', () => downloadAsset(button.getAttribute('data-download')));
@@ -272,9 +303,9 @@
 
         function downloadAsset(assetId) {
             const asset = allAssets.find((item) => String(item.id) === String(assetId));
-            if (!asset || !asset.url) return;
+            if (!asset) return;
             const link = document.createElement('a');
-            link.href = asset.url;
+            link.href = `/api/download-library-asset?id=${encodeURIComponent(asset.id)}`;
             link.download = asset.filename || 'asset';
             document.body.appendChild(link);
             link.click();
