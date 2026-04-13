@@ -1372,6 +1372,264 @@ def delete_omni_video_task(task_id, user_id=None, project_id=None):
     conn.close()
     return deleted
 
+
+# ==================== 视频画质增强任务函数 ====================
+
+def _ensure_video_enhance_tasks_schema(cursor):
+    """确保视频画质增强任务表存在。"""
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS video_enhance_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            task_id TEXT UNIQUE NOT NULL,
+            project_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'queued',
+            source_video_url TEXT NOT NULL,
+            source_video_id TEXT,
+            source_filename TEXT,
+            input_payload_json TEXT,
+            resolution TEXT NOT NULL,
+            raw_response_json TEXT,
+            result_json TEXT,
+            video_url TEXT,
+            output_filename TEXT,
+            cover_url TEXT,
+            fail_reason TEXT,
+            token_usage INTEGER,
+            usage_json TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    '''
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_user_id ON video_enhance_tasks(user_id)'
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_task_id ON video_enhance_tasks(task_id)'
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_status ON video_enhance_tasks(status)'
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_created_at ON video_enhance_tasks(created_at)'
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_user_project_created ON video_enhance_tasks(user_id, project_id, created_at DESC)'
+    )
+
+
+def _decode_video_enhance_task(row):
+    """解码视频画质增强任务的JSON字段。"""
+    task = dict(row)
+    for field in ("input_payload_json", "raw_response_json", "result_json", "usage_json"):
+        raw = task.get(field)
+        if not raw:
+            task[field] = {}
+            continue
+        try:
+            task[field] = json.loads(raw)
+        except Exception:
+            task[field] = {}
+    return task
+
+
+def save_video_enhance_task(data):
+    """插入或更新视频画质增强任务。"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    _ensure_video_enhance_tasks_schema(cursor)
+
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute('SELECT id FROM video_enhance_tasks WHERE task_id = ?', (data.get('task_id'),))
+    existing = cursor.fetchone()
+
+    if existing:
+        cursor.execute(
+            '''
+            UPDATE video_enhance_tasks
+            SET user_id = ?, project_id = ?, updated_at = ?, status = ?,
+                source_video_url = ?, source_video_id = ?, source_filename = ?,
+                input_payload_json = ?, resolution = ?, raw_response_json = ?,
+                result_json = ?, video_url = ?, output_filename = ?, cover_url = ?,
+                fail_reason = ?, token_usage = ?, usage_json = ?
+            WHERE task_id = ?
+            ''',
+            (
+                data.get('user_id'),
+                data.get('project_id'),
+                now,
+                data.get('status', 'queued'),
+                data.get('source_video_url'),
+                data.get('source_video_id'),
+                data.get('source_filename'),
+                json.dumps(data.get('input_payload_json', {})),
+                data.get('resolution'),
+                json.dumps(data.get('raw_response_json', {})),
+                json.dumps(data.get('result_json', {})),
+                data.get('video_url'),
+                data.get('output_filename'),
+                data.get('cover_url'),
+                data.get('fail_reason'),
+                data.get('token_usage'),
+                json.dumps(data.get('usage_json', {})),
+                data.get('task_id'),
+            ),
+        )
+        record_id = existing[0]
+    else:
+        cursor.execute(
+            '''
+            INSERT INTO video_enhance_tasks (
+                user_id, task_id, project_id, created_at, updated_at, status,
+                source_video_url, source_video_id, source_filename, input_payload_json,
+                resolution, raw_response_json, result_json, video_url, output_filename,
+                cover_url, fail_reason, token_usage, usage_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                data.get('user_id'),
+                data.get('task_id'),
+                data.get('project_id'),
+                now,
+                now,
+                data.get('status', 'queued'),
+                data.get('source_video_url'),
+                data.get('source_video_id'),
+                data.get('source_filename'),
+                json.dumps(data.get('input_payload_json', {})),
+                data.get('resolution'),
+                json.dumps(data.get('raw_response_json', {})),
+                json.dumps(data.get('result_json', {})),
+                data.get('video_url'),
+                data.get('output_filename'),
+                data.get('cover_url'),
+                data.get('fail_reason'),
+                data.get('token_usage'),
+                json.dumps(data.get('usage_json', {})),
+            ),
+        )
+        record_id = cursor.lastrowid
+
+    conn.commit()
+    conn.close()
+    return record_id
+
+
+def get_video_enhance_task(task_id, user_id=None, project_id=None):
+    """获取单个视频画质增强任务。"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    _ensure_video_enhance_tasks_schema(cursor)
+
+    query = 'SELECT * FROM video_enhance_tasks WHERE task_id = ?'
+    params = [task_id]
+    if user_id is not None:
+        query += ' AND user_id = ?'
+        params.append(user_id)
+    if project_id is not None:
+        query += ' AND project_id = ?'
+        params.append(project_id)
+
+    cursor.execute(query, params)
+    row = cursor.fetchone()
+    conn.close()
+    return _decode_video_enhance_task(row) if row else None
+
+
+def get_video_enhance_tasks(user_id, project_id=None, status=None, search=None, start_date=None, end_date=None, limit=20, offset=0):
+    """分页查询视频画质增强任务列表。"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    _ensure_video_enhance_tasks_schema(cursor)
+
+    query = 'SELECT * FROM video_enhance_tasks WHERE user_id = ?'
+    params = [user_id]
+
+    if project_id is not None:
+        query += ' AND project_id = ?'
+        params.append(project_id)
+    if status:
+        query += ' AND status = ?'
+        params.append(status)
+    if start_date:
+        query += ' AND created_at >= ?'
+        params.append(start_date)
+    if end_date:
+        query += ' AND created_at <= ?'
+        params.append(end_date)
+    if search:
+        query += ' AND (task_id LIKE ? OR source_filename LIKE ? OR output_filename LIKE ?)'
+        search_pattern = f'%{search}%'
+        params.extend([search_pattern, search_pattern, search_pattern])
+
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    params.extend([limit, offset])
+
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return [_decode_video_enhance_task(row) for row in rows]
+
+
+def count_video_enhance_tasks(user_id, project_id=None, status=None, search=None, start_date=None, end_date=None):
+    """计数视频画质增强任务。"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    _ensure_video_enhance_tasks_schema(cursor)
+
+    query = 'SELECT COUNT(*) FROM video_enhance_tasks WHERE user_id = ?'
+    params = [user_id]
+
+    if project_id is not None:
+        query += ' AND project_id = ?'
+        params.append(project_id)
+    if status:
+        query += ' AND status = ?'
+        params.append(status)
+    if start_date:
+        query += ' AND created_at >= ?'
+        params.append(start_date)
+    if end_date:
+        query += ' AND created_at <= ?'
+        params.append(end_date)
+    if search:
+        query += ' AND (task_id LIKE ? OR source_filename LIKE ? OR output_filename LIKE ?)'
+        search_pattern = f'%{search}%'
+        params.extend([search_pattern, search_pattern, search_pattern])
+
+    cursor.execute(query, params)
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total
+
+
+def delete_video_enhance_task(task_id, user_id=None, project_id=None):
+    """删除视频画质增强任务。"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    _ensure_video_enhance_tasks_schema(cursor)
+
+    query = 'DELETE FROM video_enhance_tasks WHERE task_id = ?'
+    params = [task_id]
+    if user_id is not None:
+        query += ' AND user_id = ?'
+        params.append(user_id)
+    if project_id is not None:
+        query += ' AND project_id = ?'
+        params.append(project_id)
+
+    cursor.execute(query, params)
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+
 def delete_image_asset(asset_id, user_id=None, project_id=None):
     """删除图片库资源。传入 user_id、project_id 时仅当资源属于该用户且属于该项目时删除（项目隔离）。"""
     ensure_media_library_tables()

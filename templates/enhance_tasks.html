@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>增强任务 - AI创作工具</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/sidebar-nav.css">
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <style>
+        .app-shell { min-height: 100vh; }
+        .main-content { padding: 0; }
+        .page-wrap { max-width: 1440px; margin: 0 auto; padding: 24px; }
+        .page-title { font-size: 1.6rem; font-weight: 700; margin-bottom: 8px; }
+        .page-subtitle { color: #aeb8d9; margin-bottom: 18px; }
+        .panel { border-radius: 16px; padding: 18px; margin-bottom: 16px; }
+        .filters { display: grid; grid-template-columns: 1.2fr 0.8fr 0.72fr 0.72fr auto auto; gap: 12px; align-items: end; }
+        .filters input, .filters select { width: 100%; box-sizing: border-box; }
+        .filters input[type="date"] { max-width: 150px; }
+        .inline-options { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .task-table-wrap { overflow-x: auto; overflow-y: hidden; padding-bottom: 8px; -webkit-overflow-scrolling: touch; }
+        .task-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; min-width: 1100px; }
+        .task-table th, .task-table td { padding: 10px 12px; border-bottom: 1px solid rgba(86,111,255,0.18); text-align: left; vertical-align: top; }
+        .task-table th { font-weight: 600; white-space: nowrap; }
+        .task-table td.filename-cell { min-width: 96px; max-width: 130px; word-break: break-all; }
+        .status-pill { display: inline-block; padding: 4px 10px; border-radius: 999px; background: rgba(86,111,255,0.16); }
+        .actions { display: grid; grid-template-columns: repeat(3, minmax(60px, 1fr)); gap: 6px; min-width: 180px; }
+        .actions .btn { width: 100%; padding-left: 8px; padding-right: 8px; }
+        .actions .btn[disabled] { opacity: 0.35; filter: grayscale(1); border-color: rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: #7d86a8; }
+        .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+        .detail-card { border-radius: 14px; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(86,111,255,0.16); }
+        .detail-card pre { white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; }
+        .meta-list { display: grid; gap: 6px; font-size: 0.92rem; }
+        .small-hint { color: #9ca8cf; font-size: 0.86rem; }
+        .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+        .preview-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.88); display: none; align-items: center; justify-content: center; z-index: 3000; }
+        .preview-inner { width: min(860px, 92vw); max-height: 88vh; padding: 18px; border-radius: 16px; background: rgba(8,13,24,0.96); }
+        .preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+        .preview-video { width: 100%; max-height: 72vh; border-radius: 12px; background: rgba(0,0,0,0.24); }
+        .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+        @media (max-width: 980px) {
+            .page-wrap { padding: 16px; }
+            .filters { grid-template-columns: 1fr; }
+            .detail-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body class="react-theme sidebar-compact">
+    <div class="app-shell">
+        {% set active_page = 'enhance_tasks' %}
+        {% include "_shared_sidebar.html" %}
+        <main class="main-content">
+            <div class="page-wrap">
+
+        <div class="page-title">视频画质增强任务</div>
+        <div class="page-subtitle">将视频画质提升至更高分辨率（720p/1080p/2K/4K），支持按状态筛选、分页查看，每 5 分钟自动刷新未完成任务。</div>
+
+        <div class="panel">
+            <div class="filters">
+                <div>
+                    <label for="search">搜索任务</label>
+                    <input id="search" type="text" placeholder="按任务 ID 或文件名搜索">
+                </div>
+                <div>
+                    <label for="status">状态</label>
+                    <select id="status">
+                        <option value="">全部</option>
+                        <option value="queued">queued</option>
+                        <option value="running">running</option>
+                        <option value="succeeded">succeeded</option>
+                        <option value="failed">failed</option>
+                        <option value="cancelled">cancelled</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="startDate">开始日期</label>
+                    <input id="startDate" type="date">
+                </div>
+                <div>
+                    <label for="endDate">结束日期</label>
+                    <input id="endDate" type="date">
+                </div>
+                <button id="reloadBtn" class="btn btn-primary">查询任务</button>
+                <button id="resetBtn" class="btn btn-secondary">重置</button>
+            </div>
+            <div class="inline-options" style="margin-top: 12px;">
+                <label style="display:flex; align-items:center; gap:8px;">
+                    <input id="autoRefresh" type="checkbox">
+                    <span>自动刷新未完成任务</span>
+                </label>
+                <span class="small-hint">开启后每 5 分钟自动刷新一次。</span>
+            </div>
+        </div>
+
+        <div class="panel task-table-wrap">
+            <table class="task-table">
+                <thead>
+                    <tr>
+                        <th>任务 ID</th>
+                        <th>状态</th>
+                        <th>目标分辨率</th>
+                        <th>原文件名</th>
+                        <th>输出文件名</th>
+                        <th>创建时间</th>
+                        <th>更新时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="taskRows">
+                    <tr><td colspan="8">加载中...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="panel pager">
+            <div id="pagerInfo" class="small-hint">第 1 页</div>
+            <div class="actions">
+                <button id="prevPageBtn" class="btn btn-secondary">上一页</button>
+                <button id="nextPageBtn" class="btn btn-secondary">下一页</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div style="font-weight: 600; margin-bottom: 12px;">任务详情</div>
+            <div id="detailBox" class="detail-grid">
+                <div class="detail-card">点击上方任务的"查看"按钮查看详情。</div>
+            </div>
+        </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="previewModal" class="preview-modal">
+        <div class="preview-inner">
+            <div class="preview-header">
+                <div id="previewTitle" style="font-weight:600;">视频预览</div>
+                <button id="closePreviewBtn" class="btn btn-secondary">关闭</button>
+            </div>
+            <video id="previewVideo" class="preview-video" controls></video>
+        </div>
+    </div>
+
+    <script src="/static/sidebar-nav.js"></script>
+    <script src="/static/sidebar-shared.js"></script>
+    <script>
+        const PAGE_SIZE = 10;
+        const AUTO_REFRESH_MS = 5 * 60 * 1000;
+        const TERMINAL_STATUSES = ['succeeded', 'success', 'completed', 'done', 'finished', 'failed', 'cancelled', 'canceled', 'expired'];
+
+        let currentTaskId = null;
+        let currentItems = [];
+        let currentPage = 1;
+        let currentTotal = 0;
+        let detailExpanded = false;
+        let autoRefreshTimer = null;
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
+        function canDownload(task) {
+            return Boolean(task && task.video_url);
+        }
+
+        function canDelete(task) {
+            const status = String(task.status || '').toLowerCase();
+            return !['running'].includes(status);
+        }
+
+        function collapseDetails(message = '点击上方任务的"查看"按钮查看详情。') {
+            currentTaskId = null;
+            detailExpanded = false;
+            document.getElementById('detailBox').innerHTML = `<div class="detail-card">${escapeHtml(message)}</div>`;
+        }
+
+        function currentFilters() {
+            return {
+                search: document.getElementById('search').value.trim(),
+                status: document.getElementById('status').value,
+                start_date: document.getElementById('startDate').value,
+                end_date: document.getElementById('endDate').value,
+            };
+        }
+
+        async function loadTasks(page = currentPage) {
+            currentPage = page;
+            const filters = currentFilters();
+            const params = new URLSearchParams({ page: String(currentPage), page_size: String(PAGE_SIZE) });
+            if (filters.search) params.set('search', filters.search);
+            if (filters.status) params.set('status', filters.status);
+            if (filters.start_date) params.set('start_date', filters.start_date);
+            if (filters.end_date) params.set('end_date', filters.end_date);
+
+            const resp = await fetch(`/api/video-enhance/tasks?${params.toString()}`);
+            const data = await resp.json();
+            const tbody = document.getElementById('taskRows');
+            if (!data.success) {
+                tbody.innerHTML = '<tr><td colspan="8">加载失败</td></tr>';
+                return;
+            }
+
+            currentItems = data.items || [];
+            currentTotal = data.total || 0;
+            updatePager();
+
+            if (!currentItems.length) {
+                tbody.innerHTML = '<tr><td colspan="8">暂无任务</td></tr>';
+                collapseDetails('当前没有可查看的任务。');
+                return;
+            }
+
+            tbody.innerHTML = currentItems.map((task) => `
+                <tr>
+                    <td>${escapeHtml(task.task_id || '-')}</td>
+                    <td><span class="status-pill">${escapeHtml(task.status || '-')}</span></td>
+                    <td>${escapeHtml(task.resolution || '-')}</td>
+                    <td class="filename-cell">${escapeHtml(task.source_filename || '-')}</td>
+                    <td class="filename-cell">${escapeHtml(task.output_filename || '-')}</td>
+                    <td>${escapeHtml(task.created_at || '-')}</td>
+                    <td>${escapeHtml(task.updated_at || '-')}</td>
+                    <td>
+                        <div class="actions">
+                            <button class="btn btn-secondary" onclick="viewTask('${encodeURIComponent(task.task_id || '')}')">${currentTaskId === task.task_id && detailExpanded ? '收起' : '查看'}</button>
+                            <button class="btn btn-secondary" ${canDownload(task) ? '' : 'disabled title="视频生成成功后可预览"'} onclick="${canDownload(task) ? `previewTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">预览</button>
+                            <button class="btn btn-secondary" ${canDownload(task) ? '' : 'disabled title="视频生成成功后可下载"'} onclick="${canDownload(task) ? `downloadTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">下载</button>
+                            <button class="btn btn-secondary" onclick="refreshTask('${encodeURIComponent(task.task_id || '')}')">刷新</button>
+                            <button class="btn btn-danger" ${canDelete(task) ? '' : 'disabled'} onclick="${canDelete(task) ? `deleteTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">删除</button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function updatePager() {
+            const totalPages = Math.max(1, Math.ceil(currentTotal / PAGE_SIZE));
+            document.getElementById('pagerInfo').textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页，合计 ${currentTotal} 条`;
+            document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+            document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
+        }
+
+        function renderDetails(task) {
+            const requestPayload = task.input_payload_json || {};
+            const remotePayload = task.raw_response_json || {};
+            return `
+                <div class="detail-card">
+                    <div style="font-weight:600; margin-bottom: 8px;">基础信息</div>
+                    <div class="meta-list">
+                        <div><strong>任务 ID：</strong>${escapeHtml(task.task_id || '-')}</div>
+                        <div><strong>原文件名：</strong>${escapeHtml(task.source_filename || '-')}</div>
+                        <div><strong>输出文件名：</strong>${escapeHtml(task.output_filename || '-')}</div>
+                        <div><strong>状态：</strong>${escapeHtml(task.status || '-')}</div>
+                        <div><strong>目标分辨率：</strong>${escapeHtml(task.resolution || '-')}</div>
+                        <div><strong>原视频URL：</strong><a href="${escapeHtml(task.source_video_url || '#')}" target="_blank" style="color:#9ed0ff;">查看</a></div>
+                        <div><strong>增强视频URL：</strong>${task.video_url ? `<a href="${escapeHtml(task.video_url)}" target="_blank" style="color:#9ed0ff;">查看</a>` : '-'}</div>
+                        <div><strong>创建时间：</strong>${escapeHtml(task.created_at || '-')}</div>
+                        <div><strong>更新时间：</strong>${escapeHtml(task.updated_at || '-')}</div>
+                        <div><strong>失败原因：</strong>${escapeHtml(task.fail_reason || '-')}</div>
+                    </div>
+                </div>
+                <div class="detail-card">
+                    <div style="font-weight:600; margin-bottom: 8px;">请求参数</div>
+                    <pre>${escapeHtml(JSON.stringify(requestPayload, null, 2) || '{}')}</pre>
+                </div>
+                <div class="detail-card">
+                    <div style="font-weight:600; margin-bottom: 8px;">远端响应</div>
+                    <pre>${escapeHtml(JSON.stringify(remotePayload, null, 2) || '{}')}</pre>
+                </div>
+            `;
+        }
+
+        async function fetchTask(taskId) {
+            const decodedTaskId = decodeURIComponent(taskId);
+            const resp = await fetch(`/api/video-enhance/tasks/${encodeURIComponent(decodedTaskId)}`);
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                throw new Error(data.error || '任务不存在或加载失败');
+            }
+            return data.task || {};
+        }
+
+        function openPreviewModal(task) {
+            if (!task.video_url) {
+                alert('当前任务还没有可预览的视频结果');
+                return false;
+            }
+            const modal = document.getElementById('previewModal');
+            const video = document.getElementById('previewVideo');
+            document.getElementById('previewTitle').textContent = `视频预览 / ${task.output_filename || task.task_id || '-'}`;
+            video.src = task.video_url;
+            video.poster = task.cover_url || '';
+            modal.style.display = 'flex';
+            return true;
+        }
+
+        function closePreviewModal() {
+            const modal = document.getElementById('previewModal');
+            const video = document.getElementById('previewVideo');
+            video.pause();
+            video.removeAttribute('src');
+            video.removeAttribute('poster');
+            modal.style.display = 'none';
+        }
+
+        async function viewTask(taskId) {
+            const decodedTaskId = decodeURIComponent(taskId);
+            if (currentTaskId === decodedTaskId && detailExpanded) {
+                collapseDetails();
+                await loadTasks(currentPage);
+                return;
+            }
+
+            try {
+                const task = await fetchTask(taskId);
+                currentTaskId = decodedTaskId;
+                detailExpanded = true;
+                document.getElementById('detailBox').innerHTML = renderDetails(task);
+                await loadTasks(currentPage);
+            } catch (error) {
+                collapseDetails(error.message || '任务不存在或加载失败。');
+            }
+        }
+
+        async function previewTask(taskId) {
+            const decodedTaskId = decodeURIComponent(taskId);
+            let task = currentItems.find((item) => item.task_id === decodedTaskId);
+            if (!task || !task.video_url) {
+                try {
+                    task = await fetchTask(taskId);
+                } catch (error) {
+                    alert(error.message || '预览失败');
+                    return;
+                }
+            }
+            openPreviewModal(task);
+        }
+
+        function downloadTask(taskId) {
+            const decodedTaskId = decodeURIComponent(taskId);
+            const task = currentItems.find((item) => item.task_id === decodedTaskId);
+            const filename = (task && (task.download_filename || task.output_filename)) || `${decodedTaskId}.mp4`;
+            const link = document.createElement('a');
+            link.href = `/api/video-enhance/tasks/${encodeURIComponent(decodedTaskId)}/download`;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        }
+
+        async function refreshTask(taskId) {
+            const decodedTaskId = decodeURIComponent(taskId);
+            const resp = await fetch(`/api/video-enhance/tasks/${encodeURIComponent(decodedTaskId)}/refresh`, { method: 'POST' });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                alert(data.error || '刷新失败');
+                return;
+            }
+            await loadTasks(currentPage);
+            if (currentTaskId === decodedTaskId) {
+                document.getElementById('detailBox').innerHTML = renderDetails(data.task);
+            }
+        }
+
+        async function deleteTask(taskId) {
+            const decodedTaskId = decodeURIComponent(taskId);
+            const task = currentItems.find((item) => item.task_id === decodedTaskId);
+            if (task && !canDelete(task)) {
+                return;
+            }
+            if (!confirm('确认删除这个任务吗？')) return;
+            const resp = await fetch(`/api/video-enhance/tasks/${encodeURIComponent(decodedTaskId)}`, { method: 'DELETE' });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                alert(data.error || '删除失败');
+                return;
+            }
+            if (currentTaskId === decodedTaskId) collapseDetails('任务已删除。');
+            await loadTasks(currentPage);
+        }
+
+        function resetFilters() {
+            document.getElementById('search').value = '';
+            document.getElementById('status').value = '';
+            document.getElementById('startDate').value = '';
+            document.getElementById('endDate').value = '';
+            currentPage = 1;
+            loadTasks(1);
+        }
+
+        function setupAutoRefresh() {
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
+            }
+            if (!document.getElementById('autoRefresh').checked) return;
+            autoRefreshTimer = setInterval(() => {
+                const hasPending = currentItems.some((item) => !TERMINAL_STATUSES.includes(String(item.status || '').toLowerCase()));
+                if (hasPending) {
+                    loadTasks(currentPage);
+                }
+            }, AUTO_REFRESH_MS);
+        }
+
+        document.getElementById('reloadBtn').addEventListener('click', () => loadTasks(1));
+        document.getElementById('resetBtn').addEventListener('click', resetFilters);
+        document.getElementById('search').addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') loadTasks(1);
+        });
+        document.getElementById('status').addEventListener('change', () => loadTasks(1));
+        document.getElementById('startDate').addEventListener('change', () => loadTasks(1));
+        document.getElementById('endDate').addEventListener('change', () => loadTasks(1));
+        document.getElementById('autoRefresh').addEventListener('change', setupAutoRefresh);
+        document.getElementById('prevPageBtn').addEventListener('click', () => {
+            if (currentPage > 1) loadTasks(currentPage - 1);
+        });
+        document.getElementById('nextPageBtn').addEventListener('click', () => {
+            const totalPages = Math.max(1, Math.ceil(currentTotal / PAGE_SIZE));
+            if (currentPage < totalPages) loadTasks(currentPage + 1);
+        });
+        document.getElementById('closePreviewBtn').addEventListener('click', closePreviewModal);
+        document.getElementById('previewModal').addEventListener('click', (event) => {
+            if (event.target === event.currentTarget) {
+                closePreviewModal();
+            }
+        });
+
+        loadTasks(1);
+        setupAutoRefresh();
+    </script>
+</body>
+</html>

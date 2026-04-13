@@ -39,6 +39,9 @@ from app.api.tools import tools_bp
 # 视频生成
 from app.api.video import video_bp
 
+# 视频画质增强
+from app.api.video_enhance import video_enhance_bp
+
 __all__ = [
     "auth_bp",
     "projects_bp",
@@ -51,4 +54,5 @@ __all__ = [
     "storyboard_bp",
     "tools_bp",
     "content_bp",
+    "video_enhance_bp",
 ]

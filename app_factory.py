@@ -35,6 +35,7 @@ try:
         storyboard_bp,
         tools_bp,
         video_bp,
+        video_enhance_bp,
     )
     from app.config import config
     from app.decorators import login_required
@@ -158,6 +159,7 @@ def create_app(config_name: str | None = None) -> Flask:
     app.register_blueprint(admin_bp)
     app.register_blueprint(image_bp)
     app.register_blueprint(omni_video_bp)
+    app.register_blueprint(video_enhance_bp)
     app.register_blueprint(batch_bp)
     app.register_blueprint(video_bp)
     app.register_blueprint(script_bp)

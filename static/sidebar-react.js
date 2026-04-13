@@ -43,6 +43,7 @@
             { key: 'video_tasks', href: '/video-tasks', icon: '📹', label: '视频任务' },
             { key: 'omni_video', href: '/omni-video', icon: '🎥', label: '全能视频' },
             { key: 'omni_video_tasks', href: '/omni-video-tasks', icon: '🗂️', label: '全能任务' },
+            { key: 'enhance_tasks', href: '/enhance-tasks', icon: '✨', label: '增强任务' },
             { key: 'script_generate', href: '/script-generate', icon: '📝', label: '剧本生成' },
             { key: 'storyboard_studio', href: '/storyboard-studio', icon: '🧩', label: '分镜制作' },
             { key: 'txt2csv', href: '/txt2csv', icon: '🔁', label: '转换工具' },

@@ -113,6 +113,28 @@
         </div>
     </div>
 
+    <div id="enhanceModal" class="preview-modal" style="display:none;">
+        <div class="preview-inner" style="width:min(500px, 92vw);">
+            <div class="preview-header">
+                <div id="enhanceModalTitle" style="font-weight:600;">画质增强</div>
+                <button class="btn btn-secondary" id="enhanceModalClose">关闭</button>
+            </div>
+            <div style="padding:12px 0;">
+                <div class="small-hint" style="margin-bottom:12px;">原视频：<span id="enhanceSourceFilename"></span></div>
+                <div>
+                    <label for="enhanceResolution" style="display:block;margin-bottom:6px;">目标分辨率</label>
+                    <select id="enhanceResolution" style="width:100%;padding:8px;border-radius:8px;">
+                        <option value="720p">720p</option>
+                        <option value="1080p" selected>1080p（推荐）</option>
+                        <option value="2k">2K</option>
+                        <option value="4k">4K</option>
+                    </select>
+                </div>
+                <button id="submitEnhanceBtn" class="btn btn-primary" style="width:100%;margin-top:16px;">开始增强</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/sidebar-nav.js"></script>
     <script src="/static/sidebar-shared.js"></script>
     <script>
@@ -230,11 +252,7 @@
                 button.addEventListener('click', () => addToImageMaterial(button.getAttribute('data-add-material')));
             });
             grid.querySelectorAll('[data-enhance]').forEach((button) => {
-                button.addEventListener('click', () => {
-                    const asset = allAssets.find((item) => String(item.id) === String(button.getAttribute('data-enhance')));
-                    if (!asset) return;
-                    alert(`已为“${asset.filename || '该视频'}”预留画质增强入口，后续功能接入后可直接使用。`);
-                });
+                button.addEventListener('click', () => openEnhanceModal(button.getAttribute('data-enhance')));
             });
             grid.querySelectorAll('[data-download]').forEach((button) => {
                 button.addEventListener('click', () => downloadAsset(button.getAttribute('data-download')));
@@ -425,6 +443,62 @@
             if (event.key === 'ArrowLeft') navigatePreview(-1);
             if (event.key === 'ArrowRight') navigatePreview(1);
         });
+
+        // 画质增强弹窗相关
+        let currentEnhanceAsset = null;
+
+        function openEnhanceModal(assetId) {
+            const asset = allAssets.find((item) => String(item.id) === String(assetId));
+            if (!asset) return;
+            currentEnhanceAsset = asset;
+            document.getElementById('enhanceSourceFilename').textContent = asset.filename || '-';
+            document.getElementById('enhanceResolution').value = '1080p';
+            document.getElementById('enhanceModal').style.display = 'flex';
+        }
+
+        function closeEnhanceModal() {
+            document.getElementById('enhanceModal').style.display = 'none';
+            currentEnhanceAsset = null;
+        }
+
+        async function submitEnhance() {
+            if (!currentEnhanceAsset) return;
+            const resolution = document.getElementById('enhanceResolution').value;
+            const submitBtn = document.getElementById('submitEnhanceBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = '提交中...';
+
+            try {
+                const resp = await fetch('/api/video-enhance/tasks', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        source_video_url: currentEnhanceAsset.url,
+                        source_video_id: currentEnhanceAsset.id,
+                        source_filename: currentEnhanceAsset.filename,
+                        resolution: resolution
+                    })
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data.success) {
+                    alert(data.error || '画质增强任务创建失败');
+                    return;
+                }
+                alert(`画质增强任务已创建，任务ID: ${data.task_id}\n请前往"增强任务"页面查看进度。`);
+                closeEnhanceModal();
+            } catch (error) {
+                alert('提交失败: ' + error.message);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = '开始增强';
+            }
+        }
+
+        document.getElementById('enhanceModalClose').addEventListener('click', closeEnhanceModal);
+        document.getElementById('enhanceModal').addEventListener('click', (event) => {
+            if (event.target === event.currentTarget) closeEnhanceModal();
+        });
+        document.getElementById('submitEnhanceBtn').addEventListener('click', submitEnhance);
 
         renderTabs();
         updateUploadAccept();

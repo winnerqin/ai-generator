@@ -59,6 +59,12 @@ class Config:
     SEEDANCE_OMNI_LIST_PATH: str = "/contents/generations/tasks"
     SEEDANCE_OMNI_CANCEL_PATH: str = "/contents/generations/tasks/{task_id}"
 
+    # ==================== 视频画质增强配置 ====================
+    VIDEO_ENHANCE_API_KEY: str = ""
+    VIDEO_ENHANCE_BASE_URL: str = "https://amk.cn-beijing.volces.com/api/v1"
+    VIDEO_ENHANCE_CREATE_PATH: str = "/tools/enhance-video"
+    VIDEO_ENHANCE_QUERY_PATH: str = "/tasks/{task_id}"
+
     # ==================== 脚本/分镜配置 ====================
     SCRIPT_MAX_LENGTH: int = 50000
     STORYBOARD_MAX_LENGTH: int = 100000
@@ -138,6 +144,20 @@ class Config:
             "SEEDANCE_OMNI_CANCEL_PATH", self.SEEDANCE_OMNI_CANCEL_PATH
         )
 
+        # 视频画质增强配置
+        self.VIDEO_ENHANCE_API_KEY = os.environ.get(
+            "VIDEO_ENHANCE_API_KEY", self.VIDEO_ENHANCE_API_KEY
+        )
+        self.VIDEO_ENHANCE_BASE_URL = os.environ.get(
+            "VIDEO_ENHANCE_BASE_URL", self.VIDEO_ENHANCE_BASE_URL
+        )
+        self.VIDEO_ENHANCE_CREATE_PATH = os.environ.get(
+            "VIDEO_ENHANCE_CREATE_PATH", self.VIDEO_ENHANCE_CREATE_PATH
+        )
+        self.VIDEO_ENHANCE_QUERY_PATH = os.environ.get(
+            "VIDEO_ENHANCE_QUERY_PATH", self.VIDEO_ENHANCE_QUERY_PATH
+        )
+
         # 日志配置
         self.LOG_LEVEL = os.environ.get("LOG_LEVEL", self.LOG_LEVEL)
 
@@ -171,6 +191,10 @@ class Config:
     def is_seedance_omni_configured(self) -> bool:
         """检查是否配置了 Seedance 2.0 全能视频接口。"""
         return bool(self.ARK_API_KEY and self.ARK_BASE_URL and self.SEEDANCE_OMNI_MODEL)
+
+    def is_video_enhance_configured(self) -> bool:
+        """检查是否配置了视频画质增强接口。"""
+        return bool(self.VIDEO_ENHANCE_API_KEY and self.VIDEO_ENHANCE_BASE_URL)
 
 
 # 全局配置实例
