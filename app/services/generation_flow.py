@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Iterable, Optional
 
 import requests
@@ -16,11 +17,25 @@ from app.services.generation_client import (
 from app.services.generation_config import GenerationRequest, normalize_seed, resolve_dimensions
 from app.services.generation_storage import save_generated_image
 
+logger = logging.getLogger(__name__)
+
 
 def stream_generated_images(
     generation_request: GenerationRequest,
     image_urls: list[str],
 ) -> Iterable[dict[str, Any]]:
+    logger.info(
+        "[image-gen][task][start] user_id=%s project_id=%s generate_mode=%s num_images=%s aspect_ratio=%s resolution=%s seed=%s prompt=%s image_urls=%s",
+        generation_request.user_id,
+        generation_request.project_id,
+        generation_request.generate_mode,
+        generation_request.num_images,
+        generation_request.aspect_ratio,
+        generation_request.resolution,
+        generation_request.seed,
+        generation_request.prompt,
+        image_urls,
+    )
     client = create_generation_client()
     width, height = resolve_dimensions(
         generation_request.aspect_ratio, generation_request.resolution
@@ -56,7 +71,38 @@ def stream_generated_images(
 
             images = response.data if use_group_images else [response.data[0]]
             for group_index, image_data in enumerate(images):
-                download = requests.get(image_data.url, timeout=60)
+                logger.info(
+                    "[image-gen][download][request] index=%s group_index=%s url=%s timeout=%s",
+                    index + 1,
+                    group_index if use_group_images else None,
+                    image_data.url,
+                    60,
+                )
+                try:
+                    download = requests.get(image_data.url, timeout=60)
+                except requests.RequestException as exc:
+                    logger.exception(
+                        "[image-gen][download][error] index=%s group_index=%s url=%s error=%s",
+                        index + 1,
+                        group_index if use_group_images else None,
+                        image_data.url,
+                        str(exc),
+                    )
+                    yield {
+                        "type": "error",
+                        "index": index * 4 + group_index if use_group_images else index,
+                        "error": f"Image download failed: {exc}",
+                    }
+                    continue
+                logger.info(
+                    "[image-gen][download][response] index=%s group_index=%s url=%s status=%s headers=%s content_length=%s",
+                    index + 1,
+                    group_index if use_group_images else None,
+                    image_data.url,
+                    download.status_code,
+                    dict(download.headers),
+                    len(download.content or b""),
+                )
                 if download.status_code != 200:
                     yield {
                         "type": "error",
@@ -88,8 +134,21 @@ def stream_generated_images(
                     **saved,
                 }
         except Exception as exc:
+            logger.exception(
+                "[image-gen][task][error] index=%s user_id=%s project_id=%s error=%s",
+                index + 1,
+                generation_request.user_id,
+                generation_request.project_id,
+                str(exc),
+            )
             yield {"type": "error", "index": index + 1, "error": str(exc)}
 
+    logger.info(
+        "[image-gen][task][complete] user_id=%s project_id=%s generated_total=%s",
+        generation_request.user_id,
+        generation_request.project_id,
+        generated_count,
+    )
     yield {"type": "complete", "total": generated_count}
 
 

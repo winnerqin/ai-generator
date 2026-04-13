@@ -196,22 +196,36 @@
             const regenerateImage = (record) => {
                 const sampleImages = record.sample_images || [];
                 const sample_image_urls = sampleImages.map(s => (typeof s === 'string' ? s : s?.url)).filter(Boolean);
+                const parsedNumImages = Number(record.num_images);
                 const data = {
                     prompt: record.prompt || '',
                     aspect_ratio: record.aspect_ratio || '9:16',
                     resolution: (record.resolution || '2k').toLowerCase(),
-                    generate_mode: 'single',
+                    generate_mode: record.generate_mode || 'single',
+                    num_images: Number.isFinite(parsedNumImages) && parsedNumImages > 0 ? parsedNumImages : 4,
+                    image_style: record.image_style || '',
+                    output_filename: record.filename || '',
                     seed: record.seed != null ? record.seed : 0,
                     sample_image_urls,
                     timestamp: Date.now()
                 };
                 try {
+                    sessionStorage.setItem('regenerateData', JSON.stringify(data));
                     localStorage.setItem('regenerateData', JSON.stringify(data));
                 } catch (e) {
                     alert('无法保存参数，请重试');
                     return;
                 }
-                window.location.href = '/';
+                const params = new URLSearchParams();
+                params.set('rg_prompt', data.prompt || '');
+                params.set('rg_aspect_ratio', data.aspect_ratio || '');
+                params.set('rg_resolution', data.resolution || '');
+                params.set('rg_generate_mode', data.generate_mode || '');
+                params.set('rg_num_images', String(data.num_images ?? ''));
+                params.set('rg_image_style', data.image_style || '');
+                params.set('rg_output_filename', data.output_filename || '');
+                params.set('rg_seed', String(data.seed ?? ''));
+                window.location.href = `/?${params.toString()}`;
             };
 
             const addToLibrary = async (record, type) => {

@@ -89,6 +89,15 @@ class OmniVideoClient:
         )
         raise ValueError(f"Seedance {action} 请求超时，请稍后重试。") from exc
 
+    def _raise_request_error(self, action: str, exc: requests.RequestException, **context: Any) -> None:
+        logger.exception(
+            "[omni-video][%s][request-error] context=%s error=%s",
+            action,
+            json.dumps(context, ensure_ascii=False, default=str),
+            str(exc),
+        )
+        raise ValueError(f"Seedance {action} 请求失败，请稍后重试。") from exc
+
     def create_task(self, payload: dict[str, Any]) -> dict[str, Any]:
         url = self._url(self.create_path)
         headers = self._headers()
@@ -110,6 +119,8 @@ class OmniVideoClient:
             )
         except requests.Timeout as exc:
             self._raise_timeout("create_task", exc, payload=payload)
+        except requests.RequestException as exc:
+            self._raise_request_error("create_task", exc, payload=payload, url=url)
         self._log_response("create_task", response)
         try:
             response.raise_for_status()
@@ -146,6 +157,8 @@ class OmniVideoClient:
             )
         except requests.Timeout as exc:
             self._raise_timeout("get_task", exc, task_id=task_id)
+        except requests.RequestException as exc:
+            self._raise_request_error("get_task", exc, task_id=task_id, url=url)
         self._log_response("get_task", response)
         try:
             response.raise_for_status()
@@ -184,6 +197,15 @@ class OmniVideoClient:
             )
         except requests.Timeout as exc:
             self._raise_timeout("list_tasks", exc, page=page, page_size=page_size)
+        except requests.RequestException as exc:
+            self._raise_request_error(
+                "list_tasks",
+                exc,
+                page=page,
+                page_size=page_size,
+                url=url,
+                params=params,
+            )
         self._log_response("list_tasks", response)
         try:
             response.raise_for_status()
@@ -223,6 +245,8 @@ class OmniVideoClient:
             )
         except requests.Timeout as exc:
             self._raise_timeout("cancel_task", exc, task_id=task_id)
+        except requests.RequestException as exc:
+            self._raise_request_error("cancel_task", exc, task_id=task_id, payload=payload, url=url)
         self._log_response("cancel_task", response)
         try:
             response.raise_for_status()

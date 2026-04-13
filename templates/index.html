@@ -388,10 +388,48 @@
             // 从生图任务「重新生成」跳转时恢复参数（与 localStorage regenerateData 约定一致）
             useEffect(() => {
                 try {
-                    const raw = localStorage.getItem('regenerateData');
-                    if (!raw) return;
-                    const data = JSON.parse(raw);
+                    const searchParams = new URLSearchParams(window.location.search);
+                    const hasQueryPrefill = searchParams.has('rg_prompt')
+                        || searchParams.has('rg_aspect_ratio')
+                        || searchParams.has('rg_resolution')
+                        || searchParams.has('rg_generate_mode')
+                        || searchParams.has('rg_num_images')
+                        || searchParams.has('rg_image_style')
+                        || searchParams.has('rg_output_filename')
+                        || searchParams.has('rg_seed');
+                    const data = hasQueryPrefill
+                        ? (() => {
+                            const base = {
+                            prompt: searchParams.get('rg_prompt') || '',
+                            aspect_ratio: searchParams.get('rg_aspect_ratio') || '',
+                            resolution: searchParams.get('rg_resolution') || '',
+                            generate_mode: searchParams.get('rg_generate_mode') || '',
+                            num_images: searchParams.get('rg_num_images'),
+                            image_style: searchParams.get('rg_image_style') || '',
+                            output_filename: searchParams.get('rg_output_filename') || '',
+                            seed: searchParams.get('rg_seed'),
+                            };
+                            const rawFallback = sessionStorage.getItem('regenerateData')
+                                || localStorage.getItem('regenerateData');
+                            if (rawFallback) {
+                                try {
+                                    const fallbackData = JSON.parse(rawFallback);
+                                    if (Array.isArray(fallbackData.sample_image_urls)) {
+                                        base.sample_image_urls = fallbackData.sample_image_urls;
+                                    }
+                                } catch (ignore) {}
+                            }
+                            return base;
+                        })()
+                        : (() => {
+                            const raw = sessionStorage.getItem('regenerateData')
+                                || localStorage.getItem('regenerateData');
+                            if (!raw) return null;
+                            return JSON.parse(raw);
+                        })();
+                    if (!data) return;
                     if (data.timestamp && Date.now() - data.timestamp > 5 * 60 * 1000) {
+                        sessionStorage.removeItem('regenerateData');
                         localStorage.removeItem('regenerateData');
                         return;
                     }
@@ -399,12 +437,26 @@
                     if (data.aspect_ratio) setAspectRatio(data.aspect_ratio);
                     if (data.resolution) setResolution(String(data.resolution).toLowerCase() === '4k' ? '4k' : '2k');
                     if (data.generate_mode) setGenerateMode(data.generate_mode);
+                    if (data.num_images != null) {
+                        const nextNum = Number(data.num_images);
+                        if (Number.isFinite(nextNum) && nextNum >= 1 && nextNum <= 20) {
+                            setNumImages(nextNum);
+                        }
+                    }
+                    if (data.image_style != null) setImageStyle(String(data.image_style || ''));
+                    if (data.output_filename != null) setOutputFilename(String(data.output_filename || ''));
                     if (data.seed != null) setSeed(Number(data.seed));
                     if (Array.isArray(data.sample_image_urls) && data.sample_image_urls.length > 0) {
                         setSelectedSample(data.sample_image_urls.slice(0, 4));
                     }
+                    if (hasQueryPrefill) {
+                        const cleanUrl = `${window.location.pathname}${window.location.hash || ''}`;
+                        window.history.replaceState({}, '', cleanUrl);
+                    }
+                    sessionStorage.removeItem('regenerateData');
                     localStorage.removeItem('regenerateData');
                 } catch (e) {
+                    sessionStorage.removeItem('regenerateData');
                     localStorage.removeItem('regenerateData');
                 }
             }, []);
@@ -1722,6 +1774,10 @@
         // 保存表单数据到localStorage
         function saveFormData() {
             try {
+                const requiredIds = ['prompt', 'aspect_ratio', 'resolution', 'generate_mode', 'num_images', 'image_style', 'seed', 'output_filename'];
+                const hasLegacyForm = requiredIds.every(id => !!document.getElementById(id));
+                if (!hasLegacyForm) return;
+
                 const formData = {
                     prompt: document.getElementById('prompt').value,
                     aspect_ratio: document.getElementById('aspect_ratio').value,
@@ -1741,8 +1797,35 @@
         // 恢复表单数据
         function loadFormData() {
             try {
+                const requiredIds = ['prompt', 'aspect_ratio', 'resolution', 'generate_mode', 'num_images', 'image_style', 'seed', 'output_filename'];
+                const hasLegacyForm = requiredIds.every(id => !!document.getElementById(id));
+                if (!hasLegacyForm) return;
+                const query = new URLSearchParams(window.location.search);
+                const hasQueryPrefill = query.has('rg_prompt')
+                    || query.has('rg_aspect_ratio')
+                    || query.has('rg_resolution')
+                    || query.has('rg_generate_mode')
+                    || query.has('rg_num_images')
+                    || query.has('rg_image_style')
+                    || query.has('rg_output_filename')
+                    || query.has('rg_seed');
+                if (hasQueryPrefill) {
+                    document.getElementById('prompt').value = query.get('rg_prompt') || '';
+                    document.getElementById('aspect_ratio').value = query.get('rg_aspect_ratio') || '9:16';
+                    document.getElementById('resolution').value = (query.get('rg_resolution') || '2k').toLowerCase().includes('4') ? '4k' : '2k';
+                    document.getElementById('generate_mode').value = query.get('rg_generate_mode') || 'single';
+                    const queryNum = Number(query.get('rg_num_images'));
+                    document.getElementById('num_images').value = (Number.isFinite(queryNum) && queryNum >= 1 && queryNum <= 20) ? String(queryNum) : '4';
+                    document.getElementById('image_style').value = query.get('rg_image_style') || '';
+                    document.getElementById('output_filename').value = query.get('rg_output_filename') || '';
+                    const querySeed = Number(query.get('rg_seed'));
+                    document.getElementById('seed').value = Number.isFinite(querySeed) ? String(querySeed) : '0';
+                    const cleanUrl = `${window.location.pathname}${window.location.hash || ''}`;
+                    window.history.replaceState({}, '', cleanUrl);
+                    return;
+                }
                 // 优先检查是否有重新生成数据
-                const regenerateData = localStorage.getItem('regenerateData');
+                const regenerateData = sessionStorage.getItem('regenerateData') || localStorage.getItem('regenerateData');
                 if (regenerateData) {
                     try {
                         const data = JSON.parse(regenerateData);
@@ -1756,6 +1839,27 @@
                             }
                             if (data.aspect_ratio) {
                                 document.getElementById('aspect_ratio').value = data.aspect_ratio;
+                            }
+                            if (data.generate_mode) {
+                                document.getElementById('generate_mode').value = data.generate_mode;
+                            }
+                            if (data.num_images != null) {
+                                const nextNum = Number(data.num_images);
+                                if (Number.isFinite(nextNum) && nextNum >= 1 && nextNum <= 20) {
+                                    document.getElementById('num_images').value = String(nextNum);
+                                }
+                            }
+                            if (data.image_style != null) {
+                                document.getElementById('image_style').value = String(data.image_style || '');
+                            }
+                            if (data.output_filename != null) {
+                                document.getElementById('output_filename').value = String(data.output_filename || '');
+                            }
+                            if (data.seed != null) {
+                                const nextSeed = Number(data.seed);
+                                if (Number.isFinite(nextSeed)) {
+                                    document.getElementById('seed').value = String(nextSeed);
+                                }
                             }
                             if (data.resolution) {
                                 // 统一处理分辨率格式：转换为小写
@@ -1789,6 +1893,7 @@
                             }
                             
                             // 清除重新生成数据，避免重复使用
+                            sessionStorage.removeItem('regenerateData');
                             localStorage.removeItem('regenerateData');
                             
                             // 显示提示
@@ -1803,10 +1908,12 @@
                             return; // 使用重新生成数据，不再加载普通缓存
                         } else {
                             // 数据过期，清除
+                            sessionStorage.removeItem('regenerateData');
                             localStorage.removeItem('regenerateData');
                         }
                     } catch (e) {
                         console.error('解析重新生成数据失败:', e);
+                        sessionStorage.removeItem('regenerateData');
                         localStorage.removeItem('regenerateData');
                     }
                 }
@@ -3482,7 +3589,7 @@
             loadImageStyles();
             
             // 检查是否有重新生成数据
-            const regenerateData = localStorage.getItem('regenerateData');
+            const regenerateData = sessionStorage.getItem('regenerateData') || localStorage.getItem('regenerateData');
             let hasRegenerateData = false;
             if (regenerateData) {
                 try {

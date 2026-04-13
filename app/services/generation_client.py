@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
 
 from openai import OpenAI
 
 from app.services.generation_config import DEFAULT_ARK_BASE_URL, MODEL_NAME
+
+logger = logging.getLogger(__name__)
+
+
+def _to_log_text(payload: Any, max_len: int = 8000) -> str:
+    try:
+        text = json.dumps(payload, ensure_ascii=False, default=str)
+    except Exception:
+        text = str(payload)
+    if len(text) > max_len:
+        return f"{text[:max_len]}...<truncated {len(text) - max_len} chars>"
+    return text
 
 
 def create_generation_client() -> OpenAI:
@@ -62,10 +75,43 @@ def request_images(
     generate_mode: str,
     image_urls: list[str],
 ):
-    return client.images.generate(
-        model=MODEL_NAME,
-        prompt=prompt,
-        size=f"{width}x{height}",
-        response_format="url",
-        extra_body=build_extra_body(generate_mode, image_urls),
+    extra_body = build_extra_body(generate_mode, image_urls)
+    request_payload = {
+        "model": MODEL_NAME,
+        "prompt": prompt,
+        "size": f"{width}x{height}",
+        "response_format": "url",
+        "extra_body": extra_body,
+    }
+    logger.info("[image-gen][remote][request] payload=%s", _to_log_text(request_payload))
+
+    try:
+        response = client.images.generate(
+            model=MODEL_NAME,
+            prompt=prompt,
+            size=f"{width}x{height}",
+            response_format="url",
+            extra_body=extra_body,
+        )
+    except Exception as exc:
+        logger.exception(
+            "[image-gen][remote][error] request=%s error=%s",
+            _to_log_text(request_payload),
+            str(exc),
+        )
+        raise
+
+    response_items = []
+    for item in getattr(response, "data", []) or []:
+        response_items.append(
+            {
+                "url": getattr(item, "url", None),
+                "revised_prompt": getattr(item, "revised_prompt", None),
+            }
+        )
+    logger.info(
+        "[image-gen][remote][response] data_count=%s response=%s",
+        len(response_items),
+        _to_log_text({"data": response_items}),
     )
+    return response
