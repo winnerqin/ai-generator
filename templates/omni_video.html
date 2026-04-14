@@ -56,6 +56,8 @@
         @media (max-width: 960px) {
             .grid { grid-template-columns: 1fr; }
             .field-row { grid-template-columns: 1fr; }
+            .asset-upload-row { grid-template-columns: 1fr; }
+            .asset-upload-row > div:last-child { padding-left: 0; border-left: none; margin-top: 16px; }
         }
     </style>
 </head>
@@ -158,16 +160,29 @@
                 </div>
 
                 <div class="panel">
-                    <div style="font-weight: 600; margin-bottom: 10px;">素材上传与选择</div>
-                    <div class="upload-box" id="uploadBox">
-                        点击上传图片、音频或视频素材。上传后会自动同步到 OSS，并按类型进入对应素材库。
-                        <input id="uploadInput" type="file" accept="image/*,audio/*,video/*" multiple style="display:none;">
+                    <div class="asset-upload-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                        <div>
+                            <div style="font-weight: 600; margin-bottom: 10px;">素材上传与选择</div>
+                            <div class="upload-box" id="uploadBox">
+                                点击上传图片、音频或视频素材。上传后会自动同步到 OSS，并按类型进入对应素材库。
+                                <input id="uploadInput" type="file" accept="image/*,audio/*,video/*" multiple style="display:none;">
+                            </div>
+                            <div class="picker-actions">
+                                <button id="openImagePickerBtn" class="btn btn-secondary">选择图片素材</button>
+                                <button id="openMediaPickerBtn" class="btn btn-secondary">选择音/视频素材</button>
+                            </div>
+                            <div class="small-hint" style="margin-top: 10px;">默认不展开素材列表。点击按钮后会弹出素材选择框，支持多选。</div>
+                        </div>
+                        <div style="padding-left: 16px; border-left: 1px solid rgba(86,111,255,0.2);">
+                            <div style="font-weight: 600; margin-bottom: 10px;">虚拟人像</div>
+                            <div class="small-hint" style="margin-bottom: 8px;">输入虚拟人像ID，点击添加后会作为图片显示在参考素材中。</div>
+                            <div style="display: flex; gap: 10px;">
+                                <input id="virtualAvatarInput" type="text" placeholder="asset-20260310030618-88hlb" style="flex: 1;">
+                                <button id="addVirtualAvatarBtn" class="btn btn-secondary">添加</button>
+                            </div>
+                            <div class="small-hint" style="margin-top: 8px;">ID格式：asset-20260310030618-88hlb</div>
+                        </div>
                     </div>
-                    <div class="picker-actions">
-                        <button id="openImagePickerBtn" class="btn btn-secondary">选择图片素材</button>
-                        <button id="openMediaPickerBtn" class="btn btn-secondary">选择音/视频素材</button>
-                    </div>
-                    <div class="small-hint" style="margin-top: 10px;">默认不展开素材列表。点击按钮后会弹出素材选择框，支持多选。</div>
                 </div>
             </div>
 
@@ -236,6 +251,7 @@
         const pickerConfigs = {
             image_material: { label: '图片素材', max: 9, hint: '可从原人物/场景素材中多选，最多 9 个。' },
             media: { label: '音/视频素材', max: 3, hint: '可选择音频或视频素材，最多 3 个。' },
+            virtual_avatar: { label: '虚拟人像', max: 9, hint: '虚拟人像作为图片素材，最多 9 个。' },
         };
 
         let currentPickerType = null;
@@ -255,6 +271,10 @@
 
         function isAudioAsset(asset) {
             return asset.type === 'audio' || /\.(mp3|wav|m4a|aac|ogg)$/i.test(asset.url || '');
+        }
+
+        function isVirtualAvatarAsset(asset) {
+            return asset.type === 'virtual_avatar' || (asset.url && asset.url.startsWith('asset://'));
         }
 
         function renderPickerGrid() {
@@ -288,20 +308,32 @@
         }
 
         function getSelectionKind(asset) {
+            if (isVirtualAvatarAsset(asset)) return 'virtual_avatar';
             return isAudioAsset(asset) || isVideoAsset(asset) ? 'media' : 'image_material';
         }
 
         function getAssetLabel(asset) {
-            const kind = isAudioAsset(asset) ? 'audio' : (isVideoAsset(asset) ? 'video' : 'image');
+            // 图片类型（含虚拟人像）统一按顺序编号
+            const isImageKind = !isAudioAsset(asset) && !isVideoAsset(asset);
+            if (isImageKind) {
+                // 所有图片类型素材统一计数
+                const allImages = selectedAssets.filter((item) => !isAudioAsset(item) && !isVideoAsset(item));
+                const index = allImages.findIndex((item) => item.url === asset.url) + 1;
+                const filename = asset.filename || '';
+                if (isVirtualAvatarAsset(asset)) {
+                    return `图片${index} 虚拟人像`;
+                }
+                return `图片${index}${filename ? ' ' + filename : ''}`;
+            }
+            // 音频和视频单独计数
+            const kind = isAudioAsset(asset) ? 'audio' : 'video';
             const filtered = selectedAssets.filter((item) => {
                 if (kind === 'audio') return isAudioAsset(item);
-                if (kind === 'video') return isVideoAsset(item);
-                return !isAudioAsset(item) && !isVideoAsset(item);
+                return isVideoAsset(item);
             });
             const index = filtered.findIndex((item) => item.url === asset.url) + 1;
             if (kind === 'audio') return `音频${index}`;
-            if (kind === 'video') return `视频${index}`;
-            return `图片${index}`;
+            return `视频${index}`;
         }
 
         function renderSelectedAssets() {
@@ -313,14 +345,16 @@
 
             container.innerHTML = selectedAssets.map((asset, index) => {
                 let preview = `<img src="${asset.url}" alt="${asset.filename || 'asset'}">`;
-                if (isVideoAsset(asset)) preview = `<video src="${asset.url}" preload="metadata"></video>`;
-                if (isAudioAsset(asset)) preview = '<div style="font-size:28px;">♪</div>';
+                if (isVirtualAvatarAsset(asset)) preview = '<div style="font-size:28px;color:#9ed0ff;">👤</div>';
+                else if (isVideoAsset(asset)) preview = `<video src="${asset.url}" preload="metadata"></video>`;
+                else if (isAudioAsset(asset)) preview = '<div style="font-size:28px;">♪</div>';
+                const hintText = isVirtualAvatarAsset(asset) ? `ID: ${asset.filename}` : '双击缩略图可放大预览';
                 return `
                     <div class="selected-item">
-                        <div class="selected-thumb" data-preview-selected="${index}" title="双击放大预览">${preview}</div>
+                        <div class="selected-thumb" data-preview-selected="${index}" title="${isVirtualAvatarAsset(asset) ? '虚拟人像' : '双击放大预览'}">${preview}</div>
                         <div>
                             <div class="selected-label">${getAssetLabel(asset)}</div>
-                            <div class="small-hint">双击缩略图可放大预览</div>
+                            <div class="small-hint">${hintText}</div>
                         </div>
                         <div class="row">
                             <button class="btn btn-danger" data-remove="${index}">移除</button>
@@ -408,7 +442,9 @@
         function openSelectedPreview(asset) {
             document.getElementById('selectedPreviewTitle').textContent = getAssetLabel(asset);
             const body = document.getElementById('selectedPreviewBody');
-            if (isVideoAsset(asset)) {
+            if (isVirtualAvatarAsset(asset)) {
+                body.innerHTML = `<div style="text-align:center;padding:40px;"><div style="font-size:80px;color:#9ed0ff;">👤</div><div style="margin-top:20px;color:#9ed0ff;">虚拟人像</div><div style="margin-top:10px;font-size:0.9rem;color:#aeb8d9;">ID: ${asset.filename}</div></div>`;
+            } else if (isVideoAsset(asset)) {
                 body.innerHTML = `<video controls autoplay src="${asset.url}"></video>`;
             } else if (isAudioAsset(asset)) {
                 body.innerHTML = `<div style="text-align:center;font-size:64px;">♪</div><audio controls autoplay src="${asset.url}"></audio>`;
@@ -440,8 +476,41 @@
             selectedAssets.push(normalized);
         }
 
+        function addVirtualAvatar(assetId) {
+            if (!assetId) return;
+            // 验证格式：asset-20260310030618-88hlb
+            const trimmed = assetId.trim();
+            if (!/^asset-\d{14}-[a-z0-9]{4,6}$/i.test(trimmed)) {
+                alert('虚拟人像ID格式不正确，应为：asset-20260310030618-88hlb');
+                return;
+            }
+            const url = `asset://${trimmed}`;
+            const normalized = {
+                id: `virtual-avatar-${trimmed}`,
+                url: url,
+                filename: trimmed,
+                type: 'virtual_avatar',
+                meta: {},
+            };
+            // 检查是否已存在
+            if (selectedAssets.some((item) => item.url === url)) {
+                alert('该虚拟人像已添加');
+                return;
+            }
+            // 检查数量限制（虚拟人像和普通图片共用9个限制）
+            const imageCount = selectedAssets.filter((item) => !isAudioAsset(item) && !isVideoAsset(item)).length;
+            if (imageCount >= pickerConfigs.image_material.max) {
+                alert(`图片素材（含虚拟人像）最多 ${pickerConfigs.image_material.max} 个`);
+                return;
+            }
+            selectedAssets.push(normalized);
+            renderSelectedAssets();
+            document.getElementById('virtualAvatarInput').value = '';
+        }
+
         function inferAssetTypeFromUrl(url) {
             const value = String(url || '').toLowerCase();
+            if (value.startsWith('asset://')) return 'virtual_avatar';
             if (/\.(mp3|wav|m4a|aac|ogg)(\?|$)/.test(value)) return 'audio';
             if (/\.(mp4|webm|mov|mkv)(\?|$)/.test(value)) return 'video';
             return 'image';
@@ -449,10 +518,15 @@
 
         function buildPrefillAsset(url, index) {
             const type = inferAssetTypeFromUrl(url);
+            let filename = '';
+            // 虚拟人像URL格式: asset://asset-xxx，提取asset ID作为filename
+            if (type === 'virtual_avatar' && url.startsWith('asset://')) {
+                filename = url.replace('asset://', '');
+            }
             return {
                 id: `prefill-${index}`,
                 url,
-                filename: '',
+                filename,
                 type,
                 meta: {},
             };
@@ -618,6 +692,18 @@
         document.getElementById('selectedPreviewModal').addEventListener('click', (event) => {
             if (event.target === event.currentTarget) {
                 closeSelectedPreview();
+            }
+        });
+
+        // 虚拟人像相关事件
+        document.getElementById('addVirtualAvatarBtn').addEventListener('click', () => {
+            const input = document.getElementById('virtualAvatarInput');
+            addVirtualAvatar(input.value);
+        });
+        document.getElementById('virtualAvatarInput').addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                addVirtualAvatar(event.target.value);
             }
         });
 

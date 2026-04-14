@@ -32,12 +32,16 @@ def login():
     )
 
     if not username or not password:
-        return ApiResponse.bad_request("用户名和密码不能为空")
+        if request.is_json:
+            return ApiResponse.bad_request("用户名和密码不能为空")
+        return render_template("login.html", error="用户名和密码不能为空")
 
     # 验证用户
     user = database.verify_user(username, password)
     if not user:
-        return ApiResponse.unauthorized("用户名或密码错误")
+        if request.is_json:
+            return ApiResponse.unauthorized("用户名或密码错误")
+        return render_template("login.html", password_error=True, username=username)
 
     user_id = user.get("id")
 

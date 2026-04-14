@@ -75,6 +75,10 @@ def _resolve_reference_url(
     if not value:
         return value
 
+    # 虚拟人像URL格式 asset://asset-xxx 直接返回，无需转换
+    if value.startswith("asset://"):
+        return value
+
     local_path: Path | None = None
     public_path: str | None = None
     parsed_url = urlparse(value) if value.startswith(("http://", "https://")) else None
@@ -127,6 +131,9 @@ def _coerce_bool(value: Any, default: bool = True) -> bool:
 
 
 def _content_item_for_url(url: str) -> dict[str, Any]:
+    # 虚拟人像URL格式: asset://asset-xxx
+    if url.startswith("asset://"):
+        return {"type": "image_url", "role": "reference_image", "image_url": {"url": url}}
     lower = url.lower()
     if any(lower.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")):
         return {"type": "image_url", "role": "reference_image", "image_url": {"url": url}}

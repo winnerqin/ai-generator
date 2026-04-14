@@ -2,6 +2,8 @@
 管理员 API
 """
 
+from datetime import datetime, timedelta
+
 from flask import Blueprint, jsonify, request, session
 
 import database
@@ -9,6 +11,26 @@ from app.decorators import admin_required, handle_api_error, login_required
 
 # 创建蓝图
 admin_bp = Blueprint("admin", __name__)
+
+
+def calculate_date_range(period, start_date=None, end_date=None):
+    """计算日期范围"""
+    today = datetime.now().date()
+
+    if period == 'day':
+        start = today
+        end = today
+    elif period == 'week':
+        start = today - timedelta(days=6)
+        end = today
+    elif period == 'month':
+        start = today - timedelta(days=29)
+        end = today
+    else:  # custom
+        # start_date 和 end_date 已经是字符串格式
+        return start_date or today.strftime('%Y-%m-%d'), end_date or today.strftime('%Y-%m-%d')
+
+    return start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
 
 
 @admin_bp.route("/admin")
@@ -168,18 +190,28 @@ def revoke_user_from_project(project_id: int):
 @handle_api_error
 def get_stats():
     """获取系统统计信息"""
+    period = request.args.get("period", "week")  # day/week/month/custom
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
 
-    # 获取概览统计
-    overview = database.get_stats_overview()
+    # 计算日期范围
+    start_date, end_date = calculate_date_range(period, start_date, end_date)
+
+    # 获取报表概览统计
+    overview = database.get_report_overview(start_date, end_date)
 
     # 获取用户统计
-    user_stats = database.get_user_stats(start_date, end_date)
+    user_stats = database.get_user_report(start_date, end_date)
 
-    stats = {
-        "overview": overview,
-        "user_stats": user_stats,
-    }
+    # 获取每日统计
+    daily_stats = database.get_daily_report(start_date, end_date)
 
-    return jsonify({"success": True, "data": stats})
+    return jsonify({
+        "success": True,
+        "data": {
+            "period": {"start": start_date, "end": end_date},
+            "overview": overview,
+            "user_stats": user_stats,
+            "daily_stats": daily_stats,
+        }
+    })
