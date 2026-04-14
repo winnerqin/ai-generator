@@ -7,7 +7,11 @@ import logging
 
 import requests
 from flask import Blueprint, jsonify, render_template, request, send_file, session
+import volcenginesdkcore
+import volcenginesdkbilling
+from volcenginesdkcore.rest import ApiException
 
+from app.config import config
 from app.decorators import handle_api_error, login_required
 from app.services.omni_video_service import omni_video_service
 
@@ -250,3 +254,40 @@ def get_omni_video_config():
     configured = omni_video_service.is_configured()
     logger.info("[omni-video][config] configured=%s", configured)
     return jsonify({"success": True, "configured": configured})
+
+
+@omni_video_bp.route("/api/omni-video/balance", methods=["GET"])
+@login_required
+def get_volcengine_balance():
+    """查询火山引擎账户余额"""
+    if not config.is_volcengine_configured():
+        return jsonify({"success": False, "error": "火山引擎配置缺失"}), 400
+
+    try:
+        configuration = volcenginesdkcore.Configuration()
+        configuration.ak = config.VOLCENGINE_AK
+        configuration.sk = config.VOLCENGINE_SK
+        configuration.region = "cn-beijing"
+        volcenginesdkcore.Configuration.set_default(configuration)
+
+        api_instance = volcenginesdkbilling.BILLINGApi()
+        request_body = volcenginesdkbilling.QueryBalanceAcctRequest()
+        result = api_instance.query_balance_acct(request_body)
+
+        # 解析返回结果
+        balance = 0
+        if hasattr(result, "available_balance"):
+            balance = float(result.available_balance) if result.available_balance else 0
+        elif hasattr(result, "balance_amount"):
+            balance = float(result.balance_amount) if result.balance_amount else 0
+        elif hasattr(result, "result") and hasattr(result.result, "available_balance"):
+            balance = float(result.result.available_balance) if result.result.available_balance else 0
+
+        logger.info("[omni-video][balance] balance=%s", balance)
+        return jsonify({"success": True, "available_balance": balance})
+    except ApiException as e:
+        logger.error("[omni-video][balance] API error: %s", e)
+        return jsonify({"success": False, "error": f"API错误: {e}"}), 500
+    except Exception as e:
+        logger.error("[omni-video][balance] error: %s", e)
+        return jsonify({"success": False, "error": f"查询失败: {e}"}), 500

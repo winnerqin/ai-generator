@@ -66,7 +66,14 @@
         <main class="main-content">
             <div class="page-wrap">
 
-        <div class="page-title">全能视频</div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div class="page-title" style="margin-bottom: 0;">全能视频</div>
+            <div id="balanceBar" style="display: flex; align-items: center; gap: 8px; font-size: 0.92rem;">
+                <span style="font-weight: 600;">账户余额：</span>
+                <span id="balanceValue" style="color: #9ed0ff;">加载中...</span>
+                <button id="refreshBalanceBtn" class="btn btn-secondary" style="padding: 2px 8px; font-size: 0.8rem;">刷新</button>
+            </div>
+        </div>
         <div class="page-subtitle">支持模型、分辨率、比例、时长、帧数、声音开关与内容库选材。填写帧数时优先于时长。</div>
 
         <div class="grid">
@@ -617,6 +624,45 @@
         renderSelectedAssets();
         syncDurationState();
         applyRegeneratePrefill();
+
+        // 账户余额查询逻辑
+        const BALANCE_REFRESH_MS = 60 * 60 * 1000; // 1小时
+        let balanceTimer = null;
+
+        function formatBalance(amount) {
+            return `¥${Number(amount || 0).toFixed(2)}`;
+        }
+
+        async function loadBalance() {
+            const valueEl = document.getElementById('balanceValue');
+            const btnEl = document.getElementById('refreshBalanceBtn');
+            try {
+                valueEl.textContent = '查询中...';
+                btnEl.disabled = true;
+                const resp = await fetch('/api/omni-video/balance');
+                const data = await resp.json();
+                if (data.success) {
+                    valueEl.textContent = formatBalance(data.available_balance);
+                } else {
+                    valueEl.textContent = '查询失败';
+                }
+            } catch (error) {
+                valueEl.textContent = '查询失败';
+            } finally {
+                btnEl.disabled = false;
+            }
+        }
+
+        function startBalanceTimer() {
+            if (balanceTimer) {
+                clearInterval(balanceTimer);
+            }
+            balanceTimer = setInterval(loadBalance, BALANCE_REFRESH_MS);
+        }
+
+        document.getElementById('refreshBalanceBtn').addEventListener('click', loadBalance);
+        loadBalance();
+        startBalanceTimer();
     </script>
 </body>
 </html>
