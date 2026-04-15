@@ -233,6 +233,10 @@ def register_remaining_routes(app: Flask) -> None:
             abort(404)
         return send_file(file_path)
 
+    @app.route("/favicon.ico")
+    def favicon():
+        return send_file(Path(app.root_path) / "static" / "favicon.ico")
+
     page_routes = [
         ("/batch", "batch.html", "\u6279\u91cf\u751f\u6210"),
         ("/content-management", "content_management.html", "\u5185\u5bb9\u7ba1\u7406"),
