@@ -99,8 +99,13 @@
                         <div class="field">
                             <label for="model">模型</label>
                             <select id="model">
-                                <option value="doubao-seedance-2-0-260128">doubao-seedance-2-0-260128</option>
-                                <option value="doubao-seedance-2-0-fast-260128">doubao-seedance-2-0-fast-260128</option>
+                                <optgroup label="国内版">
+                                    <option value="doubao-seedance-2-0-260128">doubao-seedance-2-0-260128</option>
+                                    <option value="doubao-seedance-2-0-fast-260128">doubao-seedance-2-0-fast-260128</option>
+                                </optgroup>
+                                <optgroup label="国际版">
+                                    <option value="dreamina-seedance-2-0-260128">dreamina-seedance-2-0-260128</option>
+                                </optgroup>
                             </select>
                         </div>
                         <div class="field">
@@ -312,7 +317,13 @@
             return isAudioAsset(asset) || isVideoAsset(asset) ? 'media' : 'image_material';
         }
 
+        function isIntlModelSelected() {
+            const model = document.getElementById('model').value || '';
+            return model.startsWith('dreamina-');
+        }
+
         function getAssetLabel(asset) {
+            const useEnglish = isIntlModelSelected();
             // 图片类型（含虚拟人像）统一按顺序编号
             const isImageKind = !isAudioAsset(asset) && !isVideoAsset(asset);
             if (isImageKind) {
@@ -321,9 +332,9 @@
                 const index = allImages.findIndex((item) => item.url === asset.url) + 1;
                 const filename = asset.filename || '';
                 if (isVirtualAvatarAsset(asset)) {
-                    return `图片${index} 虚拟人像`;
+                    return useEnglish ? `Image ${index} Virtual Avatar` : `图片${index} 虚拟人像`;
                 }
-                return `图片${index}${filename ? ' ' + filename : ''}`;
+                return useEnglish ? `Image ${index}${filename ? ' ' + filename : ''}` : `图片${index}${filename ? ' ' + filename : ''}`;
             }
             // 音频和视频单独计数
             const kind = isAudioAsset(asset) ? 'audio' : 'video';
@@ -332,8 +343,8 @@
                 return isVideoAsset(item);
             });
             const index = filtered.findIndex((item) => item.url === asset.url) + 1;
-            if (kind === 'audio') return `音频${index}`;
-            return `视频${index}`;
+            if (kind === 'audio') return useEnglish ? `Audio ${index}` : `音频${index}`;
+            return useEnglish ? `Video ${index}` : `视频${index}`;
         }
 
         function renderSelectedAssets() {
@@ -706,6 +717,9 @@
                 addVirtualAvatar(event.target.value);
             }
         });
+
+        // 模型选择变化时重新渲染素材列表，更新素材名称显示
+        document.getElementById('model').addEventListener('change', renderSelectedAssets);
 
         renderSelectedAssets();
         syncDurationState();

@@ -2,24 +2,52 @@
 
 from __future__ import annotations
 
+import logging
+import os
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse, urlunparse
 
+import requests
+
 import database
 from app.config import config
-from app.services.omni_video_client import omni_video_client
+from app.services.omni_video_client import omni_video_client, is_intl_model
 from app.services.oss_service import oss_service
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_OMNI_MODELS = {
     "doubao-seedance-2-0-260128",
     "doubao-seedance-2-0-fast-260128",
+    "dreamina-seedance-2-0-260128",  # 国际版模型
 }
 SUPPORTED_OMNI_RESOLUTIONS = {"480p", "720p"}
 SUPPORTED_OMNI_ASPECT_RATIOS = {"16:9", "9:16", "1:1", "4:3", "3:4"}
 SUCCESS_STATUSES = {"succeeded", "success", "completed", "done", "finished"}
 TERMINAL_STATUSES = SUCCESS_STATUSES | {"failed", "cancelled", "canceled", "expired"}
+
+# URL类型判断
+OSS_URL_PATTERNS = ["oss-cn", "aliyuncs.com"]
+TOS_URL_PATTERNS = ["tos-cn-beijing.volces.com", "tos-cn"]
+
+
+def is_oss_url(url: str) -> bool:
+    """判断是否是阿里云OSS永久URL"""
+    if not url:
+        return False
+    url_lower = url.lower()
+    return any(pattern in url_lower for pattern in OSS_URL_PATTERNS)
+
+
+def is_tos_temp_url(url: str) -> bool:
+    """判断是否是火山引擎TOS临时URL"""
+    if not url:
+        return False
+    url_lower = url.lower()
+    return any(pattern in url_lower for pattern in TOS_URL_PATTERNS)
 
 
 def _normalize_reference_urls(reference_urls: list[str] | None) -> list[str]:
@@ -452,6 +480,58 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
     return task
 
 
+def _download_and_upload_to_oss(
+    video_url: str,
+    filename: str,
+    user_id: int,
+    project_id: int | None,
+) -> str | None:
+    """
+    从远程URL下载视频并上传到OSS，返回OSS永久URL。
+
+    如果OSS不可用或下载失败，返回None，使用原始URL作为fallback。
+    """
+    if not oss_service.is_available():
+        return None
+
+    try:
+        logger.info("[omni-video] Downloading video for OSS upload: url=%s", video_url)
+        response = requests.get(video_url, timeout=120, stream=True)
+        response.raise_for_status()
+
+        temp_dir = tempfile.gettempdir()
+        temp_file = os.path.join(temp_dir, filename)
+
+        with open(temp_file, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+
+        logger.info("[omni-video] Video downloaded to temp: %s", temp_file)
+
+        oss_url = oss_service.upload_file(
+            temp_file,
+            user_id=user_id,
+            project_id=project_id,
+            file_type="video",
+        )
+
+        # 清理临时文件
+        try:
+            os.unlink(temp_file)
+        except Exception:
+            pass
+
+        if oss_url:
+            logger.info("[omni-video] Video uploaded to OSS: %s", oss_url)
+            return oss_url
+
+    except Exception as e:
+        logger.error("[omni-video] Failed to download/upload video: %s", e)
+
+    return None
+
+
 class OmniVideoService:
     def __init__(self) -> None:
         self.client = omni_video_client
@@ -478,9 +558,32 @@ class OmniVideoService:
             project_id=task.get("project_id"),
         )
         if existing:
+            # 已存在记录，检查是否需要更新URL（如果原URL是临时URL且OSS可用）
+            existing_url = existing.get("url") or ""
+            existing_meta = existing.get("meta") or {}
+            # 如果已有OSS URL或原始URL不可用，无需更新
+            if is_oss_url(existing_url) or not oss_service.is_available():
+                return
+            # 如果原始URL仍是临时URL，尝试迁移到OSS
+            if is_tos_temp_url(existing_url):
+                filename = existing.get("filename") or _guess_video_filename(task["task_id"], existing_url)
+                oss_url = _download_and_upload_to_oss(
+                    existing_url,
+                    filename,
+                    task["user_id"],
+                    task.get("project_id"),
+                )
+                if oss_url:
+                    # 更新数据库中的URL
+                    database.update_video_asset_url(existing["id"], oss_url)
+                    # 更新任务记录
+                    task["video_url"] = oss_url
+                    database.save_omni_video_task(task)
             return
 
         filename = task.get("download_filename") or _guess_video_filename(task["task_id"], video_url)
+
+        # 先保存到视频库（使用原始URL），作为占位防止并发重复
         database.save_video_asset(
             user_id=task["user_id"],
             project_id=task.get("project_id"),
@@ -503,6 +606,26 @@ class OmniVideoService:
             },
         )
 
+        # 然后尝试下载并上传到OSS，获取永久URL
+        if oss_service.is_available() and is_tos_temp_url(video_url):
+            oss_url = _download_and_upload_to_oss(
+                video_url,
+                filename,
+                task["user_id"],
+                task.get("project_id"),
+            )
+            if oss_url:
+                # 更新视频库中的URL
+                database.update_video_asset_url_by_task_id(
+                    task["user_id"],
+                    task["task_id"],
+                    oss_url,
+                    project_id=task.get("project_id"),
+                )
+                # 更新任务记录中的video_url为OSS URL
+                task["video_url"] = oss_url
+                database.save_omni_video_task(task)
+
     def _persist_and_load(self, record: dict[str, Any]) -> dict[str, Any]:
         database.save_omni_video_task(record)
         task = (
@@ -518,7 +641,10 @@ class OmniVideoService:
         return task
 
     def _sync_task_from_remote(self, task: dict[str, Any]) -> dict[str, Any]:
-        if not self.client.is_configured():
+        local_payload = task.get("input_payload_json", {})
+        model = local_payload.get("model") or task.get("model")
+
+        if not self.client.is_configured(model=model):
             task = _decorate_task(task)
             self._ensure_video_library_entry(task)
             return task
@@ -529,11 +655,11 @@ class OmniVideoService:
             self._ensure_video_library_entry(task)
             return task
 
-        remote = self.client.get_task(task_id)
+        remote = self.client.get_task(task_id, model=model)
         record = _task_record_from_remote(
             user_id=task["user_id"],
             project_id=task.get("project_id"),
-            local_payload=task.get("input_payload_json", {}),
+            local_payload=local_payload,
             remote=remote,
         )
         return self._persist_and_load(record)
@@ -543,7 +669,8 @@ class OmniVideoService:
         if not payload["prompt"]:
             raise ValueError("提示词不能为空")
 
-        if self.client.is_configured():
+        model = payload.get("model")
+        if self.client.is_configured(model=model):
             remote = self.client.create_task(payload)
         else:
             remote = {
@@ -633,8 +760,11 @@ class OmniVideoService:
         if not existing:
             raise ValueError("任务不存在")
 
-        if self.client.is_configured():
-            remote = self.client.cancel_task(task_id)
+        local_payload = existing.get("input_payload_json", {})
+        model = local_payload.get("model") or existing.get("model")
+
+        if self.client.is_configured(model=model):
+            remote = self.client.cancel_task(task_id, model=model)
             status = _extract_status(remote, "cancelled")
         else:
             remote = {"task_id": task_id, "status": "cancelled", "message": "本地占位任务已取消。"}

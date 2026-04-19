@@ -12,11 +12,20 @@ from app.config import config
 
 logger = logging.getLogger(__name__)
 
+# 国际版模型标识
+INTL_MODEL_PREFIX = "dreamina-"
+
+
+def is_intl_model(model: str) -> bool:
+    """判断是否是国际版模型"""
+    return model.startswith(INTL_MODEL_PREFIX) if model else False
+
 
 class OmniVideoClient:
     """Thin wrapper around the remote Seedance omni video endpoints."""
 
     def __init__(self) -> None:
+        # 国内版配置
         self.base_url = config.ARK_BASE_URL.rstrip("/")
         self.api_key = config.ARK_API_KEY
         self.model = config.SEEDANCE_OMNI_MODEL
@@ -25,18 +34,36 @@ class OmniVideoClient:
         self.list_path = config.SEEDANCE_OMNI_LIST_PATH
         self.cancel_path = config.SEEDANCE_OMNI_CANCEL_PATH
 
-    def is_configured(self) -> bool:
+        # 国际版配置
+        self.intl_base_url = config.ARK_INTL_BASE_URL.rstrip("/")
+        self.intl_api_key = config.ARK_INTL_API_KEY
+        self.intl_model = config.SEEDANCE_INTL_MODEL
+
+    def is_configured(self, model: str | None = None) -> bool:
+        """检查是否配置了对应版本的API"""
+        if model and is_intl_model(model):
+            return config.is_seedance_intl_configured()
         return config.is_seedance_omni_configured()
 
-    def _headers(self) -> dict[str, str]:
+    def _get_config_for_model(self, model: str | None = None) -> tuple[str, str]:
+        """根据模型返回对应的base_url和api_key"""
+        if model and is_intl_model(model):
+            return self.intl_base_url, self.intl_api_key
+        return self.base_url, self.api_key
+
+    def _headers(self, model: str | None = None) -> dict[str, str]:
+        """根据模型返回对应的headers"""
+        _, api_key = self._get_config_for_model(model)
         return {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
 
-    def _url(self, path: str, **kwargs: Any) -> str:
+    def _url(self, path: str, model: str | None = None, **kwargs: Any) -> str:
+        """根据模型返回对应的URL"""
+        base_url, _ = self._get_config_for_model(model)
         rendered = path.format(**kwargs)
-        return f"{self.base_url}{rendered}"
+        return f"{base_url}{rendered}"
 
     def _sanitize_headers(self, headers: dict[str, Any]) -> dict[str, Any]:
         sanitized: dict[str, Any] = {}
@@ -99,8 +126,9 @@ class OmniVideoClient:
         raise ValueError(f"Seedance {action} 请求失败，请稍后重试。") from exc
 
     def create_task(self, payload: dict[str, Any]) -> dict[str, Any]:
-        url = self._url(self.create_path)
-        headers = self._headers()
+        model = payload.get("model")
+        url = self._url(self.create_path, model=model)
+        headers = self._headers(model=model)
         timeout = (15, 180)
         self._log_request(
             "create_task",
@@ -137,9 +165,9 @@ class OmniVideoClient:
             ) from exc
         return response.json()
 
-    def get_task(self, task_id: str) -> dict[str, Any]:
-        url = self._url(self.query_path, task_id=task_id)
-        headers = self._headers()
+    def get_task(self, task_id: str, model: str | None = None) -> dict[str, Any]:
+        url = self._url(self.query_path, model=model, task_id=task_id)
+        headers = self._headers(model=model)
         timeout = (10, 60)
         self._log_request(
             "get_task",
@@ -175,9 +203,9 @@ class OmniVideoClient:
             ) from exc
         return response.json()
 
-    def list_tasks(self, page: int = 1, page_size: int = 20) -> dict[str, Any]:
-        url = self._url(self.list_path)
-        headers = self._headers()
+    def list_tasks(self, page: int = 1, page_size: int = 20, model: str | None = None) -> dict[str, Any]:
+        url = self._url(self.list_path, model=model)
+        headers = self._headers(model=model)
         params = {"page": page, "page_size": page_size}
         timeout = (10, 60)
         self._log_request(
@@ -223,9 +251,9 @@ class OmniVideoClient:
             ) from exc
         return response.json()
 
-    def cancel_task(self, task_id: str) -> dict[str, Any]:
-        url = self._url(self.cancel_path, task_id=task_id)
-        headers = self._headers()
+    def cancel_task(self, task_id: str, model: str | None = None) -> dict[str, Any]:
+        url = self._url(self.cancel_path, model=model, task_id=task_id)
+        headers = self._headers(model=model)
         payload = {"action": "cancel"}
         timeout = (10, 60)
         self._log_request(

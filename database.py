@@ -801,6 +801,42 @@ def rename_video_asset(asset_id, filename, user_id=None, project_id=None):
     return updated
 
 
+def update_video_asset_url(asset_id, new_url):
+    """更新视频库记录的URL"""
+    ensure_media_library_tables()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('UPDATE video_library SET url = ? WHERE id = ?', (new_url, asset_id))
+    conn.commit()
+    conn.close()
+
+
+def update_video_asset_url_by_task_id(user_id, task_id, new_url, project_id=None):
+    """根据task_id更新视频库记录的URL"""
+    ensure_media_library_tables()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('SELECT * FROM video_library WHERE user_id = ?', (user_id,))
+    else:
+        cursor.execute('SELECT * FROM video_library WHERE user_id = ? AND project_id = ?', (user_id, project_id))
+    rows = cursor.fetchall()
+    for row in rows:
+        asset = dict(row)
+        try:
+            meta = json.loads(asset.get('meta') or '{}')
+            if meta.get('task_id') == task_id:
+                cursor.execute('UPDATE video_library SET url = ? WHERE id = ?', (new_url, asset['id']))
+                conn.commit()
+                conn.close()
+                return True
+        except Exception:
+            pass
+    conn.close()
+    return False
+
+
 def save_audio_asset(user_id, filename, url, meta=None, project_id=None):
     """淇濆瓨闊抽鍒伴煶棰戝簱"""
     ensure_media_library_tables()
