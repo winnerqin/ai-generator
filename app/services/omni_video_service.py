@@ -485,14 +485,15 @@ def _download_and_upload_to_oss(
     filename: str,
     user_id: int,
     project_id: int | None,
-) -> str | None:
+) -> tuple[str | None, bool]:
     """
-    从远程URL下载视频并上传到OSS，返回OSS永久URL。
+    从远程URL下载视频并上传到OSS，返回(OSS永久URL, 是否过期)。
 
-    如果OSS不可用或下载失败，返回None，使用原始URL作为fallback。
+    如果OSS不可用或下载失败，返回(None, False)。
+    如果下载返回403（URL过期），返回(None, True)。
     """
     if not oss_service.is_available():
-        return None
+        return None, False
 
     try:
         logger.info("[omni-video] Downloading video for OSS upload: url=%s", video_url)
@@ -524,12 +525,17 @@ def _download_and_upload_to_oss(
 
         if oss_url:
             logger.info("[omni-video] Video uploaded to OSS: %s", oss_url)
-            return oss_url
+            return oss_url, False
 
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 403:
+            logger.warning("[omni-video] Video URL expired (403): %s", video_url)
+            return None, True
+        logger.error("[omni-video] Failed to download/upload video: %s", e)
     except Exception as e:
         logger.error("[omni-video] Failed to download/upload video: %s", e)
 
-    return None
+    return None, False
 
 
 class OmniVideoService:
@@ -564,10 +570,13 @@ class OmniVideoService:
             # 如果已有OSS URL或原始URL不可用，无需更新
             if is_oss_url(existing_url) or not oss_service.is_available():
                 return
+            # 如果已标记URL过期，不再重复尝试
+            if existing_meta.get("url_expired"):
+                return
             # 如果原始URL仍是临时URL，尝试迁移到OSS
             if is_tos_temp_url(existing_url):
                 filename = existing.get("filename") or _guess_video_filename(task["task_id"], existing_url)
-                oss_url = _download_and_upload_to_oss(
+                oss_url, is_expired = _download_and_upload_to_oss(
                     existing_url,
                     filename,
                     task["user_id"],
@@ -579,6 +588,10 @@ class OmniVideoService:
                     # 更新任务记录
                     task["video_url"] = oss_url
                     database.save_omni_video_task(task)
+                elif is_expired:
+                    # 标记URL过期，不再重复尝试
+                    database.update_video_asset_meta(existing["id"], {"url_expired": True})
+                    logger.info("[omni-video] Marked video URL as expired: task_id=%s", task["task_id"])
             return
 
         filename = task.get("download_filename") or _guess_video_filename(task["task_id"], video_url)
@@ -608,7 +621,7 @@ class OmniVideoService:
 
         # 然后尝试下载并上传到OSS，获取永久URL
         if oss_service.is_available() and is_tos_temp_url(video_url):
-            oss_url = _download_and_upload_to_oss(
+            oss_url, is_expired = _download_and_upload_to_oss(
                 video_url,
                 filename,
                 task["user_id"],
@@ -625,6 +638,16 @@ class OmniVideoService:
                 # 更新任务记录中的video_url为OSS URL
                 task["video_url"] = oss_url
                 database.save_omni_video_task(task)
+            elif is_expired:
+                # 标记URL过期
+                existing_video = database.get_video_by_task_id(
+                    task["user_id"],
+                    task["task_id"],
+                    project_id=task.get("project_id"),
+                )
+                if existing_video:
+                    database.update_video_asset_meta(existing_video["id"], {"url_expired": True})
+                    logger.info("[omni-video] Marked new video URL as expired: task_id=%s", task["task_id"])
 
     def _persist_and_load(self, record: dict[str, Any]) -> dict[str, Any]:
         database.save_omni_video_task(record)

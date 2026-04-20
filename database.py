@@ -837,6 +837,32 @@ def update_video_asset_url_by_task_id(user_id, task_id, new_url, project_id=None
     return False
 
 
+def update_video_asset_meta(asset_id, meta_update):
+    """更新视频库记录的meta字段（合并更新）"""
+    ensure_media_library_tables()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('SELECT meta FROM video_library WHERE id = ?', (asset_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return False
+    try:
+        existing_meta = json.loads(row['meta'] or '{}')
+        if not isinstance(existing_meta, dict):
+            existing_meta = {}
+        # 合并新的meta数据
+        existing_meta.update(meta_update)
+        cursor.execute('UPDATE video_library SET meta = ? WHERE id = ?', (json.dumps(existing_meta), asset_id))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception:
+        conn.close()
+        return False
+
+
 def save_audio_asset(user_id, filename, url, meta=None, project_id=None):
     """淇濆瓨闊抽鍒伴煶棰戝簱"""
     ensure_media_library_tables()
