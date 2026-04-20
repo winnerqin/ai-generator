@@ -383,54 +383,33 @@ class VideoEnhanceService:
         # 检查是否已经保存过
         existing = database.get_video_by_task_id(user_id, task_id, project_id=project_id)
         if existing:
-            logger.info("[video-enhance] Video already in library: task_id=%s", task_id)
+            existing_meta = existing.get("meta") or {}
+            # 已保存且URL有效或已标记过期，无需重复处理
+            if existing_meta.get("url_expired") or oss_service.is_available() and not video_url.startswith("https://"):
+                logger.info("[video-enhance] Video already in library: task_id=%s", task_id)
+                return
+            # 如果URL仍是临时URL且未过期，尝试迁移到OSS
+            if oss_service.is_available() and not existing_meta.get("url_expired"):
+                existing_url = existing.get("url") or ""
+                if existing_url and not existing_url.startswith("https://"):
+                    oss_url, is_expired = self._download_and_upload_to_oss(existing_url, output_filename, user_id, project_id, task_id)
+                    if oss_url:
+                        database.update_video_asset_url(existing["id"], oss_url)
+                    elif is_expired:
+                        database.update_video_asset_meta(existing["id"], {"url_expired": True})
+                        logger.info("[video-enhance] Marked video URL as expired: task_id=%s", task_id)
             return
 
         final_url = video_url
+        url_expired = False
 
         # 如果OSS可用，下载视频并上传到OSS
         if oss_service.is_available():
-            try:
-                logger.info("[video-enhance] Downloading video for OSS upload: task_id=%s url=%s", task_id, video_url)
-                # 下载视频到临时文件
-                response = requests.get(video_url, timeout=120, stream=True)
-                response.raise_for_status()
-
-                # 创建临时文件
-                temp_dir = tempfile.gettempdir()
-                temp_file = os.path.join(temp_dir, output_filename)
-
-                with open(temp_file, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-
-                logger.info("[video-enhance] Video downloaded to temp: %s", temp_file)
-
-                # 上传到OSS
-                oss_url = oss_service.upload_file(
-                    temp_file,
-                    user_id=user_id,
-                    project_id=project_id,
-                    file_type="video",
-                )
-
-                # 清理临时文件
-                try:
-                    os.unlink(temp_file)
-                except Exception:
-                    pass
-
-                if oss_url:
-                    final_url = oss_url
-                    logger.info("[video-enhance] Video uploaded to OSS: %s", oss_url)
-
-                    # 更新任务记录中的video_url
-                    task["video_url"] = oss_url
-                    database.save_video_enhance_task(task)
-            except Exception as e:
-                logger.error("[video-enhance] Failed to download/upload video: %s", e)
-                # 如果下载/上传失败，继续使用原始URL
+            oss_url, is_expired = self._download_and_upload_to_oss(video_url, output_filename, user_id, project_id, task_id)
+            if oss_url:
+                final_url = oss_url
+            elif is_expired:
+                url_expired = True
 
         meta = {
             "library_group": "video",
@@ -440,6 +419,8 @@ class VideoEnhanceService:
             "source_filename": task.get("source_filename"),
             "source_video_id": task.get("source_video_id"),
         }
+        if url_expired:
+            meta["url_expired"] = True
         if task.get("cover_url"):
             meta["cover_url"] = task.get("cover_url")
 
@@ -451,6 +432,49 @@ class VideoEnhanceService:
             project_id=project_id,
         )
         logger.info("[video-enhance] Video saved to library: filename=%s url=%s", output_filename, final_url)
+
+    def _download_and_upload_to_oss(self, video_url: str, filename: str, user_id: int, project_id: int | None, task_id: str) -> tuple[str | None, bool]:
+        """下载视频并上传到OSS，返回(url, is_expired)"""
+        try:
+            logger.info("[video-enhance] Downloading video for OSS upload: task_id=%s url=%s", task_id, video_url)
+            response = requests.get(video_url, timeout=120, stream=True)
+            response.raise_for_status()
+
+            temp_dir = tempfile.gettempdir()
+            temp_file = os.path.join(temp_dir, filename)
+
+            with open(temp_file, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+            logger.info("[video-enhance] Video downloaded to temp: %s", temp_file)
+
+            oss_url = oss_service.upload_file(
+                temp_file,
+                user_id=user_id,
+                project_id=project_id,
+                file_type="video",
+            )
+
+            try:
+                os.unlink(temp_file)
+            except Exception:
+                pass
+
+            if oss_url:
+                logger.info("[video-enhance] Video uploaded to OSS: %s", oss_url)
+                return oss_url, False
+
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 403:
+                logger.warning("[video-enhance] Video URL expired (403): task_id=%s url=%s", task_id, video_url)
+                return None, True
+            logger.error("[video-enhance] Failed to download/upload video: %s", e)
+        except Exception as e:
+            logger.error("[video-enhance] Failed to download/upload video: %s", e)
+
+        return None, False
 
     def _decorate_task(self, task: dict[str, Any]) -> dict[str, Any]:
         """装饰任务信息，添加显示字段。"""
