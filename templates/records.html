@@ -228,14 +228,25 @@
                 window.location.href = `/?${params.toString()}`;
             };
 
-            const addToLibrary = async (record, type) => {
+            const addToMaterial = async (record) => {
                 const url = record.image_path;
                 const filename = record.filename || 'image';
-                await fetch(type === 'person' ? '/api/add-to-person-library' : '/api/add-to-scene-library', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url, filename })
-                });
+                const meta = { width: record.width, height: record.height, resolution: record.resolution };
+                try {
+                    const resp = await fetch('/api/add-to-image-material', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url, filename, meta })
+                    });
+                    const data = await resp.json();
+                    if (data.success) {
+                        alert('已添加到素材库');
+                    } else {
+                        alert(data.error || '添加失败');
+                    }
+                } catch (e) {
+                    alert('添加失败: ' + e.message);
+                }
             };
 
             return (
@@ -399,8 +410,7 @@
                                 {currentIndex + 1} / {records.length}
                             </div>
                             <div style={{ position: 'absolute', bottom: 'calc(32vh + 12px)', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }} onClick={(e) => e.stopPropagation()}>
-                                <button className="btn btn-secondary" onClick={() => addToLibrary(modalRecord, 'person')}>加人物库</button>
-                                <button className="btn btn-secondary" onClick={() => addToLibrary(modalRecord, 'scene')}>加场景库</button>
+                                <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); addToMaterial(modalRecord); }}>加入素材库</button>
                                 <button className="btn btn-primary" onClick={() => { regenerateImage(modalRecord); setModalRecord(null); }}>重新生成</button>
                                 <button className="btn btn-danger" onClick={() => { deleteOne(modalRecord.id); setModalRecord(null); }}>删除</button>
                             </div>

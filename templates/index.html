@@ -385,7 +385,7 @@
                 });
             }, []);
 
-            // 从生图任务「重新生成」跳转时恢复参数（与 localStorage regenerateData 约定一致）
+            // 从生图任务「重新生成」跳转时恢复参数，或加载上次生成参数
             useEffect(() => {
                 try {
                     const searchParams = new URLSearchParams(window.location.search);
@@ -397,7 +397,8 @@
                         || searchParams.has('rg_image_style')
                         || searchParams.has('rg_output_filename')
                         || searchParams.has('rg_seed');
-                    const data = hasQueryPrefill
+                    // 优先使用 URL 参数或 regenerateData
+                    let data = hasQueryPrefill
                         ? (() => {
                             const base = {
                             prompt: searchParams.get('rg_prompt') || '',
@@ -427,11 +428,27 @@
                             if (!raw) return null;
                             return JSON.parse(raw);
                         })();
+                    // 如果没有 regenerateData，尝试加载上次生成参数
+                    if (!data) {
+                        const lastParams = localStorage.getItem('lastGenerateParams');
+                        if (lastParams) {
+                            try {
+                                data = JSON.parse(lastParams);
+                            } catch (e) { data = null; }
+                        }
+                    }
                     if (!data) return;
+                    // regenerateData 有时效性检查
                     if (data.timestamp && Date.now() - data.timestamp > 5 * 60 * 1000) {
                         sessionStorage.removeItem('regenerateData');
                         localStorage.removeItem('regenerateData');
-                        return;
+                        // 清除时效后，继续使用 lastGenerateParams（如果有）
+                        const lastParams = localStorage.getItem('lastGenerateParams');
+                        if (lastParams) {
+                            try { data = JSON.parse(lastParams); } catch (e) { return; }
+                        } else {
+                            return;
+                        }
                     }
                     if (data.prompt) setPrompt(data.prompt);
                     if (data.aspect_ratio) setAspectRatio(data.aspect_ratio);
@@ -585,6 +602,20 @@
                         } else if (payload.type === 'complete') {
                             setProgressText(`完成，共 ${payload.total || 0} 张`);
                             setLoading(false);
+                            // 保存本次生成参数到 localStorage
+                            try {
+                                const lastParams = {
+                                    prompt,
+                                    aspect_ratio: aspectRatio,
+                                    resolution,
+                                    generate_mode: generateMode,
+                                    num_images: numImages,
+                                    image_style: imageStyle,
+                                    output_filename: outputFilename,
+                                    seed,
+                                };
+                                localStorage.setItem('lastGenerateParams', JSON.stringify(lastParams));
+                            } catch (e) { console.error('保存上次参数失败', e); }
                         }
                     }));
                 }
@@ -595,14 +626,14 @@
                 setSelectedResults(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : prev.concat(idx));
             };
 
-            const batchAdd = async (type) => {
+            const batchAddToMaterial = async () => {
                 const targets = selectedResults.map(i => results[i]).filter(Boolean);
                 if (targets.length === 0) return;
                 for (const item of targets) {
-                    await fetch(type === 'person' ? '/api/add-to-person-library' : '/api/add-to-scene-library', {
+                    await fetch('/api/add-to-image-material', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url: item.url, filename: item.filename })
+                        body: JSON.stringify({ url: item.url, filename: item.filename, meta: item.meta || {} })
                     });
                 }
                 setSelectedResults([]);
@@ -755,8 +786,7 @@
                             <div className="panel" style={{ marginTop: '18px' }}>
                                 <div className="panel-title">生成结果</div>
                                 <div className="form-row" style={{ marginBottom: '10px' }}>
-                                    <button className="btn btn-secondary" onClick={() => batchAdd('person')}>加入人物库</button>
-                                    <button className="btn btn-secondary" onClick={() => batchAdd('scene')}>加入场景库</button>
+                                    <button className="btn btn-primary" onClick={() => batchAddToMaterial()}>加入素材库</button>
                                     <div className="small-hint">已选 {selectedResults.length} 张</div>
                                 </div>
                                 <div className="result-grid">
@@ -809,6 +839,19 @@
                                     </>
                                 )}
                                 <img src={modalImage} alt="preview" />
+                                <div style={{ textAlign: 'center', marginTop: '12px' }}>
+                                    <button className="btn btn-primary" onClick={async () => {
+                                        if (modalResultIndex != null && results[modalResultIndex]) {
+                                            const item = results[modalResultIndex];
+                                            await fetch('/api/add-to-image-material', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ url: item.url, filename: item.filename, meta: item.meta || {} })
+                                            });
+                                            alert('已添加到素材库');
+                                        }
+                                    }}>加入素材库</button>
+                                </div>
                                 {modalResultIndex != null && results.length > 1 && (
                                     <div className="modal-counter">{modalResultIndex + 1} / {results.length}</div>
                                 )}
@@ -1617,8 +1660,7 @@
                         <div class="batch-actions" id="batchActions" style="display: none; margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 8px;">
                             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                                 <span style="font-weight: 600; color: #333;">已选择 <span id="selectedCount">0</span> 张图片：</span>
-                                <button class="btn btn-primary" onclick="batchAddToPersonLibrary()">➕ 批量添加到人物库</button>
-                                <button class="btn btn-primary" onclick="batchAddToSceneLibrary()">➕ 批量添加到场景库</button>
+                                <button class="btn btn-primary" onclick="batchAddToMaterial()">➕ 批量添加到素材库</button>
                                 <button class="btn" style="background: #dc3545; color: white;" onclick="batchDeleteImages()">🗑️ 批量删除</button>
                                 <button class="btn" onclick="clearSelection()">取消选择</button>
                             </div>
@@ -2899,13 +2941,13 @@
             updateBatchActions();
         }
         
-        // 批量添加到人物库
-        async function batchAddToPersonLibrary() {
+        // 批量添加到素材库
+        async function batchAddToMaterial() {
             if (selectedResultImages.size === 0) {
                 alert('请先选择图片');
                 return;
             }
-            
+
             const selectedUrls = [];
             selectedResultImages.forEach(index => {
                 const imageDiv = document.querySelector(`.result-image[data-image-index="${index}"]`);
@@ -2916,64 +2958,25 @@
                     });
                 }
             });
-            
+
             let successCount = 0;
             for (const img of selectedUrls) {
                 try {
-                    const resp = await fetch('/api/add-to-person-library', {
+                    const resp = await fetch('/api/add-to-image-material', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url: img.url, filename: img.filename })
+                        body: JSON.stringify({ url: img.url, filename: img.filename, meta: {} })
                     });
                     const data = await resp.json();
                     if (data.success) {
                         successCount++;
                     }
                 } catch (e) {
-                    console.error('添加到人物库失败:', e);
+                    console.error('添加到素材库失败:', e);
                 }
             }
-            
-            alert(`成功添加 ${successCount}/${selectedUrls.length} 张图片到人物库`);
-            clearSelection();
-        }
-        
-        // 批量添加到场景库
-        async function batchAddToSceneLibrary() {
-            if (selectedResultImages.size === 0) {
-                alert('请先选择图片');
-                return;
-            }
-            
-            const selectedUrls = [];
-            selectedResultImages.forEach(index => {
-                const imageDiv = document.querySelector(`.result-image[data-image-index="${index}"]`);
-                if (imageDiv) {
-                    selectedUrls.push({
-                        url: imageDiv.dataset.imageUrl,
-                        filename: imageDiv.dataset.imageFilename
-                    });
-                }
-            });
-            
-            let successCount = 0;
-            for (const img of selectedUrls) {
-                try {
-                    const resp = await fetch('/api/add-to-scene-library', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url: img.url, filename: img.filename })
-                    });
-                    const data = await resp.json();
-                    if (data.success) {
-                        successCount++;
-                    }
-                } catch (e) {
-                    console.error('添加到场景库失败:', e);
-                }
-            }
-            
-            alert(`成功添加 ${successCount}/${selectedUrls.length} 张图片到场景库`);
+
+            alert(`成功添加 ${successCount}/${selectedUrls.length} 张图片到素材库`);
             clearSelection();
         }
         

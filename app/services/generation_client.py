@@ -74,8 +74,11 @@ def request_images(
     height: int,
     generate_mode: str,
     image_urls: list[str],
+    seed: int | None = None,
 ):
     extra_body = build_extra_body(generate_mode, image_urls)
+    if seed:
+        extra_body["seed"] = seed
     request_payload = {
         "model": MODEL_NAME,
         "prompt": prompt,

@@ -103,7 +103,10 @@
         <div class="preview-inner">
             <div class="preview-header">
                 <div id="previewTitle" style="font-weight:600;"></div>
-                <button class="btn btn-secondary" id="previewClose">关闭</button>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-primary" id="previewAddMaterial" style="display:none;">加入素材库</button>
+                    <button class="btn btn-secondary" id="previewClose">关闭</button>
+                </div>
             </div>
             <div id="previewMedia" class="preview-media"></div>
             <div class="preview-nav">
@@ -283,11 +286,14 @@
             renderAssets();
         }
 
+        let currentPreviewAsset = null;
+
         function openPreview(assetId) {
             const asset = previewAssets.find((item) => String(item.id) === String(assetId))
                 || allAssets.find((item) => String(item.id) === String(assetId));
             if (!asset) return;
 
+            currentPreviewAsset = asset;
             previewIndex = previewAssets.findIndex((item) => String(item.id) === String(assetId));
             document.getElementById('previewTitle').textContent = `${asset.filename || '-'} / ${assetTypeLabel(asset)}`;
             const media = document.getElementById('previewMedia');
@@ -299,6 +305,14 @@
                 media.innerHTML += `<audio class="preview-audio" controls autoplay src="${asset.url}"></audio>`;
             } else {
                 media.innerHTML = `<img src="${asset.url}" alt="${asset.filename || 'asset'}">`;
+            }
+
+            // 显示/隐藏"加入素材库"按钮：仅在图片库(image)标签下的图片才显示
+            const addMaterialBtn = document.getElementById('previewAddMaterial');
+            if (currentTab === 'image' && asset.type === 'image') {
+                addMaterialBtn.style.display = 'inline-block';
+            } else {
+                addMaterialBtn.style.display = 'none';
             }
 
             document.getElementById('previewPrev').disabled = previewIndex <= 0;
@@ -317,6 +331,7 @@
             document.getElementById('previewModal').style.display = 'none';
             document.getElementById('previewMedia').innerHTML = '';
             previewIndex = -1;
+            currentPreviewAsset = null;
         }
 
         function downloadAsset(assetId) {
@@ -423,6 +438,10 @@
         document.getElementById('uploadTrigger').addEventListener('click', () => document.getElementById('uploadInput').click());
         document.getElementById('uploadInput').addEventListener('change', (event) => uploadFiles(event.target.files));
         document.getElementById('previewClose').addEventListener('click', closePreview);
+        document.getElementById('previewAddMaterial').addEventListener('click', async () => {
+            if (!currentPreviewAsset) return;
+            await addToImageMaterial(currentPreviewAsset.id);
+        });
         document.getElementById('previewPrev').addEventListener('click', () => navigatePreview(-1));
         document.getElementById('previewNext').addEventListener('click', () => navigatePreview(1));
         document.getElementById('previewModal').addEventListener('click', (event) => {

@@ -59,6 +59,7 @@ def stream_generated_images(
                 height=height,
                 generate_mode=generation_request.generate_mode,
                 image_urls=image_urls,
+                seed=per_seed,
             )
 
             if not response.data:

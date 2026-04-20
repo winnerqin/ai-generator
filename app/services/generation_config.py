@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Optional
 
-MODEL_NAME = "doubao-seedream-4-5-251128"
+# 默认模型名称，可通过环境变量 SEEDREAM_MODEL 覆盖
+DEFAULT_MODEL_NAME = "doubao-seedream-4-5-251128"
+MODEL_NAME = os.environ.get("SEEDREAM_MODEL", DEFAULT_MODEL_NAME)
 DEFAULT_ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 MAX_SEED = 99999999
 
