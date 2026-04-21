@@ -215,3 +215,58 @@ def get_stats():
             "daily_stats": daily_stats,
         }
     })
+
+
+@admin_bp.route("/api/admin/operation-logs", methods=["GET"])
+@login_required
+@admin_required
+@handle_api_error
+def get_operation_logs():
+    """查询操作日志"""
+    user_id = request.args.get("user_id", type=int)
+    project_id = request.args.get("project_id", type=int)
+    path_prefix = request.args.get("path")
+    limit = request.args.get("limit", 100, type=int)
+    offset = request.args.get("offset", 0, type=int)
+
+    logs = database.get_operation_logs(
+        user_id=user_id,
+        project_id=project_id,
+        path_prefix=path_prefix,
+        limit=min(limit, 500),
+        offset=offset,
+    )
+
+    total = database.count_operation_logs(
+        user_id=user_id,
+        project_id=project_id,
+        path_prefix=path_prefix,
+    )
+
+    return jsonify({
+        "success": True,
+        "logs": logs,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    })
+
+
+@admin_bp.route("/api/admin/operation-logs/cleanup", methods=["POST"])
+@login_required
+@admin_required
+@handle_api_error
+def cleanup_operation_logs():
+    """清理旧操作日志"""
+    days = request.json.get("days", 30, type=int)
+
+    if days < 7:
+        return jsonify({"success": False, "error": "至少保留7天的日志"}), 400
+
+    deleted = database.delete_old_operation_logs(days)
+
+    return jsonify({
+        "success": True,
+        "deleted": deleted,
+        "message": f"已删除 {deleted} 条超过 {days} 天的日志",
+    })

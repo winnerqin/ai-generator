@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,11 @@ try:
     from app.decorators import login_required
     from app.utils import ApiResponse
     from app.utils.jwt_auth import JWTAuth
+    from app.utils.sanitizer import (
+        extract_response_summary,
+        sanitize_request_params,
+        should_skip_logging,
+    )
 
     NEW_MODULES_AVAILABLE = True
     MODULE_IMPORT_ERROR: Exception | None = None
@@ -124,6 +130,66 @@ def setup_request_logging(app: Flask) -> None:
         return response
 
 
+def setup_operation_logging(app: Flask) -> None:
+    """注册操作日志记录钩子，记录用户API请求。"""
+
+    @app.after_request
+    def log_operation(response):
+        # 跳过静态资源和不需要记录的路径
+        if should_skip_logging(request.path):
+            return response
+
+        # 仅记录 API 请求
+        if not request.path.startswith("/api/"):
+            return response
+
+        # 收集用户信息
+        user_id = session.get("user_id")
+        username = session.get("username")
+        project_id = session.get("current_project_id")
+
+        # 收集请求参数
+        params = {}
+        if request.is_json:
+            params = request.get_json(silent=True) or {}
+        elif request.form:
+            params = dict(request.form)
+        elif request.args:
+            params = dict(request.args)
+
+        # 脱敏处理
+        sanitized_params = sanitize_request_params(params)
+
+        # 计算耗时
+        duration_ms = int((time.time() - getattr(g, "start_time", time.time())) * 1000)
+
+        # 提取响应摘要
+        response_summary = extract_response_summary(response)
+
+        # 构建日志数据
+        log_data = {
+            "user_id": user_id,
+            "username": username,
+            "project_id": project_id,
+            "request_path": request.path,
+            "request_method": request.method,
+            "request_params": sanitized_params,
+            "response_status": response.status_code,
+            "response_summary": response_summary,
+            "ip_address": request.remote_addr,
+            "duration_ms": duration_ms,
+        }
+
+        # 异步写入日志（避免阻塞响应）
+        threading.Thread(
+            target=database.save_operation_log,
+            args=(log_data,),
+            daemon=True,
+        ).start()
+
+        return response
+
+
 def create_app(config_name: str | None = None) -> Flask:
     """
     Create and configure the Flask app.
@@ -152,6 +218,7 @@ def create_app(config_name: str | None = None) -> Flask:
     os.makedirs(app.config["OUTPUT_FOLDER"], exist_ok=True)
 
     setup_request_logging(app)
+    setup_operation_logging(app)
     JWTAuth.init_app(app)
 
     app.register_blueprint(auth_bp)

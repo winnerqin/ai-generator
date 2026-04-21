@@ -3141,6 +3141,233 @@ def get_daily_report(start_date=None, end_date=None, days=30):
     return stats
 
 
+# ==================== 操作日志函数 ====================
+
+def _ensure_operation_logs_schema():
+    """确保操作日志表存在。"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS operation_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            project_id INTEGER,
+            request_path TEXT NOT NULL,
+            request_method TEXT NOT NULL,
+            request_params TEXT,
+            response_status INTEGER,
+            response_summary TEXT,
+            ip_address TEXT,
+            duration_ms INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        '''
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_operation_logs_user_created '
+        'ON operation_logs(user_id, created_at DESC)'
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_operation_logs_path_created '
+        'ON operation_logs(request_path, created_at DESC)'
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_operation_logs_project_created '
+        'ON operation_logs(project_id, created_at DESC)'
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def save_operation_log(data: dict) -> int | None:
+    """
+    保存操作日志。
+
+    Args:
+        data: 包含以下字段的字典：
+            - user_id: 用户ID（可选）
+            - username: 用户名（可选）
+            - project_id: 项目ID（可选）
+            - request_path: API路径
+            - request_method: HTTP方法
+            - request_params: 请求参数（dict，可选）
+            - response_status: 响应状态码
+            - response_summary: 响应摘要（可选）
+            - ip_address: 客户端IP（可选）
+            - duration_ms: 耗时毫秒（可选）
+
+    Returns:
+        日志记录ID，失败时返回None
+    """
+    try:
+        _ensure_operation_logs_schema()
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        params_json = json.dumps(data.get('request_params') or {}, ensure_ascii=False)
+
+        cursor.execute(
+            '''
+            INSERT INTO operation_logs
+            (user_id, username, project_id, request_path, request_method,
+             request_params, response_status, response_summary, ip_address,
+             duration_ms, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                data.get('user_id'),
+                data.get('username'),
+                data.get('project_id'),
+                data.get('request_path'),
+                data.get('request_method'),
+                params_json,
+                data.get('response_status'),
+                data.get('response_summary'),
+                data.get('ip_address'),
+                data.get('duration_ms'),
+                now,
+            ),
+        )
+
+        log_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return log_id
+
+    except Exception as e:
+        # 日志写入失败不应影响主流程，静默处理
+        print(f"[operation_log] save failed: {e}")
+        return None
+
+
+def get_operation_logs(
+    user_id: int | None = None,
+    project_id: int | None = None,
+    path_prefix: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """
+    查询操作日志。
+
+    Args:
+        user_id: 按用户ID筛选（可选）
+        project_id: 按项目ID筛选（可选）
+        path_prefix: 按路径前缀筛选（可选）
+        limit: 返回数量限制，最大500
+        offset: 偏移量
+
+    Returns:
+        操作日志列表
+    """
+    _ensure_operation_logs_schema()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    limit = min(limit, 500)  # 限制最大返回量
+
+    query = 'SELECT * FROM operation_logs WHERE 1=1'
+    params = []
+
+    if user_id is not None:
+        query += ' AND user_id = ?'
+        params.append(user_id)
+    if project_id is not None:
+        query += ' AND project_id = ?'
+        params.append(project_id)
+    if path_prefix:
+        query += ' AND request_path LIKE ?'
+        params.append(f'{path_prefix}%')
+
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    params.extend([limit, offset])
+
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    logs = [dict(row) for row in rows]
+
+    # 解析JSON字段
+    for log in logs:
+        try:
+            log['request_params'] = json.loads(log.get('request_params') or '{}')
+        except Exception:
+            log['request_params'] = {}
+
+    conn.close()
+    return logs
+
+
+def count_operation_logs(
+    user_id: int | None = None,
+    project_id: int | None = None,
+    path_prefix: str | None = None,
+) -> int:
+    """
+    统计操作日志数量。
+
+    Args:
+        user_id: 按用户ID筛选（可选）
+        project_id: 按项目ID筛选（可选）
+        path_prefix: 按路径前缀筛选（可选）
+
+    Returns:
+        日志数量
+    """
+    _ensure_operation_logs_schema()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    query = 'SELECT COUNT(*) FROM operation_logs WHERE 1=1'
+    params = []
+
+    if user_id is not None:
+        query += ' AND user_id = ?'
+        params.append(user_id)
+    if project_id is not None:
+        query += ' AND project_id = ?'
+        params.append(project_id)
+    if path_prefix:
+        query += ' AND request_path LIKE ?'
+        params.append(f'{path_prefix}%')
+
+    cursor.execute(query, params)
+    count = cursor.fetchone()[0]
+
+    conn.close()
+    return count
+
+
+def delete_old_operation_logs(days: int = 30) -> int:
+    """
+    删除指定天数之前的操作日志。
+
+    Args:
+        days: 保留天数，默认30天
+
+    Returns:
+        删除的记录数量
+    """
+    _ensure_operation_logs_schema()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cutoff_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+
+    cursor.execute('DELETE FROM operation_logs WHERE created_at < ?', (cutoff_date,))
+    deleted = cursor.rowcount
+
+    conn.commit()
+    conn.close()
+    return deleted
+
+
 if __name__ == '__main__':
     # 测试数据库
     init_database()
