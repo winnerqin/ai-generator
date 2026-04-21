@@ -53,7 +53,7 @@
             <div class="page-wrap">
 
         <div class="page-title">视频画质增强任务</div>
-        <div class="page-subtitle">将视频画质提升至更高分辨率（720p/1080p/2K/4K），支持按状态筛选、分页查看，每 5 分钟自动刷新未完成任务。</div>
+        <div class="page-subtitle">将视频画质提升至更高分辨率，支持standard/professional版本，最高支持4K输出。</div>
 
         <div class="panel">
             <div class="filters">
@@ -98,6 +98,7 @@
                     <tr>
                         <th>任务 ID</th>
                         <th>状态</th>
+                        <th>工具版本</th>
                         <th>目标分辨率</th>
                         <th>原文件名</th>
                         <th>输出文件名</th>
@@ -107,7 +108,7 @@
                     </tr>
                 </thead>
                 <tbody id="taskRows">
-                    <tr><td colspan="8">加载中...</td></tr>
+                    <tr><td colspan="9">加载中...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -200,7 +201,7 @@
             const data = await resp.json();
             const tbody = document.getElementById('taskRows');
             if (!data.success) {
-                tbody.innerHTML = '<tr><td colspan="8">加载失败</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9">加载失败</td></tr>';
                 return;
             }
 
@@ -209,7 +210,7 @@
             updatePager();
 
             if (!currentItems.length) {
-                tbody.innerHTML = '<tr><td colspan="8">暂无任务</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9">暂无任务</td></tr>';
                 collapseDetails('当前没有可查看的任务。');
                 return;
             }
@@ -218,6 +219,7 @@
                 <tr>
                     <td>${escapeHtml(task.task_id || '-')}</td>
                     <td><span class="status-pill">${escapeHtml(task.status || '-')}</span></td>
+                    <td>${escapeHtml(task.tool_version || '-')}</td>
                     <td>${escapeHtml(task.resolution || '-')}</td>
                     <td class="filename-cell">${escapeHtml(task.source_filename || '-')}</td>
                     <td class="filename-cell">${escapeHtml(task.output_filename || '-')}</td>
@@ -254,6 +256,7 @@
                         <div><strong>原文件名：</strong>${escapeHtml(task.source_filename || '-')}</div>
                         <div><strong>输出文件名：</strong>${escapeHtml(task.output_filename || '-')}</div>
                         <div><strong>状态：</strong>${escapeHtml(task.status || '-')}</div>
+                        <div><strong>工具版本：</strong>${escapeHtml(task.tool_version || '-')}</div>
                         <div><strong>目标分辨率：</strong>${escapeHtml(task.resolution || '-')}</div>
                         <div><strong>原视频URL：</strong><a href="${escapeHtml(task.source_video_url || '#')}" target="_blank" style="color:#9ed0ff;">查看</a></div>
                         <div><strong>增强视频URL：</strong>${task.video_url ? `<a href="${escapeHtml(task.video_url)}" target="_blank" style="color:#9ed0ff;">查看</a>` : '-'}</div>

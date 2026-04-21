@@ -1453,7 +1453,8 @@ def _ensure_video_enhance_tasks_schema(cursor):
             source_video_id TEXT,
             source_filename TEXT,
             input_payload_json TEXT,
-            resolution TEXT NOT NULL,
+            tool_version TEXT NOT NULL DEFAULT 'standard',
+            resolution TEXT NOT NULL DEFAULT '1080p',
             raw_response_json TEXT,
             result_json TEXT,
             video_url TEXT,
@@ -1481,6 +1482,121 @@ def _ensure_video_enhance_tasks_schema(cursor):
     cursor.execute(
         'CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_user_project_created ON video_enhance_tasks(user_id, project_id, created_at DESC)'
     )
+
+    # Migration: add tool_version column if needed, ensure resolution exists
+    cursor.execute("PRAGMA table_info(video_enhance_tasks)")
+    columns = [row[1] for row in cursor.fetchall()]
+
+    # Clean up any leftover migration tables from previous failed migrations
+    cursor.execute('DROP TABLE IF EXISTS video_enhance_tasks_new')
+
+    # If table has resolution but not tool_version, add tool_version
+    if 'resolution' in columns and 'tool_version' not in columns:
+        cursor.execute(
+            '''
+            CREATE TABLE video_enhance_tasks_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                task_id TEXT UNIQUE NOT NULL,
+                project_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'queued',
+                source_video_url TEXT NOT NULL,
+                source_video_id TEXT,
+                source_filename TEXT,
+                input_payload_json TEXT,
+                tool_version TEXT NOT NULL DEFAULT 'standard',
+                resolution TEXT NOT NULL DEFAULT '1080p',
+                raw_response_json TEXT,
+                result_json TEXT,
+                video_url TEXT,
+                output_filename TEXT,
+                cover_url TEXT,
+                fail_reason TEXT,
+                token_usage INTEGER,
+                usage_json TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+            '''
+        )
+        cursor.execute(
+            '''
+            INSERT INTO video_enhance_tasks_new (
+                id, user_id, task_id, project_id, created_at, updated_at, status,
+                source_video_url, source_video_id, source_filename, input_payload_json,
+                tool_version, resolution, raw_response_json, result_json, video_url, output_filename,
+                cover_url, fail_reason, token_usage, usage_json
+            )
+            SELECT id, user_id, task_id, project_id, created_at, updated_at, status,
+                source_video_url, source_video_id, source_filename, input_payload_json,
+                'standard', resolution, raw_response_json, result_json, video_url, output_filename,
+                cover_url, fail_reason, token_usage, usage_json
+            FROM video_enhance_tasks
+            '''
+        )
+        cursor.execute('DROP TABLE video_enhance_tasks')
+        cursor.execute('ALTER TABLE video_enhance_tasks_new RENAME TO video_enhance_tasks')
+        # Recreate indexes
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_user_id ON video_enhance_tasks(user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_task_id ON video_enhance_tasks(task_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_status ON video_enhance_tasks(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_created_at ON video_enhance_tasks(created_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_user_project_created ON video_enhance_tasks(user_id, project_id, created_at DESC)')
+
+    # If table has tool_version but not resolution, add resolution column
+    elif 'tool_version' in columns and 'resolution' not in columns:
+        cursor.execute(
+            '''
+            CREATE TABLE video_enhance_tasks_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                task_id TEXT UNIQUE NOT NULL,
+                project_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'queued',
+                source_video_url TEXT NOT NULL,
+                source_video_id TEXT,
+                source_filename TEXT,
+                input_payload_json TEXT,
+                tool_version TEXT NOT NULL DEFAULT 'standard',
+                resolution TEXT NOT NULL DEFAULT '1080p',
+                raw_response_json TEXT,
+                result_json TEXT,
+                video_url TEXT,
+                output_filename TEXT,
+                cover_url TEXT,
+                fail_reason TEXT,
+                token_usage INTEGER,
+                usage_json TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+            '''
+        )
+        cursor.execute(
+            '''
+            INSERT INTO video_enhance_tasks_new (
+                id, user_id, task_id, project_id, created_at, updated_at, status,
+                source_video_url, source_video_id, source_filename, input_payload_json,
+                tool_version, resolution, raw_response_json, result_json, video_url, output_filename,
+                cover_url, fail_reason, token_usage, usage_json
+            )
+            SELECT id, user_id, task_id, project_id, created_at, updated_at, status,
+                source_video_url, source_video_id, source_filename, input_payload_json,
+                tool_version, '1080p', raw_response_json, result_json, video_url, output_filename,
+                cover_url, fail_reason, token_usage, usage_json
+            FROM video_enhance_tasks
+            '''
+        )
+        cursor.execute('DROP TABLE video_enhance_tasks')
+        cursor.execute('ALTER TABLE video_enhance_tasks_new RENAME TO video_enhance_tasks')
+        # Recreate indexes
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_user_id ON video_enhance_tasks(user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_task_id ON video_enhance_tasks(task_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_status ON video_enhance_tasks(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_created_at ON video_enhance_tasks(created_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_enhance_tasks_user_project_created ON video_enhance_tasks(user_id, project_id, created_at DESC)')
 
 
 def _decode_video_enhance_task(row):
@@ -1514,7 +1630,7 @@ def save_video_enhance_task(data):
             UPDATE video_enhance_tasks
             SET user_id = ?, project_id = ?, updated_at = ?, status = ?,
                 source_video_url = ?, source_video_id = ?, source_filename = ?,
-                input_payload_json = ?, resolution = ?, raw_response_json = ?,
+                input_payload_json = ?, tool_version = ?, resolution = ?, raw_response_json = ?,
                 result_json = ?, video_url = ?, output_filename = ?, cover_url = ?,
                 fail_reason = ?, token_usage = ?, usage_json = ?
             WHERE task_id = ?
@@ -1528,6 +1644,7 @@ def save_video_enhance_task(data):
                 data.get('source_video_id'),
                 data.get('source_filename'),
                 json.dumps(data.get('input_payload_json', {})),
+                data.get('tool_version'),
                 data.get('resolution'),
                 json.dumps(data.get('raw_response_json', {})),
                 json.dumps(data.get('result_json', {})),
@@ -1547,9 +1664,9 @@ def save_video_enhance_task(data):
             INSERT INTO video_enhance_tasks (
                 user_id, task_id, project_id, created_at, updated_at, status,
                 source_video_url, source_video_id, source_filename, input_payload_json,
-                resolution, raw_response_json, result_json, video_url, output_filename,
+                tool_version, resolution, raw_response_json, result_json, video_url, output_filename,
                 cover_url, fail_reason, token_usage, usage_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
             (
                 data.get('user_id'),
@@ -1562,6 +1679,7 @@ def save_video_enhance_task(data):
                 data.get('source_video_id'),
                 data.get('source_filename'),
                 json.dumps(data.get('input_payload_json', {})),
+                data.get('tool_version'),
                 data.get('resolution'),
                 json.dumps(data.get('raw_response_json', {})),
                 json.dumps(data.get('result_json', {})),

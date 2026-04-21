@@ -14,7 +14,7 @@ import requests
 import database
 from app.config import config
 from app.services.oss_service import oss_service
-from app.services.video_enhance_client import video_enhance_client, SUPPORTED_ENHANCE_RESOLUTIONS
+from app.services.video_enhance_client import video_enhance_client, SUPPORTED_TOOL_VERSIONS, SUPPORTED_ENHANCE_RESOLUTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +23,13 @@ TERMINAL_STATUSES = SUCCESS_STATUSES | {"failed", "cancelled", "canceled", "expi
 
 
 def _generate_output_filename(source_filename: str, resolution: str) -> str:
-    """生成输出文件名：原文件名-分辨率.mp4"""
+    """生成输出文件名：原文件名-enhanced-{resolution}.mp4"""
     if not source_filename:
         return f"enhanced-{resolution}.mp4"
 
     # 移除扩展名
     base_name = source_filename.rsplit(".", 1)[0] if "." in source_filename else source_filename
-    return f"{base_name}-{resolution}.mp4"
+    return f"{base_name}-enhanced-{resolution}.mp4"
 
 
 def _pick_nested(source: Any, *paths: tuple[str, ...]) -> Any:
@@ -141,7 +141,8 @@ class VideoEnhanceService:
         source_video_url: str,
         source_video_id: str | None,
         source_filename: str | None,
-        resolution: str,
+        tool_version: str = "standard",
+        resolution: str = "1080p",
     ) -> dict[str, Any]:
         """
         创建画质增强任务。
@@ -152,11 +153,15 @@ class VideoEnhanceService:
             source_video_url: 原视频URL
             source_video_id: 原视频在video_library中的ID（可选）
             source_filename: 原文件名（可选）
-            resolution: 目标分辨率
+            tool_version: 工具版本 (standard, professional)
+            resolution: 目标分辨率 (240p, 360p, 480p, 540p, 720p, 1080p, 2k, 4k)
 
         Returns:
             任务信息字典
         """
+        if tool_version not in SUPPORTED_TOOL_VERSIONS:
+            raise ValueError(f"不支持的工具版本: {tool_version}")
+
         if resolution not in SUPPORTED_ENHANCE_RESOLUTIONS:
             raise ValueError(f"不支持的目标分辨率: {resolution}")
 
@@ -169,12 +174,13 @@ class VideoEnhanceService:
         # 构建输入参数
         input_payload = {
             "video_url": source_video_url,
+            "tool_version": tool_version,
             "resolution": resolution,
         }
 
         # 调用远端API
         if self.client.is_configured():
-            remote = self.client.create_task(source_video_url, resolution)
+            remote = self.client.create_task(source_video_url, tool_version, resolution)
         else:
             # 未配置API时使用本地模拟
             remote = {
@@ -196,6 +202,7 @@ class VideoEnhanceService:
             "source_video_id": source_video_id,
             "source_filename": source_filename,
             "input_payload_json": input_payload,
+            "tool_version": tool_version,
             "resolution": resolution,
             "output_filename": output_filename,
             "raw_response_json": remote,
@@ -356,6 +363,7 @@ class VideoEnhanceService:
             "source_video_id": task.get("source_video_id"),
             "source_filename": task.get("source_filename"),
             "input_payload_json": task.get("input_payload_json", {}),
+            "tool_version": task.get("tool_version"),
             "resolution": task.get("resolution"),
             "output_filename": task.get("output_filename"),
             "raw_response_json": remote,
@@ -415,6 +423,7 @@ class VideoEnhanceService:
             "library_group": "video",
             "source": "video_enhance",
             "source_task_id": task_id,
+            "tool_version": task.get("tool_version"),
             "resolution": task.get("resolution"),
             "source_filename": task.get("source_filename"),
             "source_video_id": task.get("source_video_id"),

@@ -12,7 +12,8 @@ from app.config import config
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_ENHANCE_RESOLUTIONS = {"720p", "1080p", "2k", "4k"}
+SUPPORTED_TOOL_VERSIONS = {"standard", "professional"}
+SUPPORTED_ENHANCE_RESOLUTIONS = {"240p", "360p", "480p", "540p", "720p", "1080p", "2k", "4k"}
 
 
 class VideoEnhanceClient:
@@ -106,24 +107,29 @@ class VideoEnhanceClient:
         )
         raise ValueError(f"画质增强 {action} 请求失败，请稍后重试。") from exc
 
-    def create_task(self, video_url: str, resolution: str) -> dict[str, Any]:
+    def create_task(self, video_url: str, tool_version: str = "standard", resolution: str = "1080p") -> dict[str, Any]:
         """
         提交画质增强任务。
 
         Args:
             video_url: 原视频URL
-            resolution: 目标分辨率 (720p, 1080p, 2k, 4k)
+            tool_version: 工具版本 (standard, professional)
+            resolution: 目标分辨率 (240p, 360p, 480p, 540p, 720p, 1080p, 2k, 4k)
 
         Returns:
             API响应数据，包含task_id
         """
+        if tool_version not in SUPPORTED_TOOL_VERSIONS:
+            raise ValueError(f"不支持的工具版本: {tool_version}，仅支持 standard, professional")
+
         if resolution not in SUPPORTED_ENHANCE_RESOLUTIONS:
-            raise ValueError(f"不支持的目标分辨率: {resolution}，仅支持 720p, 1080p, 2k, 4k")
+            raise ValueError(f"不支持的目标分辨率: {resolution}，仅支持 240p, 360p, 480p, 540p, 720p, 1080p, 2k, 4k")
 
         url = self._url(self.create_path)
         headers = self._headers()
         payload = {
             "video_url": video_url,
+            "tool_version": tool_version,
             "resolution": resolution,
         }
         timeout = (15, 180)
@@ -145,9 +151,9 @@ class VideoEnhanceClient:
                 timeout=timeout,
             )
         except requests.Timeout as exc:
-            self._raise_timeout("create_task", exc, video_url=video_url, resolution=resolution)
+            self._raise_timeout("create_task", exc, video_url=video_url, tool_version=tool_version, resolution=resolution)
         except requests.RequestException as exc:
-            self._raise_request_error("create_task", exc, video_url=video_url, resolution=resolution, url=url)
+            self._raise_request_error("create_task", exc, video_url=video_url, tool_version=tool_version, resolution=resolution, url=url)
 
         self._log_response("create_task", response)
 
@@ -156,10 +162,11 @@ class VideoEnhanceClient:
         except requests.HTTPError as exc:
             body = response.text
             logger.error(
-                "[video-enhance][create][error] status=%s body=%s video_url=%s resolution=%s",
+                "[video-enhance][create][error] status=%s body=%s video_url=%s tool_version=%s resolution=%s",
                 response.status_code,
                 body,
                 video_url,
+                tool_version,
                 resolution,
             )
             raise ValueError(

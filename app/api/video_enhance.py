@@ -43,13 +43,15 @@ def create_enhance_task():
     source_video_url = (data.get("source_video_url") or "").strip()
     source_video_id = data.get("source_video_id")
     source_filename = (data.get("source_filename") or "").strip()
+    tool_version = (data.get("tool_version") or "standard").strip().lower()
     resolution = (data.get("resolution") or "1080p").strip().lower()
 
     logger.info(
-        "[video-enhance][create][request] user_id=%s project_id=%s source_video_url=%s resolution=%s source_filename=%s",
+        "[video-enhance][create][request] user_id=%s project_id=%s source_video_url=%s tool_version=%s resolution=%s source_filename=%s",
         user_id,
         project_id,
         source_video_url,
+        tool_version,
         resolution,
         source_filename,
     )
@@ -60,6 +62,7 @@ def create_enhance_task():
         source_video_url=source_video_url,
         source_video_id=source_video_id,
         source_filename=source_filename,
+        tool_version=tool_version,
         resolution=resolution,
     )
 

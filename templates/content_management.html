@@ -125,6 +125,13 @@
             <div style="padding:12px 0;">
                 <div class="small-hint" style="margin-bottom:12px;">原视频：<span id="enhanceSourceFilename"></span></div>
                 <div>
+                    <label for="enhanceToolVersion" style="display:block;margin-bottom:6px;">工具版本</label>
+                    <select id="enhanceToolVersion" style="width:100%;padding:8px;border-radius:8px;">
+                        <option value="standard" selected>standard（推荐）</option>
+                        <option value="professional">professional</option>
+                    </select>
+                </div>
+                <div style="margin-top:12px;">
                     <label for="enhanceResolution" style="display:block;margin-bottom:6px;">目标分辨率</label>
                     <select id="enhanceResolution" style="width:100%;padding:8px;border-radius:8px;">
                         <option value="720p">720p</option>
@@ -471,6 +478,7 @@
             if (!asset) return;
             currentEnhanceAsset = asset;
             document.getElementById('enhanceSourceFilename').textContent = asset.filename || '-';
+            document.getElementById('enhanceToolVersion').value = 'standard';
             document.getElementById('enhanceResolution').value = '1080p';
             document.getElementById('enhanceModal').style.display = 'flex';
         }
@@ -482,6 +490,7 @@
 
         async function submitEnhance() {
             if (!currentEnhanceAsset) return;
+            const tool_version = document.getElementById('enhanceToolVersion').value;
             const resolution = document.getElementById('enhanceResolution').value;
             const submitBtn = document.getElementById('submitEnhanceBtn');
             submitBtn.disabled = true;
@@ -495,6 +504,7 @@
                         source_video_url: currentEnhanceAsset.url,
                         source_video_id: currentEnhanceAsset.id,
                         source_filename: currentEnhanceAsset.filename,
+                        tool_version: tool_version,
                         resolution: resolution
                     })
                 });
