@@ -9,9 +9,11 @@ direct imports from the old monolithic entry file.
 from __future__ import annotations
 
 import logging
+import json
 import os
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -133,6 +135,28 @@ def setup_request_logging(app: Flask) -> None:
 def setup_operation_logging(app: Flask) -> None:
     """注册操作日志记录钩子，记录用户API请求。"""
 
+    # 创建操作日志目录
+    log_dir = Path(config.OPERATION_LOG_DIR)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    def write_log_to_file(log_data: dict) -> None:
+        """将日志写入按天分隔的文件。"""
+        try:
+            # 按天生成文件名
+            today = datetime.now().strftime("%Y-%m-%d")
+            log_file = log_dir / f"operation_{today}.log"
+
+            # 添加时间戳
+            log_data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+            # 写入JSON格式的日志（每行一条记录）
+            log_line = json.dumps(log_data, ensure_ascii=False)
+
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(log_line + "\n")
+        except Exception as e:
+            logger.warning("[operation_log] file write failed: %s", e)
+
     @app.after_request
     def log_operation(response):
         # 跳过静态资源和不需要记录的路径
@@ -180,14 +204,21 @@ def setup_operation_logging(app: Flask) -> None:
             "duration_ms": duration_ms,
         }
 
-        # 异步写入日志（避免阻塞响应）
+        # 异步写入数据库和文件（避免阻塞响应）
         threading.Thread(
-            target=database.save_operation_log,
+            target=_write_log_async,
             args=(log_data,),
             daemon=True,
         ).start()
 
         return response
+
+    def _write_log_async(log_data: dict) -> None:
+        """异步写入日志到数据库和文件。"""
+        # 写入数据库
+        database.save_operation_log(log_data)
+        # 写入文件
+        write_log_to_file(log_data)
 
 
 def create_app(config_name: str | None = None) -> Flask:

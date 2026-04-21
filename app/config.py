@@ -87,6 +87,7 @@ class Config:
     # ==================== 日志配置 ====================
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "app.log"
+    OPERATION_LOG_DIR: str = "logs/operations"
 
     # ==================== 视觉服务配置 ====================
     VISUAL_API_REGION: str = "cn-north-1"
