@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,11 @@ import requests
 import database
 from app.config import config
 from app.services.omni_video_client import omni_video_client, is_intl_model
+from app.services.operation_log_service import (
+    log_external_api_call,
+    log_task_operation,
+    log_video_download,
+)
 from app.services.oss_service import oss_service
 
 logger = logging.getLogger(__name__)
@@ -485,6 +491,7 @@ def _download_and_upload_to_oss(
     filename: str,
     user_id: int,
     project_id: int | None,
+    username: str | None = None,
 ) -> tuple[str | None, bool]:
     """
     从远程URL下载视频并上传到OSS，返回(OSS永久URL, 是否过期)。
@@ -492,7 +499,18 @@ def _download_and_upload_to_oss(
     如果OSS不可用或下载失败，返回(None, False)。
     如果下载返回403（URL过期），返回(None, True)。
     """
+    start_time = time.time()
+
     if not oss_service.is_available():
+        log_video_download(
+            user_id=user_id,
+            username=username,
+            project_id=project_id,
+            source_url=video_url,
+            success=False,
+            error="OSS不可用",
+            duration_ms=int((time.time() - start_time) * 1000),
+        )
         return None, False
 
     try:
@@ -503,18 +521,21 @@ def _download_and_upload_to_oss(
         temp_dir = tempfile.gettempdir()
         temp_file = os.path.join(temp_dir, filename)
 
+        file_size = 0
         with open(temp_file, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
+                    file_size += len(chunk)
 
-        logger.info("[omni-video] Video downloaded to temp: %s", temp_file)
+        logger.info("[omni-video] Video downloaded to temp: %s, size=%d", temp_file, file_size)
 
         oss_url = oss_service.upload_file(
             temp_file,
             user_id=user_id,
             project_id=project_id,
             file_type="video",
+            username=username,
         )
 
         # 清理临时文件
@@ -523,19 +544,78 @@ def _download_and_upload_to_oss(
         except Exception:
             pass
 
+        duration_ms = int((time.time() - start_time) * 1000)
+
         if oss_url:
             logger.info("[omni-video] Video uploaded to OSS: %s", oss_url)
+            log_video_download(
+                user_id=user_id,
+                username=username,
+                project_id=project_id,
+                source_url=video_url,
+                target_path=temp_file,
+                oss_url=oss_url,
+                file_size=file_size,
+                success=True,
+                duration_ms=duration_ms,
+            )
             return oss_url, False
 
-    except requests.HTTPError as e:
-        if e.response is not None and e.response.status_code == 403:
-            logger.warning("[omni-video] Video URL expired (403): %s", video_url)
-            return None, True
-        logger.error("[omni-video] Failed to download/upload video: %s", e)
-    except Exception as e:
-        logger.error("[omni-video] Failed to download/upload video: %s", e)
+        log_video_download(
+            user_id=user_id,
+            username=username,
+            project_id=project_id,
+            source_url=video_url,
+            target_path=temp_file,
+            file_size=file_size,
+            success=False,
+            error="OSS上传失败",
+            duration_ms=duration_ms,
+        )
+        return None, False
 
-    return None, False
+    except requests.HTTPError as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        is_expired = e.response is not None and e.response.status_code == 403
+        if is_expired:
+            logger.warning("[omni-video] Video URL expired (403): %s", video_url)
+            log_video_download(
+                user_id=user_id,
+                username=username,
+                project_id=project_id,
+                source_url=video_url,
+                success=False,
+                is_expired=True,
+                duration_ms=duration_ms,
+                error="URL过期(403)",
+            )
+            return None, True
+        error_str = str(e)
+        logger.error("[omni-video] Failed to download/upload video: %s", e)
+        log_video_download(
+            user_id=user_id,
+            username=username,
+            project_id=project_id,
+            source_url=video_url,
+            success=False,
+            duration_ms=duration_ms,
+            error=error_str,
+        )
+        return None, False
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        error_str = str(e)
+        logger.error("[omni-video] Failed to download/upload video: %s", e)
+        log_video_download(
+            user_id=user_id,
+            username=username,
+            project_id=project_id,
+            source_url=video_url,
+            success=False,
+            duration_ms=duration_ms,
+            error=error_str,
+        )
+        return None, False
 
 
 class OmniVideoService:
@@ -548,6 +628,7 @@ class OmniVideoService:
     def _ensure_video_library_entry(self, task: dict[str, Any]) -> None:
         status = str(task.get("status") or "").lower()
         video_url = task.get("video_url")
+        username = task.get("username")
         if status not in SUCCESS_STATUSES or not video_url:
             return
 
@@ -581,6 +662,7 @@ class OmniVideoService:
                     filename,
                     task["user_id"],
                     task.get("project_id"),
+                    username=username,
                 )
                 if oss_url:
                     # 更新数据库中的URL
@@ -626,6 +708,7 @@ class OmniVideoService:
                 filename,
                 task["user_id"],
                 task.get("project_id"),
+                username=username,
             )
             if oss_url:
                 # 更新视频库中的URL
@@ -688,19 +771,59 @@ class OmniVideoService:
         return self._persist_and_load(record)
 
     def create_task(self, user_id: int, project_id: int | None, data: dict[str, Any]) -> dict[str, Any]:
+        start_time = time.time()
+        username = data.get("_username")
         payload = build_omni_video_payload(data)
         if not payload["prompt"]:
-            raise ValueError("提示词不能为空")
+            error_msg = "提示词不能为空"
+            log_task_operation(
+                user_id=user_id,
+                username=username,
+                project_id=project_id,
+                task_type="omni_video",
+                operation="create",
+                success=False,
+                error=error_msg,
+            )
+            raise ValueError(error_msg)
 
         model = payload.get("model")
-        if self.client.is_configured(model=model):
+        is_configured = self.client.is_configured(model=model)
+        api_endpoint = self.client._url(self.client.create_path, model=model) if is_configured else "local"
+
+        if is_configured:
             remote = self.client.create_task(payload)
+            log_external_api_call(
+                user_id=user_id,
+                username=username,
+                project_id=project_id,
+                service_name="seedance",
+                api_endpoint=api_endpoint,
+                request_method="POST",
+                request_payload=payload,
+                response_status=200 if remote else None,
+                response_data=remote,
+                task_id=remote.get("task_id") if remote else None,
+                duration_ms=int((time.time() - start_time) * 1000),
+                success=bool(remote),
+            )
         else:
             remote = {
                 "task_id": f"local-{uuid.uuid4().hex[:16]}",
                 "status": "queued",
                 "message": "Seedance 2.0 尚未完成远端配置，当前为本地占位任务。",
             }
+            log_task_operation(
+                user_id=user_id,
+                username=username,
+                project_id=project_id,
+                task_type="omni_video",
+                task_id=remote["task_id"],
+                operation="create",
+                task_status="queued",
+                success=True,
+                error="远端未配置，创建本地占位任务",
+            )
 
         record = _task_record_from_remote(
             user_id=user_id,
@@ -708,7 +831,30 @@ class OmniVideoService:
             local_payload=payload,
             remote=remote,
         )
-        return self._persist_and_load(record)
+        # 传递 username 以便后续操作记录
+        record["username"] = username
+        result = self._persist_and_load(record)
+
+        log_task_operation(
+            user_id=user_id,
+            username=username,
+            project_id=project_id,
+            task_type="omni_video",
+            task_id=result.get("task_id"),
+            operation="create",
+            task_status=result.get("status"),
+            task_data={
+                "model": result.get("model"),
+                "resolution": result.get("resolution"),
+                "aspect_ratio": result.get("aspect_ratio"),
+                "duration": result.get("duration"),
+                "frame_count": result.get("frame_count"),
+            },
+            duration_ms=int((time.time() - start_time) * 1000),
+            success=True,
+        )
+
+        return result
 
     def list_tasks(
         self,

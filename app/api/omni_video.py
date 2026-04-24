@@ -14,6 +14,7 @@ from volcenginesdkcore.rest import ApiException
 from app.config import config
 from app.decorators import handle_api_error, login_required
 from app.services.omni_video_service import omni_video_service
+from app.services.operation_log_service import log_balance_query
 
 logger = logging.getLogger(__name__)
 omni_video_bp = Blueprint("omni_video", __name__)
@@ -45,10 +46,12 @@ def omni_video_tasks_page():
 def create_omni_video_task():
     user_id = session.get("user_id")
     project_id = session.get("current_project_id")
+    username = session.get("username")
     data = request.get_json(silent=True) or {}
     data["_user_id"] = user_id
     data["_project_id"] = project_id
     data["_public_origin"] = request.host_url.rstrip("/")
+    data["_username"] = username
     logger.info(
         "[omni-video][create][request] user_id=%s project_id=%s model=%s payload=%s",
         user_id,
@@ -260,7 +263,19 @@ def get_omni_video_config():
 @login_required
 def get_volcengine_balance():
     """查询火山引擎账户余额"""
+    import time
+    start_time = time.time()
+    user_id = session.get("user_id")
+    username = session.get("username")
+
     if not config.is_volcengine_configured():
+        log_balance_query(
+            user_id=user_id,
+            username=username,
+            service_name="volcengine",
+            success=False,
+            error="火山引擎配置缺失",
+        )
         return jsonify({"success": False, "error": "火山引擎配置缺失"}), 400
 
     try:
@@ -283,11 +298,42 @@ def get_volcengine_balance():
         elif hasattr(result, "result") and hasattr(result.result, "available_balance"):
             balance = float(result.result.available_balance) if result.result.available_balance else 0
 
+        duration_ms = int((time.time() - start_time) * 1000)
         logger.info("[omni-video][balance] balance=%s", balance)
+
+        log_balance_query(
+            user_id=user_id,
+            username=username,
+            service_name="volcengine",
+            available_balance=balance,
+            success=True,
+            duration_ms=duration_ms,
+        )
+
         return jsonify({"success": True, "available_balance": balance})
     except ApiException as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        error_str = str(e)
         logger.error("[omni-video][balance] API error: %s", e)
+        log_balance_query(
+            user_id=user_id,
+            username=username,
+            service_name="volcengine",
+            success=False,
+            duration_ms=duration_ms,
+            error=f"API错误: {error_str}",
+        )
         return jsonify({"success": False, "error": f"API错误: {e}"}), 500
     except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        error_str = str(e)
         logger.error("[omni-video][balance] error: %s", e)
+        log_balance_query(
+            user_id=user_id,
+            username=username,
+            service_name="volcengine",
+            success=False,
+            duration_ms=duration_ms,
+            error=f"查询失败: {error_str}",
+        )
         return jsonify({"success": False, "error": f"查询失败: {e}"}), 500

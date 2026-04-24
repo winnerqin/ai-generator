@@ -562,12 +562,17 @@
                 document.getElementById('seed').value = data.seed ?? -1;
                 document.getElementById('generateAudio').checked = data.generate_audio !== false;
 
-                if (data.frame_count) {
-                    document.getElementById('frameCount').value = data.frame_count;
+                const frameCountValue = data.frame_count;
+                const isValidFrameCount = frameCountValue != null && frameCountValue >= 29 && frameCountValue <= 289;
+                if (isValidFrameCount) {
+                    document.getElementById('frameCount').value = frameCountValue;
+                    // 保存原始 duration 值，以便用户清空 frameCount 后能恢复
+                    window._prefillBackupDuration = data.duration ?? -1;
                     document.getElementById('duration').value = '-1';
                 } else {
                     document.getElementById('frameCount').value = '';
                     document.getElementById('duration').value = String(data.duration ?? -1);
+                    window._prefillBackupDuration = undefined;
                 }
 
                 selectedAssets = Array.isArray(data.reference_urls)
@@ -611,18 +616,27 @@
 
         function syncDurationState() {
             const frameCount = document.getElementById('frameCount').value.trim();
-            document.getElementById('duration').disabled = !!frameCount;
+            const durationEl = document.getElementById('duration');
+            const wasDisabled = durationEl.disabled;
+            durationEl.disabled = !!frameCount;
+            // 当 frameCount 被清空（从有值变为无值）且存在备份 duration 时，恢复备份值
+            if (!frameCount && wasDisabled && window._prefillBackupDuration != null) {
+                durationEl.value = String(window._prefillBackupDuration);
+                window._prefillBackupDuration = undefined;
+            }
         }
 
         function buildPayload() {
             const frameCountValue = document.getElementById('frameCount').value.trim();
+            const hasFrameCount = frameCountValue && Number(frameCountValue) >= 29 && Number(frameCountValue) <= 289;
             return {
                 prompt: document.getElementById('prompt').value.trim(),
                 filename: document.getElementById('filename').value.trim(),
                 model: document.getElementById('model').value,
                 resolution: document.getElementById('resolution').value,
-                duration: Number(document.getElementById('duration').value || -1),
-                frame_count: frameCountValue ? Number(frameCountValue) : null,
+                // 当有有效的 frame_count 时，duration 不应提交（设为 -1 让后端忽略）
+                duration: hasFrameCount ? -1 : Number(document.getElementById('duration').value || -1),
+                frame_count: hasFrameCount ? Number(frameCountValue) : null,
                 aspect_ratio: document.getElementById('aspectRatio').value,
                 seed: Number(document.getElementById('seed').value || -1),
                 generate_audio: document.getElementById('generateAudio').checked,

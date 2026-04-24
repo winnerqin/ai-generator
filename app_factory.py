@@ -133,7 +133,7 @@ def setup_request_logging(app: Flask) -> None:
 
 
 def setup_operation_logging(app: Flask) -> None:
-    """注册操作日志记录钩子，记录用户API请求。"""
+    """注册操作日志记录钩子，记录用户API请求和详细响应。"""
 
     # 创建操作日志目录
     log_dir = Path(config.OPERATION_LOG_DIR)
@@ -146,16 +146,56 @@ def setup_operation_logging(app: Flask) -> None:
             today = datetime.now().strftime("%Y-%m-%d")
             log_file = log_dir / f"operation_{today}.log"
 
-            # 添加时间戳
-            log_data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            # 添加毫秒级时间戳，确保放在第一列
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            ordered_log_data = {"timestamp": timestamp}
+            for key, value in log_data.items():
+                ordered_log_data[key] = value
 
             # 写入JSON格式的日志（每行一条记录）
-            log_line = json.dumps(log_data, ensure_ascii=False)
+            log_line = json.dumps(ordered_log_data, ensure_ascii=False)
 
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(log_line + "\n")
         except Exception as e:
             logger.warning("[operation_log] file write failed: %s", e)
+
+    def extract_response_data(response) -> dict:
+        """提取完整的响应数据"""
+        try:
+            content_type = (response.headers.get("Content-Type") or "").lower()
+
+            # 非JSON响应，返回基本信息
+            if "application/json" not in content_type:
+                return {
+                    "content_type": content_type,
+                    "summary": extract_response_summary(response),
+                }
+
+            # 解析JSON响应
+            body = response.get_data(as_text=True)
+            data = json.loads(body)
+
+            # 截断过大的响应数据
+            max_len = 2000
+            if isinstance(data, dict):
+                # 对于包含大量数据的响应，只保留关键信息
+                truncated_data = {}
+                for key, value in data.items():
+                    if isinstance(value, str) and len(value) > max_len:
+                        truncated_data[key] = value[:max_len] + "...<truncated>"
+                    elif isinstance(value, list) and len(value) > 20:
+                        truncated_data[key] = value[:20] + [f"...<truncated {len(value) - 20} items>"]
+                    elif isinstance(value, dict) and len(str(value)) > max_len:
+                        truncated_data[key] = f"<dict size={len(str(value))}>"
+                    else:
+                        truncated_data[key] = value
+                return truncated_data
+
+            return {"data": str(data)[:max_len] if len(str(data)) > max_len else data}
+
+        except Exception as e:
+            return {"error": str(e), "summary": "<unavailable>"}
 
     @app.after_request
     def log_operation(response):
@@ -187,11 +227,12 @@ def setup_operation_logging(app: Flask) -> None:
         # 计算耗时
         duration_ms = int((time.time() - getattr(g, "start_time", time.time())) * 1000)
 
-        # 提取响应摘要
-        response_summary = extract_response_summary(response)
+        # 提取完整响应数据
+        response_data = extract_response_data(response)
 
         # 构建日志数据
         log_data = {
+            "log_type": "api_response",
             "user_id": user_id,
             "username": username,
             "project_id": project_id,
@@ -199,7 +240,7 @@ def setup_operation_logging(app: Flask) -> None:
             "request_method": request.method,
             "request_params": sanitized_params,
             "response_status": response.status_code,
-            "response_summary": response_summary,
+            "response_data": response_data,
             "ip_address": request.remote_addr,
             "duration_ms": duration_ms,
         }

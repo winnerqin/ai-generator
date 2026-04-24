@@ -2,13 +2,16 @@
 阿里云 OSS 服务模块
 
 提供 OSS 文件上传、下载、列表等操作的封装
+所有操作都会记录到操作日志中
 """
 
 import os
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.config import config
+from app.services.operation_log_service import log_oss_operation
 
 
 class OSSService:
@@ -72,6 +75,7 @@ class OSSService:
         user_id: Optional[int] = None,
         project_id: Optional[int] = None,
         file_type: str = "image",
+        username: Optional[str] = None,
     ) -> Optional[str]:
         """
         上传文件到 OSS
@@ -81,13 +85,27 @@ class OSSService:
             user_id: 用户ID，用于隔离用户文件
             project_id: 项目ID，用于项目隔离
             file_type: 文件类型 (image, video, sample, person, scene, document)
+            username: 用户名，用于日志记录
 
         Returns:
             公网访问 URL，失败返回 None
         """
         if not os.path.exists(file_path):
             print(f"[OSS] 文件不存在: {file_path}")
+            log_oss_operation(
+                user_id=user_id,
+                username=username,
+                project_id=project_id,
+                operation="upload",
+                file_path=file_path,
+                file_type=file_type,
+                success=False,
+                error="文件不存在",
+            )
             return None
+
+        start_time = time.time()
+        file_size = os.path.getsize(file_path)
 
         try:
             self._init_oss()
@@ -101,14 +119,46 @@ class OSSService:
 
             # 返回公网访问 URL
             public_url = f"https://{self._endpoint_full}/{object_key}"
+            duration_ms = int((time.time() - start_time) * 1000)
+
             print(f"[OSS] 上传成功: {file_path} -> {object_key}")
+
+            log_oss_operation(
+                user_id=user_id,
+                username=username,
+                project_id=project_id,
+                operation="upload",
+                file_path=file_path,
+                object_key=object_key,
+                file_type=file_type,
+                file_size=file_size,
+                result_url=public_url,
+                success=True,
+                duration_ms=duration_ms,
+            )
+
             return public_url
 
         except Exception as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+            error_str = str(e)
             print(f"[OSS] 上传失败: {e}")
             import traceback
-
             traceback.print_exc()
+
+            log_oss_operation(
+                user_id=user_id,
+                username=username,
+                project_id=project_id,
+                operation="upload",
+                file_path=file_path,
+                file_type=file_type,
+                file_size=file_size,
+                success=False,
+                duration_ms=duration_ms,
+                error=error_str,
+            )
+
             return None
 
     def _generate_object_key(
@@ -183,23 +233,59 @@ class OSSService:
             else:
                 return f"ai-images/{timestamp}/{filename}"
 
-    def delete_file(self, object_key: str) -> bool:
+    def delete_file(
+        self,
+        object_key: str,
+        user_id: Optional[int] = None,
+        project_id: Optional[int] = None,
+        username: Optional[str] = None,
+    ) -> bool:
         """
         删除 OSS 中的文件
 
         Args:
             object_key: OSS 对象键
+            user_id: 用户ID
+            project_id: 项目ID
+            username: 用户名
 
         Returns:
             是否删除成功
         """
+        start_time = time.time()
         try:
             self._init_oss()
             self._bucket.delete_object(object_key)
+            duration_ms = int((time.time() - start_time) * 1000)
             print(f"[OSS] 删除成功: {object_key}")
+
+            log_oss_operation(
+                user_id=user_id,
+                username=username,
+                project_id=project_id,
+                operation="delete",
+                object_key=object_key,
+                success=True,
+                duration_ms=duration_ms,
+            )
+
             return True
         except Exception as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+            error_str = str(e)
             print(f"[OSS] 删除失败: {object_key}, 错误: {e}")
+
+            log_oss_operation(
+                user_id=user_id,
+                username=username,
+                project_id=project_id,
+                operation="delete",
+                object_key=object_key,
+                success=False,
+                duration_ms=duration_ms,
+                error=error_str,
+            )
+
             return False
 
     def file_exists(self, object_key: str) -> bool:

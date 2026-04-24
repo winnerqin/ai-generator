@@ -438,10 +438,12 @@
                 prompt: task.prompt || payload.prompt || '',
                 model: task.model || payload.model || '',
                 resolution: task.resolution || payload.resolution || '',
-                filename_base: (payload.filename_base || task.filename || payload.filename || '').replace(/\.mp4$/i, ''),
+                // 使用 ?? 避免空字符串被跳过，优先取 payload.filename（实际存储的字段）
+                filename_base: ((payload.filename ?? task.filename ?? payload.filename_base ?? '') + '').replace(/\.mp4$/i, ''),
                 duration: payload.duration ?? task.duration ?? -1,
                 frame_count: payload.frame_count ?? null,
-                aspect_ratio: task.aspect_ratio || payload.aspect_ratio || payload.ratio || '9:16',
+                // 使用 ?? 避免 aspect_ratio 为空字符串时被跳过，同时支持 payload.ratio 作为备用
+                aspect_ratio: task.aspect_ratio ?? payload.aspect_ratio ?? payload.ratio ?? '9:16',
                 seed: task.seed ?? payload.seed ?? -1,
                 generate_audio: payload.generate_audio ?? true,
                 reference_urls: task.reference_urls_json || payload.reference_urls || [],
