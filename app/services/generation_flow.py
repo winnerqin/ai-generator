@@ -52,7 +52,7 @@ def stream_generated_images(
 
             yield {"type": "generating", "index": index + 1, "total": total_needed}
 
-            response = request_images(
+            response, _ = request_images(
                 client=client,
                 prompt=full_prompt,
                 width=width,

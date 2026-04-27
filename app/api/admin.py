@@ -16,16 +16,17 @@ admin_bp = Blueprint("admin", __name__)
 def calculate_date_range(period, start_date=None, end_date=None):
     """计算日期范围"""
     today = datetime.now().date()
+    yesterday = today - timedelta(days=1)
 
     if period == 'day':
-        start = today
+        start = today  # 今日：当天数据
         end = today
-    elif period == 'week':
-        start = today - timedelta(days=6)
-        end = today
+    elif period == 'last7days':
+        start = yesterday - timedelta(days=6)  # 近7天：前一天开始往前6天（不含今天）
+        end = yesterday
     elif period == 'month':
-        start = today - timedelta(days=29)
-        end = today
+        start = yesterday - timedelta(days=29)  # 近30天：前一天开始往前29天（不含今天）
+        end = yesterday
     else:  # custom
         # start_date 和 end_date 已经是字符串格式
         return start_date or today.strftime('%Y-%m-%d'), end_date or today.strftime('%Y-%m-%d')
@@ -190,9 +191,10 @@ def revoke_user_from_project(project_id: int):
 @handle_api_error
 def get_stats():
     """获取系统统计信息"""
-    period = request.args.get("period", "week")  # day/week/month/custom
+    period = request.args.get("period", "last7days")  # day/last7days/month/custom
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
+    username_filter = request.args.get("username")  # 用户名筛选
 
     # 计算日期范围
     start_date, end_date = calculate_date_range(period, start_date, end_date)
@@ -200,11 +202,17 @@ def get_stats():
     # 获取报表概览统计
     overview = database.get_report_overview(start_date, end_date)
 
-    # 获取用户统计
-    user_stats = database.get_user_report(start_date, end_date)
+    # 获取用户统计（支持用户名筛选）
+    user_stats = database.get_user_report(start_date, end_date, username_filter)
 
     # 获取每日统计
     daily_stats = database.get_daily_report(start_date, end_date)
+
+    # 获取任务状态统计
+    status_report = database.get_task_status_report(start_date, end_date)
+
+    # 获取Token消耗统计
+    token_report = database.get_token_usage_report(start_date, end_date)
 
     return jsonify({
         "success": True,
@@ -213,6 +221,8 @@ def get_stats():
             "overview": overview,
             "user_stats": user_stats,
             "daily_stats": daily_stats,
+            "status_report": status_report,
+            "token_report": token_report,
         }
     })
 

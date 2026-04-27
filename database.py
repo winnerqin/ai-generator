@@ -473,6 +473,16 @@ def init_database():
     cursor.execute(
         'CREATE INDEX IF NOT EXISTS idx_omni_video_tasks_created_at ON omni_video_tasks(created_at)'
     )
+
+    # 添加复合索引以优化日期范围查询和用户统计查询
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_user_date ON generation_records(user_id, DATE(created_at))')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_date ON generation_records(DATE(created_at))')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_user_date ON video_tasks(user_id, DATE(created_at))')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_date ON video_tasks(DATE(created_at))')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_omni_user_date ON omni_video_tasks(user_id, DATE(created_at))')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_omni_date ON omni_video_tasks(DATE(created_at))')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_enhance_user_date ON video_enhance_tasks(user_id, DATE(created_at))')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_enhance_date ON video_enhance_tasks(DATE(created_at))')
     
     # ===== 项目字段迁移与默认项目 =====
     def ensure_column(table_name, column_name, column_def):
@@ -496,6 +506,9 @@ def init_database():
     ensure_column('omni_video_tasks', 'token_usage', 'INTEGER')
     ensure_column('omni_video_tasks', 'usage_json', 'TEXT')
     ensure_column('omni_video_tasks', 'filename', 'TEXT')
+
+    # 图片生成记录添加token_usage字段
+    ensure_column('generation_records', 'token_usage', 'INTEGER')
     
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_records_user_project_created ON generation_records(user_id, project_id, created_at DESC)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_person_user_project_created ON person_library(user_id, project_id, created_at DESC)')
@@ -550,7 +563,7 @@ def init_database():
 def save_generation_record(data):
     """
     保存生成记录
-    
+
     Args:
         data: dict with keys:
             - user_id (required)
@@ -558,14 +571,15 @@ def save_generation_record(data):
             - width, height, num_images, seed, steps
             - sample_images (list), image_path, filename
             - batch_id (optional)
+            - token_usage (optional) - 图片生成消耗的token
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
+
     sample_images_json = json.dumps(data.get('sample_images', []))
     # 使用本地时间
     local_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
+
     # 防止重复保存相同的 image_path（避免前端/网络重试导致重复记录）
     existing = None
     try:
@@ -584,10 +598,10 @@ def save_generation_record(data):
         return existing
 
     cursor.execute('''
-        INSERT INTO generation_records 
-        (user_id, project_id, created_at, prompt, negative_prompt, aspect_ratio, resolution, width, height, 
-         num_images, seed, steps, sample_images, image_path, filename, batch_id, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO generation_records
+        (user_id, project_id, created_at, prompt, negative_prompt, aspect_ratio, resolution, width, height,
+         num_images, seed, steps, sample_images, image_path, filename, batch_id, status, token_usage)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         data.get('user_id'),
         data.get('project_id'),
@@ -605,13 +619,14 @@ def save_generation_record(data):
         data.get('image_path'),
         data.get('filename'),
         data.get('batch_id'),
-        data.get('status', 'success')
+        data.get('status', 'success'),
+        data.get('token_usage')  # 新增token_usage字段
     ))
-    
+
     record_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    
+
     return record_id
 
 
@@ -2845,16 +2860,18 @@ def get_report_overview(start_date=None, end_date=None):
 
     返回: {
         'total_users': int,
-        'image': {'total': int, 'today': int, 'week': int, 'period': int},
-        'video': {'total': int, 'today': int, 'week': int, 'period': int, 'total_duration': int, ...},
-        'enhance': {'total': int, 'today': int, 'week': int, 'period': int}
+        'image': {'total': int, 'today': int, 'last7days': int, 'period': int},
+        'video': {'total': int, 'today': int, 'last7days': int, 'period': int, 'total_duration': int, 'today_duration': int, 'last7days_duration': int, 'period_duration': int},
+        'enhance': {'total': int, 'today': int, 'last7days': int, 'period': int}
     }
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
     today = datetime.now().strftime('%Y-%m-%d')
-    week_start = (datetime.now() - timedelta(days=6)).strftime('%Y-%m-%d')
+    # 近7天：从前一天开始往前推6天（不含今天）
+    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    last7days_start = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
 
     # 总用户数
     cursor.execute('SELECT COUNT(*) FROM users')
@@ -2862,7 +2879,7 @@ def get_report_overview(start_date=None, end_date=None):
 
     # 图片统计
     image_stats = {
-        'total': 0, 'today': 0, 'week': 0, 'period': 0
+        'total': 0, 'today': 0, 'last7days': 0, 'period': 0
     }
     cursor.execute('SELECT COUNT(*) FROM generation_records')
     image_stats['total'] = cursor.fetchone()[0]
@@ -2870,8 +2887,8 @@ def get_report_overview(start_date=None, end_date=None):
     cursor.execute('SELECT COUNT(*) FROM generation_records WHERE DATE(created_at) = ?', (today,))
     image_stats['today'] = cursor.fetchone()[0]
 
-    cursor.execute('SELECT COUNT(*) FROM generation_records WHERE DATE(created_at) >= ?', (week_start,))
-    image_stats['week'] = cursor.fetchone()[0]
+    cursor.execute('SELECT COUNT(*) FROM generation_records WHERE DATE(created_at) BETWEEN ? AND ?', (last7days_start, yesterday))
+    image_stats['last7days'] = cursor.fetchone()[0]
 
     if start_date and end_date:
         cursor.execute('SELECT COUNT(*) FROM generation_records WHERE DATE(created_at) BETWEEN ? AND ?', (start_date, end_date))
@@ -2879,8 +2896,8 @@ def get_report_overview(start_date=None, end_date=None):
 
     # 视频统计（合并 video_tasks 和 omni_video_tasks）
     video_stats = {
-        'total': 0, 'today': 0, 'week': 0, 'period': 0,
-        'total_duration': 0, 'today_duration': 0, 'week_duration': 0, 'period_duration': 0
+        'total': 0, 'today': 0, 'last7days': 0, 'period': 0,
+        'total_duration': 0, 'today_duration': 0, 'last7days_duration': 0, 'period_duration': 0
     }
 
     # 总数和总时长
@@ -2907,17 +2924,17 @@ def get_report_overview(start_date=None, end_date=None):
     video_stats['today'] = row[0] or 0
     video_stats['today_duration'] = row[1] or 0
 
-    # 本周
+    # 近7天
     cursor.execute('''
         SELECT COUNT(*), COALESCE(SUM(duration), 0) FROM (
             SELECT duration, created_at FROM video_tasks
             UNION ALL
             SELECT duration, created_at FROM omni_video_tasks
-        ) WHERE DATE(created_at) >= ?
-    ''', (week_start,))
+        ) WHERE DATE(created_at) BETWEEN ? AND ?
+    ''', (last7days_start, yesterday))
     row = cursor.fetchone()
-    video_stats['week'] = row[0] or 0
-    video_stats['week_duration'] = row[1] or 0
+    video_stats['last7days'] = row[0] or 0
+    video_stats['last7days_duration'] = row[1] or 0
 
     # 指定时间段
     if start_date and end_date:
@@ -2934,7 +2951,7 @@ def get_report_overview(start_date=None, end_date=None):
 
     # 增强统计
     enhance_stats = {
-        'total': 0, 'today': 0, 'week': 0, 'period': 0
+        'total': 0, 'today': 0, 'last7days': 0, 'period': 0
     }
     cursor.execute('SELECT COUNT(*) FROM video_enhance_tasks')
     enhance_stats['total'] = cursor.fetchone()[0]
@@ -2942,8 +2959,8 @@ def get_report_overview(start_date=None, end_date=None):
     cursor.execute('SELECT COUNT(*) FROM video_enhance_tasks WHERE DATE(created_at) = ?', (today,))
     enhance_stats['today'] = cursor.fetchone()[0]
 
-    cursor.execute('SELECT COUNT(*) FROM video_enhance_tasks WHERE DATE(created_at) >= ?', (week_start,))
-    enhance_stats['week'] = cursor.fetchone()[0]
+    cursor.execute('SELECT COUNT(*) FROM video_enhance_tasks WHERE DATE(created_at) BETWEEN ? AND ?', (last7days_start, yesterday))
+    enhance_stats['last7days'] = cursor.fetchone()[0]
 
     if start_date and end_date:
         cursor.execute('SELECT COUNT(*) FROM video_enhance_tasks WHERE DATE(created_at) BETWEEN ? AND ?', (start_date, end_date))
@@ -2959,86 +2976,102 @@ def get_report_overview(start_date=None, end_date=None):
     }
 
 
-def get_user_report(start_date=None, end_date=None):
+def get_user_report(start_date=None, end_date=None, username_filter=None):
     """
-    获取用户维度统计
+    获取用户维度统计（使用单次聚合查询，消除N+1问题）
+
+    Args:
+        start_date: 开始日期
+        end_date: 结束日期
+        username_filter: 用户名筛选（可选）
 
     返回: List[{
         'user_id': int, 'username': str,
         'image_count': int, 'video_count': int, 'video_duration': int,
-        'enhance_count': int, 'total_count': int, 'last_active': str
+        'enhance_count': int, 'total_count': int, 'last_active': str,
+        'video_tokens': int, 'enhance_tokens': int, 'total_tokens': int
     }]
     """
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    users = get_all_users()
+    # 构建日期条件
+    date_condition = ""
+    date_params = []
+    if start_date and end_date:
+        date_condition = "AND DATE(created_at) BETWEEN ? AND ?"
+        date_params = [start_date, end_date]
+
+    # 用户名筛选条件
+    username_condition = ""
+    username_params = []
+    if username_filter:
+        username_condition = "AND u.username LIKE ?"
+        username_params = [f"%{username_filter}%"]
+
+    # 单次聚合查询，合并所有表的统计
+    # 使用LEFT JOIN确保所有用户都被包含，即使没有记录
+    # Token只统计全能视频(omni_video_tasks)
+    query = f'''
+        SELECT
+            u.id as user_id,
+            u.username,
+            COALESCE(g.image_count, 0) as image_count,
+            COALESCE(v.video_count, 0) as video_count,
+            COALESCE(v.video_duration, 0) as video_duration,
+            COALESCE(e.enhance_count, 0) as enhance_count,
+            COALESCE(ov.video_tokens, 0) as video_tokens,
+            MAX(COALESCE(g.last_active, ''), COALESCE(v.last_active, ''), COALESCE(e.last_active, '')) as last_active
+        FROM users u
+        LEFT JOIN (
+            SELECT user_id, COUNT(*) as image_count, MAX(created_at) as last_active
+            FROM generation_records
+            WHERE 1=1 {date_condition}
+            GROUP BY user_id
+        ) g ON u.id = g.user_id
+        LEFT JOIN (
+            SELECT user_id, COUNT(*) as video_count, SUM(COALESCE(duration, 0)) as video_duration, MAX(created_at) as last_active
+            FROM video_tasks
+            WHERE 1=1 {date_condition}
+            GROUP BY user_id
+        ) v ON u.id = v.user_id
+        LEFT JOIN (
+            SELECT user_id, COUNT(*) as enhance_count, MAX(created_at) as last_active
+            FROM video_enhance_tasks
+            WHERE 1=1 {date_condition}
+            GROUP BY user_id
+        ) e ON u.id = e.user_id
+        LEFT JOIN (
+            SELECT user_id, SUM(COALESCE(token_usage, 0)) as video_tokens
+            FROM omni_video_tasks
+            WHERE 1=1 {date_condition}
+            GROUP BY user_id
+        ) ov ON u.id = ov.user_id
+        WHERE 1=1 {username_condition}
+        ORDER BY u.id
+    '''
+
+    params = date_params + date_params + date_params + date_params + username_params
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+
     stats = []
-
-    for user in users:
-        user_id = user['id']
-
-        # 图片数量
-        if start_date and end_date:
-            cursor.execute('SELECT COUNT(*) FROM generation_records WHERE user_id = ? AND DATE(created_at) BETWEEN ? AND ?', (user_id, start_date, end_date))
-        else:
-            cursor.execute('SELECT COUNT(*) FROM generation_records WHERE user_id = ?', (user_id,))
-        image_count = cursor.fetchone()[0]
-
-        # 视频数量和时长（合并两张表）
-        if start_date and end_date:
-            cursor.execute('''
-                SELECT COUNT(*), COALESCE(SUM(duration), 0) FROM (
-                    SELECT duration, created_at, user_id FROM video_tasks
-                    UNION ALL
-                    SELECT duration, created_at, user_id FROM omni_video_tasks
-                ) WHERE user_id = ? AND DATE(created_at) BETWEEN ? AND ?
-            ''', (user_id, start_date, end_date))
-        else:
-            cursor.execute('''
-                SELECT COUNT(*), COALESCE(SUM(duration), 0) FROM (
-                    SELECT duration, user_id FROM video_tasks
-                    UNION ALL
-                    SELECT duration, user_id FROM omni_video_tasks
-                ) WHERE user_id = ?
-            ''', (user_id,))
-        row = cursor.fetchone()
-        video_count = row[0] or 0
-        video_duration = row[1] or 0
-
-        # 增强数量
-        if start_date and end_date:
-            cursor.execute('SELECT COUNT(*) FROM video_enhance_tasks WHERE user_id = ? AND DATE(created_at) BETWEEN ? AND ?', (user_id, start_date, end_date))
-        else:
-            cursor.execute('SELECT COUNT(*) FROM video_enhance_tasks WHERE user_id = ?', (user_id,))
-        enhance_count = cursor.fetchone()[0]
-
-        # 最后活动时间（取四张表的最大值）
-        cursor.execute('''
-            SELECT MAX(created_at) FROM (
-                SELECT created_at FROM generation_records WHERE user_id = ?
-                UNION ALL
-                SELECT created_at FROM video_tasks WHERE user_id = ?
-                UNION ALL
-                SELECT created_at FROM omni_video_tasks WHERE user_id = ?
-                UNION ALL
-                SELECT created_at FROM video_enhance_tasks WHERE user_id = ?
-            )
-        ''', (user_id, user_id, user_id, user_id))
-        row = cursor.fetchone()
-        last_active = row[0] if row and row[0] else None
-
-        total_count = image_count + video_count + enhance_count
-
+    for row in rows:
+        total_count = (row['image_count'] or 0) + (row['video_count'] or 0) + (row['enhance_count'] or 0)
+        video_tokens = row['video_tokens'] or 0
+        last_active = row['last_active'] if row['last_active'] else None
         stats.append({
-            'user_id': user_id,
-            'username': user['username'],
-            'image_count': image_count,
-            'video_count': video_count,
-            'video_duration': video_duration,
-            'enhance_count': enhance_count,
+            'user_id': row['user_id'],
+            'username': row['username'],
+            'image_count': row['image_count'] or 0,
+            'video_count': row['video_count'] or 0,
+            'video_duration': row['video_duration'] or 0,
+            'enhance_count': row['enhance_count'] or 0,
             'total_count': total_count,
-            'last_active': last_active
+            'last_active': last_active,
+            'video_tokens': video_tokens,
+            'total_tokens': video_tokens
         })
 
     conn.close()
@@ -3047,14 +3080,16 @@ def get_user_report(start_date=None, end_date=None):
 
 def get_daily_report(start_date=None, end_date=None, days=30):
     """
-    获取每日趋势统计
+    获取每日趋势统计（使用子查询优化，消除循环查询）
 
     返回: List[{
         'date': str, 'image_count': int, 'video_count': int,
-        'video_duration': int, 'enhance_count': int, 'user_count': int
+        'video_duration': int, 'enhance_count': int, 'user_count': int,
+        'video_tokens': int
     }]
     """
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     # 确定日期范围
@@ -3062,6 +3097,48 @@ def get_daily_report(start_date=None, end_date=None, days=30):
         end_date = datetime.now().strftime('%Y-%m-%d')
         start_date = (datetime.now() - timedelta(days=days-1)).strftime('%Y-%m-%d')
 
+    # 单次查询获取所有日期的统计数据（使用UNION合并所有活动）
+    # Token只统计全能视频(omni_video_tasks)
+    cursor.execute('''
+        WITH all_activities AS (
+            -- 图片生成（不计token）
+            SELECT DATE(created_at) as date, user_id, 'image' as type, 0 as duration, 0 as video_tokens
+            FROM generation_records
+            WHERE DATE(created_at) BETWEEN ? AND ?
+            UNION ALL
+            -- 视频任务（不计token）
+            SELECT DATE(created_at) as date, user_id, 'video' as type, COALESCE(duration, 0) as duration, 0 as video_tokens
+            FROM video_tasks
+            WHERE DATE(created_at) BETWEEN ? AND ?
+            UNION ALL
+            -- 全能视频任务（统计token）
+            SELECT DATE(created_at) as date, user_id, 'omni_video' as type, COALESCE(duration, 0) as duration, COALESCE(token_usage, 0) as video_tokens
+            FROM omni_video_tasks
+            WHERE DATE(created_at) BETWEEN ? AND ?
+            UNION ALL
+            -- 视频增强（不计token）
+            SELECT DATE(created_at) as date, user_id, 'enhance' as type, 0 as duration, 0 as video_tokens
+            FROM video_enhance_tasks
+            WHERE DATE(created_at) BETWEEN ? AND ?
+        ),
+        daily_stats AS (
+            SELECT
+                date,
+                SUM(CASE WHEN type = 'image' THEN 1 ELSE 0 END) as image_count,
+                SUM(CASE WHEN type IN ('video', 'omni_video') THEN 1 ELSE 0 END) as video_count,
+                SUM(CASE WHEN type IN ('video', 'omni_video') THEN duration ELSE 0 END) as video_duration,
+                SUM(CASE WHEN type = 'enhance' THEN 1 ELSE 0 END) as enhance_count,
+                COUNT(DISTINCT user_id) as user_count,
+                SUM(video_tokens) as video_tokens
+            FROM all_activities
+            GROUP BY date
+        )
+        SELECT * FROM daily_stats ORDER BY date DESC
+    ''', (start_date, end_date, start_date, end_date, start_date, end_date, start_date, end_date))
+
+    rows = cursor.fetchall()
+
+    # 如果需要补全日期（无数据的日期也要显示）
     # 获取日期范围内的所有日期
     cursor.execute('''
         WITH dates(date) AS (
@@ -3073,72 +3150,218 @@ def get_daily_report(start_date=None, end_date=None, days=30):
         )
         SELECT date FROM dates ORDER BY date DESC
     ''', (start_date, end_date))
-    date_rows = cursor.fetchall()
-    all_dates = [row[0] for row in date_rows]
+    all_dates = [row[0] for row in cursor.fetchall()]
 
-    # 图片每日统计
-    cursor.execute('''
-        SELECT DATE(created_at) as date, COUNT(*) as count, COUNT(DISTINCT user_id) as user_count
-        FROM generation_records
-        WHERE DATE(created_at) BETWEEN ? AND ?
-        GROUP BY DATE(created_at)
-    ''', (start_date, end_date))
-    image_data = {row[0]: {'count': row[1], 'users': row[2]} for row in cursor.fetchall()}
-
-    # 视频每日统计（合并两张表）
-    cursor.execute('''
-        SELECT DATE(created_at) as date, COUNT(*) as count, COALESCE(SUM(duration), 0) as duration, COUNT(DISTINCT user_id) as user_count
-        FROM (
-            SELECT created_at, duration, user_id FROM video_tasks
-            UNION ALL
-            SELECT created_at, duration, user_id FROM omni_video_tasks
-        )
-        WHERE DATE(created_at) BETWEEN ? AND ?
-        GROUP BY DATE(created_at)
-    ''', (start_date, end_date))
-    video_data = {row[0]: {'count': row[1], 'duration': row[2], 'users': row[3]} for row in cursor.fetchall()}
-
-    # 增强每日统计
-    cursor.execute('''
-        SELECT DATE(created_at) as date, COUNT(*) as count, COUNT(DISTINCT user_id) as user_count
-        FROM video_enhance_tasks
-        WHERE DATE(created_at) BETWEEN ? AND ?
-        GROUP BY DATE(created_at)
-    ''', (start_date, end_date))
-    enhance_data = {row[0]: {'count': row[1], 'users': row[2]} for row in cursor.fetchall()}
-
-    # 合并数据
+    # 合并数据，补全无数据的日期
+    stats_dict = {row['date']: dict(row) for row in rows}
     stats = []
     for date in all_dates:
-        img = image_data.get(date, {'count': 0, 'users': set()})
-        vid = video_data.get(date, {'count': 0, 'duration': 0, 'users': set()})
-        enh = enhance_data.get(date, {'count': 0, 'users': set()})
-
-        # 参与用户数去重
-        all_users = set()
-        if date in image_data:
-            cursor.execute('SELECT DISTINCT user_id FROM generation_records WHERE DATE(created_at) = ?', (date,))
-            all_users.update(row[0] for row in cursor.fetchall())
-        if date in video_data:
-            cursor.execute('SELECT DISTINCT user_id FROM video_tasks WHERE DATE(created_at) = ?', (date,))
-            all_users.update(row[0] for row in cursor.fetchall())
-            cursor.execute('SELECT DISTINCT user_id FROM omni_video_tasks WHERE DATE(created_at) = ?', (date,))
-            all_users.update(row[0] for row in cursor.fetchall())
-        if date in enhance_data:
-            cursor.execute('SELECT DISTINCT user_id FROM video_enhance_tasks WHERE DATE(created_at) = ?', (date,))
-            all_users.update(row[0] for row in cursor.fetchall())
-
-        stats.append({
-            'date': date,
-            'image_count': img['count'],
-            'video_count': vid['count'],
-            'video_duration': vid['duration'],
-            'enhance_count': enh['count'],
-            'user_count': len(all_users)
-        })
+        if date in stats_dict:
+            stats.append(stats_dict[date])
+        else:
+            stats.append({
+                'date': date,
+                'image_count': 0,
+                'video_count': 0,
+                'video_duration': 0,
+                'enhance_count': 0,
+                'user_count': 0,
+                'video_tokens': 0
+            })
 
     conn.close()
     return stats
+
+
+def get_task_status_report(start_date=None, end_date=None):
+    """
+    获取任务状态统计（成功率、失败率分析）
+
+    返回: {
+        'image': {'success': int, 'failed': int, 'total': int, 'success_rate': float},
+        'video': {'success': int, 'failed': int, 'pending': int, 'total': int, 'success_rate': float},
+        'omni_video': {'success': int, 'failed': int, 'queued': int, 'total': int, 'success_rate': float},
+        'enhance': {'success': int, 'failed': int, 'queued': int, 'total': int, 'success_rate': float}
+    }
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    date_condition = ""
+    date_params = []
+    if start_date and end_date:
+        date_condition = "AND DATE(created_at) BETWEEN ? AND ?"
+        date_params = [start_date, end_date]
+
+    result = {}
+
+    # 图片生成状态统计
+    query = f'''
+        SELECT status, COUNT(*) as count
+        FROM generation_records
+        WHERE 1=1 {date_condition}
+        GROUP BY status
+    '''
+    cursor.execute(query, date_params)
+    rows = cursor.fetchall()
+    image_stats = {'success': 0, 'failed': 0, 'total': 0}
+    for row in rows:
+        status = row[0] or 'success'
+        count = row[1]
+        if status == 'success':
+            image_stats['success'] = count
+        else:
+            image_stats['failed'] += count
+        image_stats['total'] += count
+    image_stats['success_rate'] = round(image_stats['success'] / max(image_stats['total'], 1) * 100, 2)
+    result['image'] = image_stats
+
+    # 视频任务状态统计
+    query = f'''
+        SELECT status, COUNT(*) as count
+        FROM video_tasks
+        WHERE 1=1 {date_condition}
+        GROUP BY status
+    '''
+    cursor.execute(query, date_params)
+    rows = cursor.fetchall()
+    video_stats = {'success': 0, 'failed': 0, 'pending': 0, 'total': 0}
+    for row in rows:
+        status = row[0] or 'pending'
+        count = row[1]
+        if status in ('success', 'completed', 'done'):
+            video_stats['success'] += count
+        elif status in ('failed', 'error'):
+            video_stats['failed'] += count
+        else:
+            video_stats['pending'] += count
+        video_stats['total'] += count
+    video_stats['success_rate'] = round(video_stats['success'] / max(video_stats['total'], 1) * 100, 2)
+    result['video'] = video_stats
+
+    # 全能视频任务状态统计
+    query = f'''
+        SELECT status, COUNT(*) as count
+        FROM omni_video_tasks
+        WHERE 1=1 {date_condition}
+        GROUP BY status
+    '''
+    cursor.execute(query, date_params)
+    rows = cursor.fetchall()
+    omni_stats = {'success': 0, 'failed': 0, 'queued': 0, 'total': 0}
+    for row in rows:
+        status = row[0] or 'queued'
+        count = row[1]
+        if status in ('success', 'completed', 'done'):
+            omni_stats['success'] += count
+        elif status in ('failed', 'error'):
+            omni_stats['failed'] += count
+        else:
+            omni_stats['queued'] += count
+        omni_stats['total'] += count
+    omni_stats['success_rate'] = round(omni_stats['success'] / max(omni_stats['total'], 1) * 100, 2)
+    result['omni_video'] = omni_stats
+
+    # 视频增强任务状态统计
+    query = f'''
+        SELECT status, COUNT(*) as count
+        FROM video_enhance_tasks
+        WHERE 1=1 {date_condition}
+        GROUP BY status
+    '''
+    cursor.execute(query, date_params)
+    rows = cursor.fetchall()
+    enhance_stats = {'success': 0, 'failed': 0, 'queued': 0, 'total': 0}
+    for row in rows:
+        status = row[0] or 'queued'
+        count = row[1]
+        if status in ('success', 'completed', 'done'):
+            enhance_stats['success'] += count
+        elif status in ('failed', 'error'):
+            enhance_stats['failed'] += count
+        else:
+            enhance_stats['queued'] += count
+        enhance_stats['total'] += count
+    enhance_stats['success_rate'] = round(enhance_stats['success'] / max(enhance_stats['total'], 1) * 100, 2)
+    result['enhance'] = enhance_stats
+
+    conn.close()
+    return result
+
+
+def get_token_usage_report(start_date=None, end_date=None):
+    """
+    获取Token消耗统计（只统计全能视频生成token）
+
+    返回: {
+        'total_tokens': int,
+        'video_generation_tokens': int,  # 全能视频生成(omni_video_tasks)
+        'daily_tokens': List[{date: str, video_tokens: int}],
+        'user_tokens': List[{user_id: int, username: str, video_tokens: int}]
+    }
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # 确定日期范围
+    if not start_date or not end_date:
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=6)).strftime('%Y-%m-%d')
+
+    # 全能视频生成Token消耗（omni_video_tasks）
+    cursor.execute('''
+        SELECT COALESCE(SUM(token_usage), 0) as tokens
+        FROM omni_video_tasks
+        WHERE DATE(created_at) BETWEEN ? AND ?
+    ''', (start_date, end_date))
+    video_generation_tokens = cursor.fetchone()[0] or 0
+
+    total_tokens = video_generation_tokens
+
+    # 每日Token消耗（只统计全能视频）
+    cursor.execute('''
+        SELECT DATE(created_at) as date, SUM(COALESCE(token_usage, 0)) as video_tokens
+        FROM omni_video_tasks
+        WHERE DATE(created_at) BETWEEN ? AND ?
+        GROUP BY DATE(created_at)
+    ''', (start_date, end_date))
+    daily_tokens = [{'date': row[0], 'video_tokens': row[1]} for row in cursor.fetchall()]
+
+    # 用户Token消耗（只统计全能视频）
+    cursor.execute('''
+        SELECT user_id, SUM(COALESCE(token_usage, 0)) as video_tokens
+        FROM omni_video_tasks
+        WHERE DATE(created_at) BETWEEN ? AND ?
+        GROUP BY user_id
+    ''', (start_date, end_date))
+    video_user = {row[0]: row[1] for row in cursor.fetchall()}
+
+    # 获取所有用户
+    cursor.execute('SELECT id, username FROM users')
+    users = cursor.fetchall()
+
+    user_tokens = []
+    for user in users:
+        user_id = user[0]
+        username = user[1]
+        vt = video_user.get(user_id, 0)
+        user_tokens.append({
+            'user_id': user_id,
+            'username': username,
+            'video_tokens': vt
+        })
+
+    # 按消耗排序
+    user_tokens.sort(key=lambda x: x['video_tokens'], reverse=True)
+
+    conn.close()
+    return {
+        'total_tokens': total_tokens,
+        'video_generation_tokens': video_generation_tokens,
+        'daily_tokens': daily_tokens,
+        'user_tokens': user_tokens
+    }
 
 
 # ==================== 操作日志函数 ====================

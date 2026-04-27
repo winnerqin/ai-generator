@@ -75,7 +75,13 @@ def request_images(
     generate_mode: str,
     image_urls: list[str],
     seed: int | None = None,
-):
+) -> tuple[Any, int]:
+    """
+    请求图片生成
+
+    Returns:
+        tuple: (response对象, total_tokens消耗)
+    """
     extra_body = build_extra_body(generate_mode, image_urls)
     if seed:
         extra_body["seed"] = seed
@@ -104,6 +110,13 @@ def request_images(
         )
         raise
 
+    # 提取usage中的total_tokens
+    total_tokens = 0
+    usage = getattr(response, "usage", None)
+    if usage:
+        total_tokens = getattr(usage, "total_tokens", 0) or 0
+        logger.info("[image-gen][remote][usage] total_tokens=%s", total_tokens)
+
     response_items = []
     for item in getattr(response, "data", []) or []:
         response_items.append(
@@ -113,8 +126,9 @@ def request_images(
             }
         )
     logger.info(
-        "[image-gen][remote][response] data_count=%s response=%s",
+        "[image-gen][remote][response] data_count=%s total_tokens=%s response=%s",
         len(response_items),
+        total_tokens,
         _to_log_text({"data": response_items}),
     )
-    return response
+    return response, total_tokens

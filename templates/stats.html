@@ -72,19 +72,27 @@
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState('');
 
-            const [period, setPeriod] = useState('week');
+            const [period, setPeriod] = useState('last7days');
             const [customStart, setCustomStart] = useState('');
             const [customEnd, setCustomEnd] = useState('');
+            const [usernameFilter, setUsernameFilter] = useState('');
             const [activeTab, setActiveTab] = useState('user');
 
             const [overview, setOverview] = useState({
                 total_users: 0,
-                image: { total: 0, today: 0, week: 0, period: 0 },
-                video: { total: 0, today: 0, week: 0, period: 0, total_duration: 0, today_duration: 0, week_duration: 0, period_duration: 0 },
-                enhance: { total: 0, today: 0, week: 0, period: 0 }
+                image: { total: 0, today: 0, last7days: 0, period: 0 },
+                video: { total: 0, today: 0, last7days: 0, period: 0, total_duration: 0, today_duration: 0, last7days_duration: 0, period_duration: 0 },
+                enhance: { total: 0, today: 0, last7days: 0, period: 0 }
             });
             const [userStats, setUserStats] = useState([]);
             const [dailyStats, setDailyStats] = useState([]);
+            const [statusReport, setStatusReport] = useState({});
+            const [tokenReport, setTokenReport] = useState({
+                total_tokens: 0,
+                video_generation_tokens: 0,
+                daily_tokens: [],
+                user_tokens: []
+            });
 
             useEffect(() => {
                 document.body.classList.add('react-theme', 'sidebar-compact');
@@ -123,6 +131,9 @@
                         params.append('start_date', customStart);
                         params.append('end_date', customEnd);
                     }
+                    if (usernameFilter) {
+                        params.append('username', usernameFilter);
+                    }
                     const res = await fetch('/api/stats?' + params.toString());
                     const json = await res.json();
                     if (!json.success) throw new Error(json.error || '加载统计失败');
@@ -131,11 +142,22 @@
                     setOverview(data.overview || {});
                     setUserStats(data.user_stats || []);
                     setDailyStats(data.daily_stats || []);
+                    setStatusReport(data.status_report || {});
+                    setTokenReport(data.token_report || { total_tokens: 0, daily_tokens: [], user_tokens: [] });
                 } catch (e) {
                     setError(e.message || '加载失败');
                 } finally {
                     setLoading(false);
                 }
+            };
+
+            const handleUsernameSearch = () => {
+                loadStats();
+            };
+
+            const clearUsernameFilter = () => {
+                setUsernameFilter('');
+                loadStats();
             };
 
             const handlePeriodChange = (p) => {
@@ -157,15 +179,15 @@
 
                 if (activeTab === 'user') {
                     filename = 'user_stats.csv';
-                    csvContent = '用户ID,用户名,图片数,视频数,视频时长(秒),增强数,总计,最后活动\n';
+                    csvContent = '用户ID,用户名,图片数,视频数,视频时长(秒),增强数,视频Token,总计,最后活动\n';
                     userStats.forEach(s => {
-                        csvContent += `${s.user_id},${s.username},${s.image_count},${s.video_count},${s.video_duration},${s.enhance_count},${s.total_count},${s.last_active || '无'}\n`;
+                        csvContent += `${s.user_id},${s.username},${s.image_count},${s.video_count},${s.video_duration},${s.enhance_count},${s.video_tokens || 0},${s.total_count},${s.last_active || '无'}\n`;
                     });
                 } else {
                     filename = 'daily_stats.csv';
-                    csvContent = '日期,图片数,视频数,视频时长(秒),增强数,参与用户\n';
+                    csvContent = '日期,图片数,视频数,视频时长(秒),增强数,视频Token,参与用户\n';
                     dailyStats.forEach(s => {
-                        csvContent += `${s.date},${s.image_count},${s.video_count},${s.video_duration},${s.enhance_count},${s.user_count}\n`;
+                        csvContent += `${s.date},${s.image_count},${s.video_count},${s.video_duration},${s.enhance_count},${s.video_tokens || 0},${s.user_count}\n`;
                     });
                 }
 
@@ -195,8 +217,8 @@
                             <div className="panel">
                                 <div className="filter-row">
                                     <button className={`period-btn ${period === 'day' ? 'active' : ''}`} onClick={() => handlePeriodChange('day')}>今日</button>
-                                    <button className={`period-btn ${period === 'week' ? 'active' : ''}`} onClick={() => handlePeriodChange('week')}>本周</button>
-                                    <button className={`period-btn ${period === 'month' ? 'active' : ''}`} onClick={() => handlePeriodChange('month')}>本月</button>
+                                    <button className={`period-btn ${period === 'last7days' ? 'active' : ''}`} onClick={() => handlePeriodChange('last7days')}>近7天</button>
+                                    <button className={`period-btn ${period === 'month' ? 'active' : ''}`} onClick={() => handlePeriodChange('month')}>近30天</button>
                                     <button className={`period-btn ${period === 'custom' ? 'active' : ''}`} onClick={() => handlePeriodChange('custom')}>自定义</button>
                                     {period === 'custom' && (
                                         <>
@@ -206,6 +228,13 @@
                                             <button className="btn-convert" onClick={handleCustomSearch} disabled={loading}>{loading ? '查询中...' : '查询'}</button>
                                         </>
                                     )}
+                                </div>
+                                {/* 用户名筛选 */}
+                                <div className="filter-row" style={{ marginTop: '10px' }}>
+                                    <label className="small-hint">用户名:</label>
+                                    <input className="filter-input" type="text" placeholder="输入用户名筛选" value={usernameFilter} onChange={(e) => setUsernameFilter(e.target.value)} style={{ width: '150px' }} />
+                                    <button className="btn-convert" onClick={handleUsernameSearch} disabled={loading}>筛选</button>
+                                    {usernameFilter && <button className="period-btn" onClick={clearUsernameFilter}>清除</button>}
                                 </div>
                             </div>
 
@@ -219,17 +248,17 @@
                                     </div>
                                     <div className="stat-card">
                                         <div className="label">🖼️ 图片生成</div>
-                                        <div className="value">{overview.image?.period || overview.image?.total || 0}</div>
+                                        <div className="value">{overview.image?.period || overview.image?.last7days || overview.image?.total || 0}</div>
                                         <div className="sub">今日: {overview.image?.today || 0}</div>
                                     </div>
                                     <div className="stat-card">
                                         <div className="label">🎬 视频生成</div>
-                                        <div className="value">{overview.video?.period || overview.video?.total || 0}</div>
+                                        <div className="value">{overview.video?.period || overview.video?.last7days || overview.video?.total || 0}</div>
                                         <div className="sub">今日: {overview.video?.today || 0}</div>
                                     </div>
                                     <div className="stat-card">
                                         <div className="label">✨ 增强任务</div>
-                                        <div className="value">{overview.enhance?.period || overview.enhance?.total || 0}</div>
+                                        <div className="value">{overview.enhance?.period || overview.enhance?.last7days || overview.enhance?.total || 0}</div>
                                         <div className="sub">今日: {overview.enhance?.today || 0}</div>
                                     </div>
                                 </div>
@@ -241,15 +270,53 @@
                                 <div className="stats-grid">
                                     <div className="stat-card">
                                         <div className="label">总时长</div>
-                                        <div className="value duration-value">{formatDuration(overview.video?.period_duration || overview.video?.total_duration || 0)}</div>
+                                        <div className="value duration-value">{formatDuration(overview.video?.period_duration || overview.video?.last7days_duration || overview.video?.total_duration || 0)}</div>
                                     </div>
                                     <div className="stat-card">
                                         <div className="label">今日时长</div>
                                         <div className="value duration-value">{formatDuration(overview.video?.today_duration || 0)}</div>
                                     </div>
                                     <div className="stat-card">
-                                        <div className="label">本周时长</div>
-                                        <div className="value duration-value">{formatDuration(overview.video?.week_duration || 0)}</div>
+                                        <div className="label">近7天时长</div>
+                                        <div className="value duration-value">{formatDuration(overview.video?.last7days_duration || 0)}</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Token消耗统计 */}
+                            <div className="panel">
+                                <div className="section-title">🔋 Token消耗统计（全能视频）</div>
+                                <div className="stats-grid">
+                                    <div className="stat-card">
+                                        <div className="label">总消耗</div>
+                                        <div className="value">{tokenReport.total_tokens || 0}</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 任务状态统计 */}
+                            <div className="panel">
+                                <div className="section-title">📋 任务状态统计</div>
+                                <div className="stats-grid">
+                                    <div className="stat-card">
+                                        <div className="label">图片成功率</div>
+                                        <div className="value">{statusReport.image?.success_rate || 0}%</div>
+                                        <div className="sub">成功: {statusReport.image?.success || 0} / 失败: {statusReport.image?.failed || 0}</div>
+                                    </div>
+                                    <div className="stat-card">
+                                        <div className="label">视频成功率</div>
+                                        <div className="value">{statusReport.video?.success_rate || 0}%</div>
+                                        <div className="sub">成功: {statusReport.video?.success || 0} / 待处理: {statusReport.video?.pending || 0}</div>
+                                    </div>
+                                    <div className="stat-card">
+                                        <div className="label">全能视频成功率</div>
+                                        <div className="value">{statusReport.omni_video?.success_rate || 0}%</div>
+                                        <div className="sub">成功: {statusReport.omni_video?.success || 0} / 排队: {statusReport.omni_video?.queued || 0}</div>
+                                    </div>
+                                    <div className="stat-card">
+                                        <div className="label">增强成功率</div>
+                                        <div className="value">{statusReport.enhance?.success_rate || 0}%</div>
+                                        <div className="sub">成功: {statusReport.enhance?.success || 0} / 排队: {statusReport.enhance?.queued || 0}</div>
                                     </div>
                                 </div>
                             </div>
@@ -273,13 +340,14 @@
                                                     <th>视频数</th>
                                                     <th>视频时长</th>
                                                     <th>增强数</th>
+                                                    <th>视频Token</th>
                                                     <th>总计</th>
                                                     <th>最后活动</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {userStats.length === 0 ? (
-                                                    <tr><td colSpan="8" className="small-hint">暂无数据</td></tr>
+                                                    <tr><td colSpan="9" className="small-hint">暂无数据</td></tr>
                                                 ) : userStats.map(s => (
                                                     <tr key={s.user_id}>
                                                         <td>{s.user_id}</td>
@@ -288,6 +356,7 @@
                                                         <td>{s.video_count}</td>
                                                         <td className="duration-value">{formatDuration(s.video_duration)}</td>
                                                         <td>{s.enhance_count}</td>
+                                                        <td style={{ color: '#9ed0ff' }}>{s.video_tokens || 0}</td>
                                                         <td style={{ fontWeight: 600 }}>{s.total_count}</td>
                                                         <td>{s.last_active || '无'}</td>
                                                     </tr>
@@ -307,12 +376,13 @@
                                                     <th>视频数</th>
                                                     <th>视频时长</th>
                                                     <th>增强数</th>
+                                                    <th>视频Token</th>
                                                     <th>参与用户</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {dailyStats.length === 0 ? (
-                                                    <tr><td colSpan="6" className="small-hint">暂无数据</td></tr>
+                                                    <tr><td colSpan="7" className="small-hint">暂无数据</td></tr>
                                                 ) : dailyStats.map(s => (
                                                     <tr key={s.date}>
                                                         <td style={{ fontWeight: 800 }}>{s.date}</td>
@@ -320,6 +390,7 @@
                                                         <td>{s.video_count}</td>
                                                         <td className="duration-value">{formatDuration(s.video_duration)}</td>
                                                         <td>{s.enhance_count}</td>
+                                                        <td style={{ color: '#9ed0ff' }}>{s.video_tokens || 0}</td>
                                                         <td>{s.user_count}</td>
                                                     </tr>
                                                 ))}
