@@ -3294,7 +3294,10 @@ def get_token_usage_report(start_date=None, end_date=None):
     获取Token消耗统计（只统计全能视频生成token）
 
     返回: {
-        'total_tokens': int,
+        'total_tokens': int,  # 总消耗（所有时间）
+        'today_tokens': int,  # 今日消耗
+        'last7days_tokens': int,  # 近7日消耗
+        'period_tokens': int,  # 所选时间范围消耗
         'video_generation_tokens': int,  # 全能视频生成(omni_video_tasks)
         'daily_tokens': List[{date: str, video_tokens: int}],
         'user_tokens': List[{user_id: int, username: str, video_tokens: int}]
@@ -3304,20 +3307,36 @@ def get_token_usage_report(start_date=None, end_date=None):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
+    today = datetime.now().strftime('%Y-%m-%d')
+    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    last7days_start = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+
     # 确定日期范围
     if not start_date or not end_date:
-        end_date = datetime.now().strftime('%Y-%m-%d')
-        start_date = (datetime.now() - timedelta(days=6)).strftime('%Y-%m-%d')
+        end_date = yesterday
+        start_date = last7days_start
 
-    # 全能视频生成Token消耗（omni_video_tasks）
+    # 总消耗（所有时间）
+    cursor.execute('SELECT COALESCE(SUM(token_usage), 0) FROM omni_video_tasks')
+    total_tokens_all = cursor.fetchone()[0] or 0
+
+    # 今日消耗
+    cursor.execute('SELECT COALESCE(SUM(token_usage), 0) FROM omni_video_tasks WHERE DATE(created_at) = ?', (today,))
+    today_tokens = cursor.fetchone()[0] or 0
+
+    # 近7日消耗（不含今天）
+    cursor.execute('SELECT COALESCE(SUM(token_usage), 0) FROM omni_video_tasks WHERE DATE(created_at) BETWEEN ? AND ?', (last7days_start, yesterday))
+    last7days_tokens = cursor.fetchone()[0] or 0
+
+    # 所选时间范围消耗（omni_video_tasks）
     cursor.execute('''
         SELECT COALESCE(SUM(token_usage), 0) as tokens
         FROM omni_video_tasks
         WHERE DATE(created_at) BETWEEN ? AND ?
     ''', (start_date, end_date))
-    video_generation_tokens = cursor.fetchone()[0] or 0
+    period_tokens = cursor.fetchone()[0] or 0
 
-    total_tokens = video_generation_tokens
+    video_generation_tokens = period_tokens
 
     # 每日Token消耗（只统计全能视频）
     cursor.execute('''
@@ -3357,7 +3376,10 @@ def get_token_usage_report(start_date=None, end_date=None):
 
     conn.close()
     return {
-        'total_tokens': total_tokens,
+        'total_tokens': total_tokens_all,
+        'today_tokens': today_tokens,
+        'last7days_tokens': last7days_tokens,
+        'period_tokens': period_tokens,
         'video_generation_tokens': video_generation_tokens,
         'daily_tokens': daily_tokens,
         'user_tokens': user_tokens

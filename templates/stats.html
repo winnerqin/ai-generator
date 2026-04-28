@@ -66,6 +66,14 @@
             return `${secs}秒`;
         }
 
+        function getPeriodLabel(period) {
+            if (period === 'day') return '（今日）';
+            if (period === 'last7days') return '（近7天）';
+            if (period === 'month') return '（近30天）';
+            if (period === 'custom') return '（自定义范围）';
+            return '';
+        }
+
         function App() {
             const [projects, setProjects] = useState([]);
             const [currentProjectId, setCurrentProjectId] = useState('');
@@ -89,6 +97,9 @@
             const [statusReport, setStatusReport] = useState({});
             const [tokenReport, setTokenReport] = useState({
                 total_tokens: 0,
+                today_tokens: 0,
+                last7days_tokens: 0,
+                period_tokens: 0,
                 video_generation_tokens: 0,
                 daily_tokens: [],
                 user_tokens: []
@@ -240,7 +251,7 @@
 
                             {/* 概览卡片 */}
                             <div className="panel">
-                                <div className="section-title">📈 任务概览</div>
+                                <div className="section-title">📈 任务概览{getPeriodLabel(period)}</div>
                                 <div className="stats-grid">
                                     <div className="stat-card">
                                         <div className="label">👤 用户总数</div>
@@ -264,39 +275,32 @@
                                 </div>
                             </div>
 
-                            {/* 视频时长统计 */}
-                            <div className="panel">
-                                <div className="section-title">⏱️ 视频时长统计</div>
-                                <div className="stats-grid">
-                                    <div className="stat-card">
-                                        <div className="label">总时长</div>
-                                        <div className="value duration-value">{formatDuration(overview.video?.period_duration || overview.video?.last7days_duration || overview.video?.total_duration || 0)}</div>
-                                    </div>
-                                    <div className="stat-card">
-                                        <div className="label">今日时长</div>
-                                        <div className="value duration-value">{formatDuration(overview.video?.today_duration || 0)}</div>
-                                    </div>
-                                    <div className="stat-card">
-                                        <div className="label">近7天时长</div>
-                                        <div className="value duration-value">{formatDuration(overview.video?.last7days_duration || 0)}</div>
-                                    </div>
-                                </div>
-                            </div>
-
                             {/* Token消耗统计 */}
                             <div className="panel">
-                                <div className="section-title">🔋 Token消耗统计（全能视频）</div>
+                                <div className="section-title">🔋 Token消耗统计（全能视频）{getPeriodLabel(period)}</div>
                                 <div className="stats-grid">
                                     <div className="stat-card">
                                         <div className="label">总消耗</div>
                                         <div className="value">{tokenReport.total_tokens || 0}</div>
+                                    </div>
+                                    <div className="stat-card">
+                                        <div className="label">今日消耗</div>
+                                        <div className="value">{tokenReport.today_tokens || 0}</div>
+                                    </div>
+                                    <div className="stat-card">
+                                        <div className="label">近7日消耗</div>
+                                        <div className="value">{tokenReport.last7days_tokens || 0}</div>
+                                    </div>
+                                    <div className="stat-card">
+                                        <div className="label">所选范围消耗</div>
+                                        <div className="value">{tokenReport.period_tokens || 0}</div>
                                     </div>
                                 </div>
                             </div>
 
                             {/* 任务状态统计 */}
                             <div className="panel">
-                                <div className="section-title">📋 任务状态统计</div>
+                                <div className="section-title">📋 任务状态统计{getPeriodLabel(period)}</div>
                                 <div className="stats-grid">
                                     <div className="stat-card">
                                         <div className="label">图片成功率</div>
@@ -324,7 +328,7 @@
                             {/* Tab切换 */}
                             <div className="panel">
                                 <div className="tab-bar">
-                                    <button className={`tab-btn ${activeTab === 'user' ? 'active' : ''}`} onClick={() => setActiveTab('user')}>用户统计</button>
+                                    <button className={`tab-btn ${activeTab === 'user' ? 'active' : ''}`} onClick={() => setActiveTab('user')}>用户统计{getPeriodLabel(period)}</button>
                                     <button className={`tab-btn ${activeTab === 'daily' ? 'active' : ''}`} onClick={() => setActiveTab('daily')}>每日趋势</button>
                                     <button className="btn-export" onClick={exportCSV}>导出CSV</button>
                                 </div>
