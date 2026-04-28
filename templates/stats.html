@@ -74,6 +74,16 @@
             return '';
         }
 
+        function getPeriodValue(stats, period) {
+            // 根据选择的 period 类型返回对应值
+            if (period === 'day') return stats?.period ?? 0;
+            if (period === 'last7days') return stats?.period ?? stats?.last7days ?? 0;
+            if (period === 'month') return stats?.period ?? 0;
+            if (period === 'custom') return stats?.period ?? 0;
+            // 默认显示 period
+            return stats?.period ?? stats?.last7days ?? stats?.total ?? 0;
+        }
+
         function App() {
             const [projects, setProjects] = useState([]);
             const [currentProjectId, setCurrentProjectId] = useState('');
@@ -259,17 +269,17 @@
                                     </div>
                                     <div className="stat-card">
                                         <div className="label">🖼️ 图片生成</div>
-                                        <div className="value">{overview.image?.period || overview.image?.last7days || overview.image?.total || 0}</div>
+                                        <div className="value">{getPeriodValue(overview.image, period)}</div>
                                         <div className="sub">今日: {overview.image?.today || 0}</div>
                                     </div>
                                     <div className="stat-card">
                                         <div className="label">🎬 视频生成</div>
-                                        <div className="value">{overview.video?.period || overview.video?.last7days || overview.video?.total || 0}</div>
+                                        <div className="value">{getPeriodValue(overview.video, period)}</div>
                                         <div className="sub">今日: {overview.video?.today || 0}</div>
                                     </div>
                                     <div className="stat-card">
                                         <div className="label">✨ 增强任务</div>
-                                        <div className="value">{overview.enhance?.period || overview.enhance?.last7days || overview.enhance?.total || 0}</div>
+                                        <div className="value">{getPeriodValue(overview.enhance, period)}</div>
                                         <div className="sub">今日: {overview.enhance?.today || 0}</div>
                                     </div>
                                 </div>

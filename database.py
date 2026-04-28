@@ -3256,11 +3256,13 @@ def get_task_status_report(start_date=None, end_date=None):
     for row in rows:
         status = row[0] or 'queued'
         count = row[1]
-        if status in ('success', 'completed', 'done'):
+        # 成功状态包括: success, succeeded, completed, done, finished
+        if status in ('success', 'succeeded', 'completed', 'done', 'finished'):
             omni_stats['success'] += count
-        elif status in ('failed', 'error'):
+        elif status in ('failed', 'error', 'cancelled', 'canceled', 'expired'):
             omni_stats['failed'] += count
         else:
+            # queued, running, pending 等都归为排队/处理中
             omni_stats['queued'] += count
         omni_stats['total'] += count
     omni_stats['success_rate'] = round(omni_stats['success'] / max(omni_stats['total'], 1) * 100, 2)
@@ -3279,11 +3281,13 @@ def get_task_status_report(start_date=None, end_date=None):
     for row in rows:
         status = row[0] or 'queued'
         count = row[1]
-        if status in ('success', 'completed', 'done'):
+        # 成功状态包括: success, succeeded, completed, done, finished
+        if status in ('success', 'succeeded', 'completed', 'done', 'finished'):
             enhance_stats['success'] += count
-        elif status in ('failed', 'error'):
+        elif status in ('failed', 'error', 'cancelled', 'canceled', 'expired'):
             enhance_stats['failed'] += count
         else:
+            # queued, running, pending 等都归为排队/处理中
             enhance_stats['queued'] += count
         enhance_stats['total'] += count
     enhance_stats['success_rate'] = round(enhance_stats['success'] / max(enhance_stats['total'], 1) * 100, 2)
