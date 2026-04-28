@@ -3013,6 +3013,7 @@ def get_user_report(start_date=None, end_date=None, username_filter=None):
     # 单次聚合查询，合并所有表的统计
     # 使用LEFT JOIN确保所有用户都被包含，即使没有记录
     # Token只统计全能视频(omni_video_tasks)
+    # 视频统计合并 video_tasks 和 omni_video_tasks
     query = f'''
         SELECT
             u.id as user_id,
@@ -3022,7 +3023,7 @@ def get_user_report(start_date=None, end_date=None, username_filter=None):
             COALESCE(v.video_duration, 0) as video_duration,
             COALESCE(e.enhance_count, 0) as enhance_count,
             COALESCE(ov.video_tokens, 0) as video_tokens,
-            MAX(COALESCE(g.last_active, ''), COALESCE(v.last_active, ''), COALESCE(e.last_active, '')) as last_active
+            MAX(COALESCE(g.last_active, ''), COALESCE(v.last_active, ''), COALESCE(e.last_active, ''), COALESCE(ov.last_active, '')) as last_active
         FROM users u
         LEFT JOIN (
             SELECT user_id, COUNT(*) as image_count, MAX(created_at) as last_active
@@ -3032,8 +3033,11 @@ def get_user_report(start_date=None, end_date=None, username_filter=None):
         ) g ON u.id = g.user_id
         LEFT JOIN (
             SELECT user_id, COUNT(*) as video_count, SUM(COALESCE(duration, 0)) as video_duration, MAX(created_at) as last_active
-            FROM video_tasks
-            WHERE 1=1 {date_condition}
+            FROM (
+                SELECT user_id, duration, created_at FROM video_tasks WHERE 1=1 {date_condition}
+                UNION ALL
+                SELECT user_id, COALESCE(duration, 0) as duration, created_at FROM omni_video_tasks WHERE 1=1 {date_condition}
+            )
             GROUP BY user_id
         ) v ON u.id = v.user_id
         LEFT JOIN (
@@ -3043,7 +3047,7 @@ def get_user_report(start_date=None, end_date=None, username_filter=None):
             GROUP BY user_id
         ) e ON u.id = e.user_id
         LEFT JOIN (
-            SELECT user_id, SUM(COALESCE(token_usage, 0)) as video_tokens
+            SELECT user_id, SUM(COALESCE(token_usage, 0)) as video_tokens, MAX(created_at) as last_active
             FROM omni_video_tasks
             WHERE 1=1 {date_condition}
             GROUP BY user_id
@@ -3052,7 +3056,7 @@ def get_user_report(start_date=None, end_date=None, username_filter=None):
         ORDER BY u.id
     '''
 
-    params = date_params + date_params + date_params + date_params + username_params
+    params = date_params + date_params + date_params + date_params + date_params + date_params + username_params
     cursor.execute(query, params)
     rows = cursor.fetchall()
 
