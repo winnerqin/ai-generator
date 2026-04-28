@@ -3056,7 +3056,7 @@ def get_user_report(start_date=None, end_date=None, username_filter=None):
         ORDER BY u.id
     '''
 
-    params = date_params + date_params + date_params + date_params + date_params + date_params + username_params
+    params = date_params + date_params + date_params + date_params + date_params + username_params
     cursor.execute(query, params)
     rows = cursor.fetchall()
 
