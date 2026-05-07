@@ -97,6 +97,8 @@ class Config:
     # OSS配置
     OSS_ENABLED: bool = os.environ.get("OSS_ENABLED", "false").lower() == "true"
     OSS_ENDPOINT: str = os.environ.get("OSS_ENDPOINT", "")
+    OSS_EXTERNAL_ENDPOINT: str = os.environ.get("OSS_EXTERNAL_ENDPOINT", "")
+    OSS_ACCESS_ENDPOINT: str = os.environ.get("OSS_ACCESS_ENDPOINT", "")
     OSS_ACCESS_KEY_ID: str = os.environ.get("OSS_ACCESS_KEY_ID", "")
     OSS_ACCESS_KEY_SECRET: str = os.environ.get("OSS_ACCESS_KEY_SECRET", "")
 
@@ -140,7 +142,8 @@ class Database:
     def __init__(self):
         self._conn = None
         self._bucket = None
-        self._oss_endpoint_full = None
+        self._oss_endpoint_full = None  # 用于服务器内部访问
+        self._oss_external_endpoint = None  # 用于返回给前端的URL
 
     def connect(self):
         """建立数据库连接"""
@@ -219,11 +222,19 @@ class Database:
             return False
 
         try:
+            # 确定服务器内部访问OSS使用的endpoint
+            # 优先级：OSS_ACCESS_ENDPOINT > OSS_EXTERNAL_ENDPOINT > OSS_ENDPOINT
+            access_endpoint = config.OSS_ACCESS_ENDPOINT or config.OSS_EXTERNAL_ENDPOINT or config.OSS_ENDPOINT
+
+            # 确定返回给前端的URL使用的endpoint
+            # 优先级：OSS_EXTERNAL_ENDPOINT > OSS_ENDPOINT
+            external_endpoint = config.OSS_EXTERNAL_ENDPOINT or config.OSS_ENDPOINT
+
             # 从endpoint提取bucket名
-            # 格式: bucket-name.oss-region.aliyuncs.com
-            parts = config.OSS_ENDPOINT.split(".", 1)
+            # 格式: bucket-name.oss-region.aliyuncs.com 或 bucket-name.oss-region-internal.aliyuncs.com
+            parts = access_endpoint.split(".", 1)
             if len(parts) != 2:
-                logger.error(f"OSS_ENDPOINT格式不正确: {config.OSS_ENDPOINT}")
+                logger.error(f"OSS endpoint格式不正确: {access_endpoint}")
                 return False
 
             bucket_name = parts[0]
@@ -231,8 +242,10 @@ class Database:
 
             auth = oss2.Auth(config.OSS_ACCESS_KEY_ID, config.OSS_ACCESS_KEY_SECRET)
             self._bucket = oss2.Bucket(auth, f"https://{oss_endpoint}", bucket_name)
-            self._oss_endpoint_full = config.OSS_ENDPOINT
-            logger.info(f"OSS已初始化: {config.OSS_ENDPOINT}")
+            self._oss_endpoint_full = access_endpoint
+            self._oss_external_endpoint = external_endpoint
+
+            logger.info(f"OSS已初始化 - 访问端点: {access_endpoint}, URL端点: {external_endpoint}")
             return True
         except Exception as e:
             logger.error(f"OSS初始化失败: {e}")
@@ -257,7 +270,7 @@ class Database:
             with open(local_path, "rb") as f:
                 self._bucket.put_object(object_key, f)
 
-            oss_url = f"https://{self._oss_endpoint_full}/{object_key}"
+            oss_url = f"https://{self._oss_external_endpoint}/{object_key}"
             logger.info(f"OSS上传成功: {object_key}")
             return oss_url
         except Exception as e:

@@ -306,9 +306,19 @@ class FileUploadService:
         """
         if is_oss:
             # 从 OSS URL 提取对象键
-            if config.OSS_ENDPOINT in file_path:
-                object_key = file_path.split(config.OSS_ENDPOINT + "/", 1)[1]
-                return oss_service.delete_file(object_key)
+            # 需要检查所有可能的endpoint，因为URL可能使用任意一个
+            endpoints = [
+                config.OSS_EXTERNAL_ENDPOINT,
+                config.OSS_ACCESS_ENDPOINT,
+                config.OSS_ENDPOINT,
+            ]
+            # 过滤掉空值并去重
+            endpoints = list(set(e for e in endpoints if e))
+
+            for endpoint in endpoints:
+                if endpoint and endpoint in file_path:
+                    object_key = file_path.split(endpoint + "/", 1)[1]
+                    return oss_service.delete_file(object_key)
             return False
 
         # 删除本地文件

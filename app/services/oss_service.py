@@ -20,7 +20,8 @@ class OSSService:
     def __init__(self):
         """初始化 OSS 服务"""
         self._bucket = None
-        self._endpoint_full = None
+        self._endpoint_full = None  # 用于服务器内部访问（可能是内网地址）
+        self._external_endpoint = None  # 用于返回给前端的URL（公网地址）
         self._oss2 = None
 
         # 延迟导入，避免未安装 oss2 时出错
@@ -41,22 +42,33 @@ class OSSService:
         except ImportError:
             raise RuntimeError("未安装 oss2 SDK，请运行: pip install oss2")
 
+        # 确定服务器内部访问OSS使用的endpoint
+        # 优先级：OSS_ACCESS_ENDPOINT > OSS_EXTERNAL_ENDPOINT > OSS_ENDPOINT
+        access_endpoint = config.OSS_ACCESS_ENDPOINT or config.OSS_EXTERNAL_ENDPOINT or config.OSS_ENDPOINT
+
+        # 确定返回给前端的URL使用的endpoint
+        # 优先级：OSS_EXTERNAL_ENDPOINT > OSS_ENDPOINT
+        external_endpoint = config.OSS_EXTERNAL_ENDPOINT or config.OSS_ENDPOINT
+
         # 从完整的 endpoint 中提取 bucket 和实际 endpoint
-        # 格式: bucket-name.oss-region.aliyuncs.com
-        parts = config.OSS_ENDPOINT.split(".", 1)
+        # 格式: bucket-name.oss-region.aliyuncs.com 或 bucket-name.oss-region-internal.aliyuncs.com
+        parts = access_endpoint.split(".", 1)
         if len(parts) != 2:
             raise ValueError(
-                f"OSS_ENDPOINT 格式不正确: {config.OSS_ENDPOINT}，"
+                f"OSS endpoint 格式不正确: {access_endpoint}，"
                 "应为 bucket-name.oss-region.aliyuncs.com"
             )
 
         bucket_name = parts[0]
         oss_endpoint = parts[1]
 
-        # 初始化 OSS 客户端
+        # 初始化 OSS 客户端（使用access_endpoint进行服务器内部访问）
         auth = oss2.Auth(config.OSS_ACCESS_KEY_ID, config.OSS_ACCESS_KEY_SECRET)
         self._bucket = oss2.Bucket(auth, f"https://{oss_endpoint}", bucket_name)
-        self._endpoint_full = config.OSS_ENDPOINT
+        self._endpoint_full = access_endpoint
+        self._external_endpoint = external_endpoint
+
+        print(f"[OSS] 初始化完成 - 访问端点: {access_endpoint}, URL端点: {external_endpoint}")
         self._initialized = True
 
     def is_available(self) -> bool:
@@ -117,8 +129,8 @@ class OSSService:
             with open(file_path, "rb") as f:
                 self._bucket.put_object(object_key, f)
 
-            # 返回公网访问 URL
-            public_url = f"https://{self._endpoint_full}/{object_key}"
+            # 返回公网访问 URL（使用外网endpoint，确保外网用户可访问）
+            public_url = f"https://{self._external_endpoint}/{object_key}"
             duration_ms = int((time.time() - start_time) * 1000)
 
             print(f"[OSS] 上传成功: {file_path} -> {object_key}")
@@ -345,7 +357,7 @@ class OSSService:
                         continue
 
                 filename = os.path.basename(obj.key)
-                url = f"https://{self._endpoint_full}/{obj.key}"
+                url = f"https://{self._external_endpoint}/{obj.key}"
 
                 files.append(
                     {
@@ -435,12 +447,12 @@ class OSSService:
             object_key: OSS 对象键
 
         Returns:
-            公网 URL
+            公网 URL（使用外网endpoint）
         """
         if not self.is_available():
             return None
 
-        return f"https://{self._endpoint_full}/{object_key}"
+        return f"https://{self._external_endpoint}/{object_key}"
 
     def get_bucket(self):
         """

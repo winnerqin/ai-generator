@@ -41,7 +41,13 @@ class Config:
 
     # ==================== 阿里云 OSS 配置 ====================
     OSS_ENABLED: bool = False
+    # OSS端点地址（用于显示和作为默认值）
     OSS_ENDPOINT: str = "shor-file.oss-cn-wulanchabu.aliyuncs.com"
+    # 外网端点（返回给前端的URL使用，如果为空则使用OSS_ENDPOINT）
+    OSS_EXTERNAL_ENDPOINT: str = ""
+    # 服务器内部访问OSS的地址（如果为空则使用OSS_EXTERNAL_ENDPOINT或OSS_ENDPOINT）
+    # 在阿里云内网环境中设置为内网地址可节省流量费用，如：bucket.oss-cn-region-internal.aliyuncs.com
+    OSS_ACCESS_ENDPOINT: str = ""
     OSS_ACCESS_KEY_ID: str = ""
     OSS_ACCESS_KEY_SECRET: str = ""
 
@@ -121,6 +127,8 @@ class Config:
         # OSS 配置
         self.OSS_ENABLED = os.environ.get("OSS_ENABLED", "false").lower() == "true"
         self.OSS_ENDPOINT = os.environ.get("OSS_ENDPOINT", self.OSS_ENDPOINT)
+        self.OSS_EXTERNAL_ENDPOINT = os.environ.get("OSS_EXTERNAL_ENDPOINT", self.OSS_EXTERNAL_ENDPOINT)
+        self.OSS_ACCESS_ENDPOINT = os.environ.get("OSS_ACCESS_ENDPOINT", self.OSS_ACCESS_ENDPOINT)
         self.OSS_ACCESS_KEY_ID = os.environ.get("OSS_ACCESS_KEY_ID", self.OSS_ACCESS_KEY_ID)
         self.OSS_ACCESS_KEY_SECRET = os.environ.get(
             "OSS_ACCESS_KEY_SECRET", self.OSS_ACCESS_KEY_SECRET
