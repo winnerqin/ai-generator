@@ -796,6 +796,91 @@ def get_video_assets(user_id, project_id=None, limit=500):
     return assets
 
 
+def query_video_assets(user_id, project_id=None, limit=50, offset=0, search=None, library_kind="all"):
+    """
+    分页查询视频库资源，并在 SQL 层完成库类型过滤与搜索。
+
+    Args:
+        user_id: 用户 ID
+        project_id: 项目 ID（可选）
+        limit: 单页条数
+        offset: 偏移量
+        search: 文件名关键词（可选）
+        library_kind: all | video | media
+
+    Returns:
+        (assets, total)
+    """
+    ensure_media_library_tables()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    where_parts = ["user_id = ?"]
+    params = [user_id]
+
+    if project_id is None:
+        where_parts.append("project_id IS NULL")
+    else:
+        where_parts.append("project_id = ?")
+        params.append(project_id)
+
+    if search:
+        where_parts.append("filename LIKE ?")
+        params.append(f"%{search}%")
+
+    kind = (library_kind or "all").lower()
+    if kind == "video":
+        where_parts.append(
+            "("
+            "meta LIKE '%\"library_group\": \"video\"%' "
+            "OR meta LIKE '%\"task_id\"%' "
+            "OR meta LIKE '%\"source\": \"omni_video\"%' "
+            "OR meta LIKE '%\"model\"%'"
+            ")"
+        )
+    elif kind == "media":
+        where_parts.append(
+            "("
+            "("
+            "meta LIKE '%\"library_group\": \"media\"%' "
+            "OR meta LIKE '%\"mime_type\"%' "
+            "OR url LIKE '%media_video%' "
+            "OR url LIKE '%media_audio%'"
+            ") "
+            "AND meta NOT LIKE '%\"library_group\": \"video\"%' "
+            "AND meta NOT LIKE '%\"task_id\"%' "
+            "AND meta NOT LIKE '%\"source\": \"omni_video\"%' "
+            "AND meta NOT LIKE '%\"model\"%'"
+            ")"
+        )
+
+    where_sql = " AND ".join(where_parts)
+
+    cursor.execute(f"SELECT COUNT(*) FROM video_library WHERE {where_sql}", tuple(params))
+    total = cursor.fetchone()[0]
+
+    query_params = list(params) + [limit, offset]
+    cursor.execute(
+        f"""
+        SELECT * FROM video_library
+        WHERE {where_sql}
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        tuple(query_params),
+    )
+    rows = cursor.fetchall()
+    assets = [dict(r) for r in rows]
+    for a in assets:
+        try:
+            a["meta"] = json.loads(a.get("meta") or "{}")
+        except Exception:
+            a["meta"] = {}
+    conn.close()
+    return assets, total
+
+
 def rename_video_asset(asset_id, filename, user_id=None, project_id=None):
     """Rename a video asset in the video library."""
     ensure_media_library_tables()
@@ -944,7 +1029,7 @@ def get_video_by_task_id(user_id, task_id, project_id=None):
         asset = dict(row)
         try:
             meta = json.loads(asset.get('meta') or '{}')
-            if meta.get('task_id') == task_id:
+            if meta.get('task_id') == task_id or meta.get('source_task_id') == task_id:
                 asset['meta'] = meta
                 conn.close()
                 return asset

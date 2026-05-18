@@ -375,6 +375,18 @@ class VideoEnhanceService:
         }
         database.save_video_enhance_task(updated)
 
+        # 统一在远端同步后处理入库，避免只有 refresh_task 才会触发入库。
+        # list_tasks 会调用 _sync_from_remote，同步到成功态后也应自动入库。
+        if status in SUCCESS_STATUSES and video_url:
+            try:
+                self._save_to_video_library(updated)
+            except Exception as exc:
+                logger.error(
+                    "[video-enhance] Failed to save enhanced video to library: task_id=%s error=%s",
+                    task_id,
+                    exc,
+                )
+
         return updated
 
     def _save_to_video_library(self, task: dict[str, Any]) -> None:

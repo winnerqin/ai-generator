@@ -26,6 +26,7 @@
         .asset-info { padding: 10px; display: grid; gap: 6px; font-size: 0.88rem; }
         .asset-meta-line { display: flex; justify-content: space-between; gap: 8px; color: #9ca8cf; font-size: 0.82rem; }
         .asset-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .pager { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
         .empty-hint { color: #9ca8cf; }
         .small-hint { color: #9ca8cf; font-size: 0.82rem; }
         .preview-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.88); display: none; align-items: center; justify-content: center; z-index: 2000; }
@@ -94,6 +95,13 @@
 
                 <div class="panel">
                     <div id="assetGrid" class="asset-grid"></div>
+                    <div class="pager">
+                        <div id="pagerInfo" class="small-hint">第 1 页</div>
+                        <div style="display:flex; gap:8px;">
+                            <button class="btn btn-secondary" id="prevPageBtn">上一页</button>
+                            <button class="btn btn-secondary" id="nextPageBtn">下一页</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </main>
@@ -155,11 +163,16 @@
             { key: 'video', label: '视频库' },
         ];
 
-        let currentTab = 'image_material';
+        let currentTab = 'video';
         let allAssets = [];
         let previewAssets = [];
         let previewIndex = -1;
         let touchStartX = 0;
+        let currentPage = 1;
+        let pageSize = 36;
+        let totalAssets = 0;
+        let searchTimer = null;
+        let videoPreviewObserver = null;
 
         function assetTypeLabel(asset) {
             return { image: '图片', video: '视频', audio: '音频' }[asset.type] || asset.type || '-';
@@ -173,16 +186,12 @@
             container.querySelectorAll('[data-tab]').forEach((button) => {
                 button.addEventListener('click', () => {
                     currentTab = button.getAttribute('data-tab');
+                    currentPage = 1;
                     renderTabs();
                     updateUploadAccept();
                     loadAssets();
                 });
             });
-        }
-
-        function matchesFilter(asset, keyword) {
-            if (!keyword) return true;
-            return (asset.filename || '').toLowerCase().includes(keyword.toLowerCase());
         }
 
         function canRename(asset) {
@@ -219,7 +228,7 @@
 
         function previewMarkup(asset) {
             if (asset.type === 'video') {
-                return `<video src="${asset.url}" preload="metadata"></video>`;
+                return `<video class="lazy-video-preview" data-src="${asset.url}" preload="none" muted playsinline></video>`;
             }
             if (asset.type === 'audio') {
                 return '<div class="asset-preview-audio">♫</div>';
@@ -228,9 +237,8 @@
         }
 
         function renderAssets() {
-            const keyword = document.getElementById('searchInput').value.trim();
             const grid = document.getElementById('assetGrid');
-            const assets = allAssets.filter((asset) => matchesFilter(asset, keyword));
+            const assets = allAssets;
             previewAssets = assets;
 
             if (!assets.length) {
@@ -273,6 +281,39 @@
             grid.querySelectorAll('[data-rename]').forEach((button) => {
                 button.addEventListener('click', () => renameAsset(button.getAttribute('data-rename')));
             });
+            setupVideoPreviewLazyLoad();
+        }
+
+        function setupVideoPreviewLazyLoad() {
+            if (videoPreviewObserver) {
+                videoPreviewObserver.disconnect();
+                videoPreviewObserver = null;
+            }
+
+            const videos = document.querySelectorAll('.lazy-video-preview[data-src]');
+            if (!videos.length) return;
+
+            videoPreviewObserver = new IntersectionObserver((entries, observer) => {
+                entries.forEach((entry) => {
+                    if (!entry.isIntersecting) return;
+                    const video = entry.target;
+                    const src = video.getAttribute('data-src');
+                    if (src && !video.getAttribute('src')) {
+                        video.setAttribute('src', src);
+                        video.load();
+                    }
+                    observer.unobserve(video);
+                });
+            }, { rootMargin: '120px 0px', threshold: 0.01 });
+
+            videos.forEach((video) => videoPreviewObserver.observe(video));
+        }
+
+        function updatePager() {
+            const totalPages = Math.max(1, Math.ceil(totalAssets / pageSize));
+            document.getElementById('pagerInfo').textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页，合计 ${totalAssets} 条`;
+            document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+            document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
         }
 
         function updateUploadAccept() {
@@ -286,11 +327,31 @@
             }
         }
 
-        async function loadAssets() {
-            const resp = await fetch(`/api/content-library?type=${encodeURIComponent(currentTab)}`);
+        function isServerPagedTab() {
+            return currentTab === 'video' || currentTab === 'media';
+        }
+
+        async function loadAssets(page = currentPage) {
+            currentPage = Math.max(1, page);
+            const keyword = document.getElementById('searchInput').value.trim();
+            const params = new URLSearchParams({ type: currentTab });
+            if (isServerPagedTab()) {
+                params.set('page', String(currentPage));
+                params.set('page_size', String(pageSize));
+                if (keyword) params.set('search', keyword);
+            }
+
+            const resp = await fetch(`/api/content-library?${params.toString()}`);
             const data = await resp.json();
             allAssets = data.success ? (data.assets || []) : [];
+            if (isServerPagedTab()) {
+                totalAssets = Number(data.total || 0);
+            } else {
+                totalAssets = allAssets.length;
+                currentPage = 1;
+            }
             renderAssets();
+            updatePager();
         }
 
         let currentPreviewAsset = null;
@@ -440,8 +501,18 @@
             await loadAssets();
         }
 
-        document.getElementById('searchInput').addEventListener('input', renderAssets);
-        document.getElementById('refreshBtn').addEventListener('click', loadAssets);
+        document.getElementById('searchInput').addEventListener('input', () => {
+            if (searchTimer) clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => loadAssets(1), 300);
+        });
+        document.getElementById('refreshBtn').addEventListener('click', () => loadAssets(1));
+        document.getElementById('prevPageBtn').addEventListener('click', () => {
+            if (currentPage > 1) loadAssets(currentPage - 1);
+        });
+        document.getElementById('nextPageBtn').addEventListener('click', () => {
+            const totalPages = Math.max(1, Math.ceil(totalAssets / pageSize));
+            if (currentPage < totalPages) loadAssets(currentPage + 1);
+        });
         document.getElementById('uploadTrigger').addEventListener('click', () => document.getElementById('uploadInput').click());
         document.getElementById('uploadInput').addEventListener('change', (event) => uploadFiles(event.target.files));
         document.getElementById('previewClose').addEventListener('click', closePreview);

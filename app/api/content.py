@@ -145,11 +145,22 @@ def manage_samples_page():
 @content_bp.route("/api/content-library", methods=["GET"])
 @login_required
 def get_content_library():
+    def _safe_int(value: str, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
     user_id = session.get("user_id")
     project_id = session.get("current_project_id")
     library_type = request.args.get("type", "all")
+    page = max(1, _safe_int(request.args.get("page", "1"), 1))
+    page_size = max(1, min(200, _safe_int(request.args.get("page_size", "500"), 500)))
+    search = (request.args.get("search") or "").strip()
+    offset = (page - 1) * page_size
 
     assets: list[dict] = []
+    total = 0
 
     if oss_service.is_available():
         if library_type in ("person", "all", "image_material"):
@@ -198,30 +209,60 @@ def get_content_library():
         )
     if library_type in ("image", "all"):
         _append_assets(assets, database.get_image_assets(user_id, project_id), "db_image", "image")
-    video_assets = database.get_video_assets(user_id, project_id)
     if library_type == "video":
+        video_assets, total = database.query_video_assets(
+            user_id=user_id,
+            project_id=project_id,
+            limit=page_size,
+            offset=offset,
+            search=search,
+            library_kind="video",
+        )
         _append_assets(
             assets,
-            [item for item in video_assets if _is_generated_video_asset(item)],
+            video_assets,
             "db_video",
             "video",
         )
+    elif library_type == "media":
+        video_assets, total = database.query_video_assets(
+            user_id=user_id,
+            project_id=project_id,
+            limit=page_size,
+            offset=offset,
+            search=search,
+            library_kind="media",
+        )
+        _append_assets(
+            assets,
+            video_assets,
+            "db_video",
+            "video",
+        )
+    else:
+        video_assets = database.get_video_assets(user_id, project_id)
+
     if library_type == "all":
         _append_assets(assets, video_assets, "db_video", "video")
-    if library_type == "media":
-        _append_assets(
-            assets,
-            [item for item in video_assets if _is_media_upload_asset(item)],
-            "db_video",
-            "video",
-        )
     if library_type in ("audio", "all", "media"):
         _append_assets(assets, database.get_audio_assets(user_id, project_id), "db_audio", "audio")
 
     for asset in assets:
         asset["url"] = _public_asset_url(str(asset.get("url") or ""))
 
-    return jsonify({"success": True, "assets": assets})
+    if library_type in ("video", "media"):
+        return jsonify(
+            {
+                "success": True,
+                "assets": assets,
+                "items": assets,
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+            }
+        )
+
+    return jsonify({"success": True, "assets": assets, "items": assets, "total": len(assets), "page": 1, "page_size": len(assets)})
 
 
 @content_bp.route("/api/upload-media-asset", methods=["POST"])
