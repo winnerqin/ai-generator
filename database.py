@@ -656,14 +656,14 @@ def save_scene_asset(user_id, filename, url, meta=None, project_id=None):
     return asset_id
 
 
-def get_person_assets(user_id, project_id=None, limit=500):
+def get_person_assets(user_id, project_id=None, limit=500, offset=0):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     if project_id is None:
-        cursor.execute('SELECT * FROM person_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, limit))
+        cursor.execute('SELECT * FROM person_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?', (user_id, limit, offset))
     else:
-        cursor.execute('SELECT * FROM person_library WHERE user_id = ? AND project_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, project_id, limit))
+        cursor.execute('SELECT * FROM person_library WHERE user_id = ? AND project_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?', (user_id, project_id, limit, offset))
     rows = cursor.fetchall()
     assets = [dict(r) for r in rows]
     for a in assets:
@@ -675,14 +675,14 @@ def get_person_assets(user_id, project_id=None, limit=500):
     return assets
 
 
-def get_scene_assets(user_id, project_id=None, limit=500):
+def get_scene_assets(user_id, project_id=None, limit=500, offset=0):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     if project_id is None:
-        cursor.execute('SELECT * FROM scene_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, limit))
+        cursor.execute('SELECT * FROM scene_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?', (user_id, limit, offset))
     else:
-        cursor.execute('SELECT * FROM scene_library WHERE user_id = ? AND project_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, project_id, limit))
+        cursor.execute('SELECT * FROM scene_library WHERE user_id = ? AND project_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?', (user_id, project_id, limit, offset))
     rows = cursor.fetchall()
     assets = [dict(r) for r in rows]
     for a in assets:
@@ -692,6 +692,58 @@ def get_scene_assets(user_id, project_id=None, limit=500):
             a['meta'] = {}
     conn.close()
     return assets
+
+
+def _query_asset_table(table_name, user_id, project_id=None, limit=500, offset=0, search=None):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    where_parts = ["user_id = ?"]
+    params = [user_id]
+    if project_id is not None:
+        where_parts.append("project_id = ?")
+        params.append(project_id)
+    if search:
+        where_parts.append("filename LIKE ?")
+        params.append(f"%{search}%")
+
+    where_sql = " AND ".join(where_parts)
+    cursor.execute(f"SELECT COUNT(*) FROM {table_name} WHERE {where_sql}", tuple(params))
+    total = cursor.fetchone()[0]
+
+    query_params = list(params) + [limit, offset]
+    cursor.execute(
+        f"SELECT * FROM {table_name} WHERE {where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        tuple(query_params),
+    )
+    rows = cursor.fetchall()
+    assets = [dict(r) for r in rows]
+    for a in assets:
+        try:
+            a['meta'] = json.loads(a.get('meta') or '{}')
+        except Exception:
+            a['meta'] = {}
+    conn.close()
+    return assets, total
+
+
+def query_person_assets(user_id, project_id=None, limit=500, offset=0, search=None):
+    return _query_asset_table("person_library", user_id, project_id, limit, offset, search)
+
+
+def query_scene_assets(user_id, project_id=None, limit=500, offset=0, search=None):
+    return _query_asset_table("scene_library", user_id, project_id, limit, offset, search)
+
+
+def count_person_assets(user_id, project_id=None, search=None):
+    _, total = query_person_assets(user_id, project_id, limit=1, offset=0, search=search)
+    return total
+
+
+def count_scene_assets(user_id, project_id=None, search=None):
+    _, total = query_scene_assets(user_id, project_id, limit=1, offset=0, search=search)
+    return total
 
 
 def delete_person_asset(asset_id, user_id=None, project_id=None):
@@ -755,16 +807,16 @@ def save_video_asset(user_id, filename, url, meta=None, project_id=None):
     conn.close()
     return asset_id
 
-def get_image_assets(user_id, project_id=None, limit=500):
+def get_image_assets(user_id, project_id=None, limit=500, offset=0):
     """获取图片库资源"""
     ensure_media_library_tables()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     if project_id is None:
-        cursor.execute('SELECT * FROM image_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, limit))
+        cursor.execute('SELECT * FROM image_library WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?', (user_id, limit, offset))
     else:
-        cursor.execute('SELECT * FROM image_library WHERE user_id = ? AND project_id = ? ORDER BY created_at DESC LIMIT ?', (user_id, project_id, limit))
+        cursor.execute('SELECT * FROM image_library WHERE user_id = ? AND project_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?', (user_id, project_id, limit, offset))
     rows = cursor.fetchall()
     assets = [dict(r) for r in rows]
     for a in assets:
@@ -774,6 +826,37 @@ def get_image_assets(user_id, project_id=None, limit=500):
             a['meta'] = {}
     conn.close()
     return assets
+
+
+def count_image_assets(user_id, project_id=None):
+    """统计图片库资源数量"""
+    ensure_media_library_tables()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    if project_id is None:
+        cursor.execute('SELECT COUNT(*) FROM image_library WHERE user_id = ?', (user_id,))
+    else:
+        cursor.execute('SELECT COUNT(*) FROM image_library WHERE user_id = ? AND project_id = ?', (user_id, project_id))
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total
+
+
+def query_image_assets(user_id, project_id=None, limit=500, offset=0, search=None):
+    """分页查询图片库资源"""
+    ensure_media_library_tables()
+    return _query_asset_table("image_library", user_id, project_id, limit, offset, search)
+
+
+def query_audio_assets(user_id, project_id=None, limit=500, offset=0, search=None):
+    """分页查询音频库资源"""
+    ensure_media_library_tables()
+    return _query_asset_table("audio_library", user_id, project_id, limit, offset, search)
+
+
+def count_audio_assets(user_id, project_id=None, search=None):
+    _, total = query_audio_assets(user_id, project_id, limit=1, offset=0, search=search)
+    return total
 
 def get_video_assets(user_id, project_id=None, limit=500):
     """获取视频库资源"""

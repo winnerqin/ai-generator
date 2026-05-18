@@ -21,6 +21,20 @@ from app.utils import ApiResponse
 image_bp = Blueprint("image", __name__)
 
 
+def _pagination_args(default_page_size: int = 20, max_page_size: int = 200) -> tuple[int, int, int]:
+    page = request.args.get("page", 1, type=int) or 1
+    page_size = request.args.get("page_size", default_page_size, type=int) or default_page_size
+    page = max(1, page)
+    page_size = max(1, min(max_page_size, page_size))
+    return page, page_size, (page - 1) * page_size
+
+
+def _paginate_items(items: list[dict], page: int, page_size: int) -> tuple[list[dict], int]:
+    total = len(items)
+    start = (page - 1) * page_size
+    return items[start : start + page_size], total
+
+
 @image_bp.route("/api/image-styles", methods=["GET"])
 @login_required
 def get_image_styles():
@@ -53,17 +67,27 @@ def get_image_styles():
 def get_recent_images():
     """获取最近生成的图片"""
     user_id = session.get("user_id")
-    limit = request.args.get("limit", 20, type=int)
     project_id = session.get("current_project_id")
+    page_requested = "page" in request.args or "page_size" in request.args
 
-    # 使用 image_library 表获取最近的图片
-    images = database.get_image_assets(user_id, project_id, limit)
+    if page_requested:
+        page, page_size, offset = _pagination_args()
+        images = database.get_image_assets(user_id, project_id, page_size, offset=offset)
+        total = database.count_image_assets(user_id, project_id)
+    else:
+        limit = max(1, min(500, request.args.get("limit", 20, type=int) or 20))
+        page, page_size = 1, limit
+        images = database.get_image_assets(user_id, project_id, limit)
+        total = len(images)
 
     return jsonify(
         {
             "success": True,
             "images": images,
             "data": {"images": images},
+            "page": page,
+            "page_size": page_size,
+            "total": total,
         }
     )
 
@@ -75,15 +99,20 @@ def get_sample_images():
     user_id = session.get("user_id")
     project_id = session.get("current_project_id")
     category = request.args.get("category")  # person, scene, all
+    page, page_size, _ = _pagination_args()
 
     # 尝试从 OSS 获取
     if oss_service.is_available():
-        images = oss_service.list_sample_images(user_id, project_id, category)
+        all_images = oss_service.list_sample_images(user_id, project_id, category)
+        images, total = _paginate_items(all_images, page, page_size)
         return jsonify(
             {
                 "success": True,
                 "images": images,
                 "data": {"images": images},
+                "page": page,
+                "page_size": page_size,
+                "total": total,
             }
         )
 
@@ -111,11 +140,16 @@ def get_sample_images():
                 }
             )
 
+    images, total = _paginate_items(images, page, page_size)
+
     return jsonify(
         {
             "success": True,
             "images": images,
             "data": {"images": images},
+            "page": page,
+            "page_size": page_size,
+            "total": total,
         }
     )
 

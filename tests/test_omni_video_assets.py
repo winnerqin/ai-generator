@@ -88,16 +88,19 @@ def test_content_library_media_returns_video_and_audio(auth_client, monkeypatch)
 
     monkeypatch.setattr(
         database,
-        "get_video_assets",
-        lambda user_id, project_id=None: [
-            {
-                "id": 1,
-                "url": "https://example.com/uploads/media_video/demo.mp4",
-                "filename": "demo.mp4",
-                "created_at": "2026-04-11",
-                "meta": {"mime_type": "video/mp4"},
-            }
-        ],
+        "query_video_assets",
+        lambda user_id, project_id=None, limit=50, offset=0, search=None, library_kind="all": (
+            [
+                {
+                    "id": 1,
+                    "url": "https://example.com/uploads/media_video/demo.mp4",
+                    "filename": "demo.mp4",
+                    "created_at": "2026-04-11",
+                    "meta": {"mime_type": "video/mp4"},
+                }
+            ],
+            1,
+        ),
     )
     monkeypatch.setattr(
         database,
@@ -121,16 +124,8 @@ def test_content_library_media_excludes_generated_video_assets(auth_client, monk
 
     monkeypatch.setattr(
         database,
-        "get_video_assets",
-        lambda user_id, project_id=None: [
-            {
-                "id": 3,
-                "url": "https://example.com/output/generated.mp4",
-                "filename": "generated.mp4",
-                "created_at": "2026-04-12",
-                "meta": {"task_id": "task-1", "source": "omni_video"},
-            }
-        ],
+        "query_video_assets",
+        lambda user_id, project_id=None, limit=50, offset=0, search=None, library_kind="all": ([], 0),
     )
     monkeypatch.setattr(database, "get_audio_assets", lambda user_id, project_id=None: [])
 
@@ -146,16 +141,19 @@ def test_content_library_video_returns_video_assets(auth_client, monkeypatch):
 
     monkeypatch.setattr(
         database,
-        "get_video_assets",
-        lambda user_id, project_id=None: [
-            {
-                "id": 3,
-                "url": "https://example.com/generated.mp4",
-                "filename": "generated.mp4",
-                "created_at": "2026-04-12",
-                "meta": {"task_id": "task-1"},
-            }
-        ],
+        "query_video_assets",
+        lambda user_id, project_id=None, limit=50, offset=0, search=None, library_kind="all": (
+            [
+                {
+                    "id": 3,
+                    "url": "https://example.com/generated.mp4",
+                    "filename": "generated.mp4",
+                    "created_at": "2026-04-12",
+                    "meta": {"task_id": "task-1"},
+                }
+            ],
+            1,
+        ),
     )
 
     response = auth_client.get("/api/content-library?type=video")
@@ -164,6 +162,46 @@ def test_content_library_video_returns_video_assets(auth_client, monkeypatch):
     assert data["success"] is True
     assert data["assets"][0]["type"] == "video"
     assert data["assets"][0]["meta"]["task_id"] == "task-1"
+
+
+def test_content_library_media_returns_server_paged_mixed_assets(auth_client, monkeypatch):
+    import database
+
+    videos = [
+        {"id": 1, "url": "https://example.com/v1.mp4", "filename": "v1.mp4", "created_at": "2026-05-18", "meta": {"mime_type": "video/mp4"}},
+        {"id": 2, "url": "https://example.com/v2.mp4", "filename": "v2.mp4", "created_at": "2026-05-18", "meta": {"mime_type": "video/mp4"}},
+        {"id": 3, "url": "https://example.com/v3.mp4", "filename": "v3.mp4", "created_at": "2026-05-18", "meta": {"mime_type": "video/mp4"}},
+    ]
+    audios = [
+        {"id": 4, "url": "https://example.com/a1.mp3", "filename": "a1.mp3", "created_at": "2026-05-18", "meta": {}},
+        {"id": 5, "url": "https://example.com/a2.mp3", "filename": "a2.mp3", "created_at": "2026-05-18", "meta": {}},
+    ]
+
+    monkeypatch.setattr(
+        database,
+        "query_video_assets",
+        lambda user_id, project_id=None, limit=50, offset=0, search=None, library_kind="all": (
+            videos[offset : offset + limit],
+            len(videos),
+        ),
+    )
+    monkeypatch.setattr(database, "count_audio_assets", lambda user_id, project_id=None, search=None: len(audios))
+    monkeypatch.setattr(
+        database,
+        "query_audio_assets",
+        lambda user_id, project_id=None, limit=500, offset=0, search=None: (
+            audios[offset : offset + limit],
+            len(audios),
+        ),
+    )
+
+    response = auth_client.get("/api/content-library?type=media&page=2&page_size=2")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["total"] == 5
+    assert [asset["filename"] for asset in data["assets"]] == ["v3.mp4", "a1.mp3"]
+    assert [asset["type"] for asset in data["assets"]] == ["video", "audio"]
 
 
 def test_content_library_image_material_merges_person_and_scene(auth_client, monkeypatch):
@@ -190,6 +228,75 @@ def test_content_library_image_material_merges_person_and_scene(auth_client, mon
     data = response.get_json()
     assert data["success"] is True
     assert len(data["assets"]) == 2
+    assert {asset["type"] for asset in data["assets"]} == {"image"}
+
+
+def test_content_library_image_returns_server_paged_payload(auth_client, monkeypatch):
+    import database
+
+    calls = {}
+
+    def fake_query_image_assets(user_id, project_id=None, limit=500, offset=0, search=None):
+        calls.update({"limit": limit, "offset": offset, "search": search})
+        return (
+            [
+                {
+                    "id": 21,
+                    "url": "https://example.com/image-21.jpg",
+                    "filename": "image-21.jpg",
+                    "created_at": "2026-05-18",
+                    "meta": {},
+                }
+            ],
+            45,
+        )
+
+    monkeypatch.setattr(database, "query_image_assets", fake_query_image_assets)
+
+    response = auth_client.get("/api/content-library?type=image&page=2&page_size=20&search=image")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["page"] == 2
+    assert data["page_size"] == 20
+    assert data["total"] == 45
+    assert data["assets"][0]["id"] == "db_image_21"
+    assert calls == {"limit": 20, "offset": 20, "search": "image"}
+
+
+def test_content_library_image_material_returns_server_paged_payload(auth_client, monkeypatch):
+    import database
+
+    monkeypatch.setattr("app.api.content.oss_service.is_available", lambda: False)
+    monkeypatch.setattr(database, "count_person_assets", lambda user_id, project_id=None, search=None: 3)
+    monkeypatch.setattr(database, "count_scene_assets", lambda user_id, project_id=None, search=None: 2)
+
+    def fake_query_person_assets(user_id, project_id=None, limit=500, offset=0, search=None):
+        people = [
+            {"id": 1, "url": "https://example.com/p1.jpg", "filename": "p1.jpg", "created_at": "2026-05-18", "meta": {}},
+            {"id": 2, "url": "https://example.com/p2.jpg", "filename": "p2.jpg", "created_at": "2026-05-18", "meta": {}},
+            {"id": 3, "url": "https://example.com/p3.jpg", "filename": "p3.jpg", "created_at": "2026-05-18", "meta": {}},
+        ]
+        return people[offset : offset + limit], 3
+
+    def fake_query_scene_assets(user_id, project_id=None, limit=500, offset=0, search=None):
+        scenes = [
+            {"id": 4, "url": "https://example.com/s1.jpg", "filename": "s1.jpg", "created_at": "2026-05-18", "meta": {}},
+            {"id": 5, "url": "https://example.com/s2.jpg", "filename": "s2.jpg", "created_at": "2026-05-18", "meta": {}},
+        ]
+        return scenes[offset : offset + limit], 2
+
+    monkeypatch.setattr(database, "query_person_assets", fake_query_person_assets)
+    monkeypatch.setattr(database, "query_scene_assets", fake_query_scene_assets)
+
+    response = auth_client.get("/api/content-library?type=image_material&page=2&page_size=2")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["page"] == 2
+    assert data["page_size"] == 2
+    assert data["total"] == 5
+    assert [asset["filename"] for asset in data["assets"]] == ["p3.jpg", "s1.jpg"]
     assert {asset["type"] for asset in data["assets"]} == {"image"}
 
 

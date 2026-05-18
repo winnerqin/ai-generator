@@ -8,16 +8,20 @@
     <link rel="stylesheet" href="/static/sidebar-nav.css">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <style>
-        .app-shell { min-height: 100vh; }
-        .main-content { padding: 0; }
-        .page-wrap { max-width: 1260px; margin: 0 auto; padding: 24px; }
+        html, body { height: 100%; overflow: hidden; }
+        .app-shell { height: 100vh; overflow: hidden; }
+        .main-content { padding: 0; height: 100vh; overflow: hidden; }
+        .page-wrap { max-width: 1260px; height: 100vh; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; min-height: 0; }
         .page-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 8px; }
         .page-subtitle { color: #aeb8d9; margin-bottom: 18px; }
-        .panel { border-radius: 16px; padding: 18px; margin-bottom: 16px; }
+        .panel { border-radius: 16px; padding: 18px; margin-bottom: 16px; flex: 0 0 auto; }
         .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
         .tab-btn { padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(86,111,255,0.3); background: rgba(86,111,255,0.08); color: inherit; cursor: pointer; }
         .tab-btn.active { background: rgba(86,111,255,0.22); border-color: rgba(86,111,255,0.55); }
         .toolbar { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: end; }
+        .asset-list-panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; margin-bottom: 0; }
+        .asset-list-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+        .asset-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
         .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
         .asset-card { border-radius: 14px; overflow: hidden; border: 1px solid rgba(86,111,255,0.2); background: rgba(255,255,255,0.02); }
         .asset-preview { height: 160px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.15); cursor: pointer; }
@@ -26,7 +30,7 @@
         .asset-info { padding: 10px; display: grid; gap: 6px; font-size: 0.88rem; }
         .asset-meta-line { display: flex; justify-content: space-between; gap: 8px; color: #9ca8cf; font-size: 0.82rem; }
         .asset-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-        .pager { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+        .pager { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .empty-hint { color: #9ca8cf; }
         .small-hint { color: #9ca8cf; font-size: 0.82rem; }
         .preview-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.88); display: none; align-items: center; justify-content: center; z-index: 2000; }
@@ -93,14 +97,16 @@
                     <input id="uploadInput" type="file" multiple style="display:none;">
                 </div>
 
-                <div class="panel">
-                    <div id="assetGrid" class="asset-grid"></div>
-                    <div class="pager">
+                <div class="panel asset-list-panel">
+                    <div class="asset-list-header">
                         <div id="pagerInfo" class="small-hint">第 1 页</div>
-                        <div style="display:flex; gap:8px;">
+                        <div class="pager">
                             <button class="btn btn-secondary" id="prevPageBtn">上一页</button>
                             <button class="btn btn-secondary" id="nextPageBtn">下一页</button>
                         </div>
+                    </div>
+                    <div class="asset-scroll" id="assetScroll">
+                        <div id="assetGrid" class="asset-grid"></div>
                     </div>
                 </div>
             </div>
@@ -328,30 +334,31 @@
         }
 
         function isServerPagedTab() {
-            return currentTab === 'video' || currentTab === 'media';
+            return true;
         }
 
         async function loadAssets(page = currentPage) {
             currentPage = Math.max(1, page);
             const keyword = document.getElementById('searchInput').value.trim();
             const params = new URLSearchParams({ type: currentTab });
-            if (isServerPagedTab()) {
-                params.set('page', String(currentPage));
-                params.set('page_size', String(pageSize));
-                if (keyword) params.set('search', keyword);
-            }
+            params.set('page', String(currentPage));
+            params.set('page_size', String(pageSize));
+            if (keyword) params.set('search', keyword);
 
             const resp = await fetch(`/api/content-library?${params.toString()}`);
             const data = await resp.json();
             allAssets = data.success ? (data.assets || []) : [];
-            if (isServerPagedTab()) {
-                totalAssets = Number(data.total || 0);
-            } else {
-                totalAssets = allAssets.length;
-                currentPage = 1;
+            totalAssets = Number(data.total || 0);
+            currentPage = Number(data.page || currentPage);
+            const totalPages = Math.max(1, Math.ceil(totalAssets / pageSize));
+            if (data.success && !allAssets.length && totalAssets > 0 && currentPage > totalPages) {
+                await loadAssets(totalPages);
+                return;
             }
             renderAssets();
             updatePager();
+            const assetScroll = document.getElementById('assetScroll');
+            if (assetScroll) assetScroll.scrollTop = 0;
         }
 
         let currentPreviewAsset = null;

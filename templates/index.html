@@ -109,6 +109,18 @@
             grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
             gap: 8px;
         }
+        .sample-scroll {
+            height: 430px;
+            overflow-y: auto;
+            padding: 10px;
+            margin-top: 10px;
+            border: 1px solid rgba(86, 111, 255, 0.2);
+            border-radius: 12px;
+            background: rgba(10, 18, 35, 0.16);
+        }
+        .sample-scroll .sample-grid {
+            align-content: start;
+        }
         .sample-item {
             position: relative;
             border-radius: 10px;
@@ -137,6 +149,26 @@
             object-fit: contain;
             display: block;
             background: rgba(0,0,0,0.12);
+        }
+        .sample-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+        .sample-pagination {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .sample-page-status {
+            min-width: 92px;
+            text-align: center;
+            color: rgba(255,255,255,0.72);
+            font-size: 0.85rem;
         }
         .reference-row {
             display: flex;
@@ -307,7 +339,7 @@
     <script src="/static/sidebar-react.js"></script>
     {% raw %}
     <script type="text/babel">
-        const { useEffect, useMemo, useState } = React;
+        const { useEffect, useMemo, useRef, useState } = React;
 
         const ASPECT_RATIOS = [
             { value: '9:16', label: '9:16 (手机屏)' },
@@ -318,6 +350,7 @@
             { value: '4:3', label: '4:3 (横屏)' },
             { value: '16:9', label: '16:9 (宽屏)' }
         ];
+        const SAMPLE_PAGE_SIZE = 20;
 
         const Sidebar = (props) => <window.AppSidebar {...props} activePage="index" />;
 
@@ -335,6 +368,9 @@
             const [styles, setStyles] = useState([]);
             const [sampleCategory, setSampleCategory] = useState('image_material');
             const [sampleImages, setSampleImages] = useState([]);
+            const [samplePage, setSamplePage] = useState(1);
+            const [sampleTotal, setSampleTotal] = useState(0);
+            const [sampleLoading, setSampleLoading] = useState(false);
             const [selectedSample, setSelectedSample] = useState([]);
             const [uploadedFiles, setUploadedFiles] = useState([]);
             const [results, setResults] = useState([]);
@@ -344,6 +380,7 @@
             const [error, setError] = useState('');
             const [modalImage, setModalImage] = useState(null);
             const [modalResultIndex, setModalResultIndex] = useState(null);
+            const sampleScrollRef = useRef(null);
 
             useEffect(() => {
                 document.body.classList.add('react-theme');
@@ -478,34 +515,71 @@
                 }
             }, []);
 
-            // 随当前项目与分类重新拉取示例图/最近图，URL 带 project_id 并禁用缓存，避免切换项目后显示相同内容
+            // 随当前项目、分类和页码重新拉取示例图/最近图，避免一次性创建大量图片节点。
             useEffect(() => {
+                const controller = new AbortController();
+                let active = true;
+                const pageParam = `page=${samplePage}&page_size=${SAMPLE_PAGE_SIZE}`;
                 const projectParam = currentProjectId ? `&project_id=${currentProjectId}` : '';
-                const opts = { cache: 'no-store' };
+                const opts = { cache: 'no-store', signal: controller.signal };
+                if (sampleScrollRef.current) sampleScrollRef.current.scrollTop = 0;
+                setSampleLoading(true);
+                const applyImages = (data, key) => {
+                    if (!active) return;
+                    if (data.success) {
+                        setSampleImages(data[key] || []);
+                        setSampleTotal(Number(data.total || 0));
+                    } else {
+                        setSampleImages([]);
+                        setSampleTotal(0);
+                    }
+                };
+                const failImages = (err) => {
+                    if (!active || err.name === 'AbortError') return;
+                    setSampleImages([]);
+                    setSampleTotal(0);
+                };
+                const finishLoading = () => {
+                    if (active) setSampleLoading(false);
+                };
                 if (sampleCategory === 'recent') {
-                    fetch(`/api/recent-images?limit=50${projectParam}`, opts).then(res => res.json()).then(data => {
-                        if (data.success) setSampleImages(data.images || []);
-                        else setSampleImages([]);
-                    });
-                    return;
+                    fetch(`/api/recent-images?${pageParam}${projectParam}`, opts).then(res => res.json()).then(data => {
+                        applyImages(data, 'images');
+                    }).catch(failImages).finally(finishLoading);
+                    return () => {
+                        active = false;
+                        controller.abort();
+                    };
                 }
                 if (sampleCategory === 'image_material') {
-                    fetch(`/api/content-library?type=image_material${projectParam}`, opts).then(res => res.json()).then(data => {
-                        if (data.success) setSampleImages(data.assets || []);
-                        else setSampleImages([]);
-                    });
-                    return;
+                    fetch(`/api/content-library?type=image_material&${pageParam}${projectParam}`, opts).then(res => res.json()).then(data => {
+                        applyImages(data, 'assets');
+                    }).catch(failImages).finally(finishLoading);
+                    return () => {
+                        active = false;
+                        controller.abort();
+                    };
                 }
-                fetch(`/api/sample-images?category=${sampleCategory}${projectParam}`, opts).then(res => res.json()).then(data => {
-                    if (data.success) setSampleImages(data.images || []);
-                    else setSampleImages([]);
-                });
-            }, [sampleCategory, currentProjectId]);
+                fetch(`/api/sample-images?category=${sampleCategory}&${pageParam}${projectParam}`, opts).then(res => res.json()).then(data => {
+                    applyImages(data, 'images');
+                }).catch(failImages).finally(finishLoading);
+                return () => {
+                    active = false;
+                    controller.abort();
+                };
+            }, [sampleCategory, currentProjectId, samplePage]);
 
             const referenceChips = useMemo(() => {
                 return selectedSample.map(url => ({ type: 'sample', url }))
                     .concat(uploadedFiles.map(f => ({ type: 'upload', url: f.preview, name: f.file.name })));
             }, [selectedSample, uploadedFiles]);
+
+            const sampleTotalPages = Math.max(1, Math.ceil(sampleTotal / SAMPLE_PAGE_SIZE));
+
+            const switchSampleCategory = (category) => {
+                setSampleCategory(category);
+                setSamplePage(1);
+            };
 
             const toggleSample = (img) => {
                 const url = img.url || img;
@@ -765,20 +839,41 @@
                                 <div className="panel">
                                     <div className="panel-title">示例图库</div>
                                     <div className="form-row three">
-                                        <button className={`btn ${sampleCategory === 'image_material' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSampleCategory('image_material')}>图片素材</button>
-                                        <button className={`btn ${sampleCategory === 'recent' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSampleCategory('recent')}>最近</button>
+                                        <button className={`btn ${sampleCategory === 'image_material' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => switchSampleCategory('image_material')}>图片素材</button>
+                                        <button className={`btn ${sampleCategory === 'recent' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => switchSampleCategory('recent')}>最近</button>
                                     </div>
-                                    <div className="sample-grid" style={{ marginTop: '10px' }}>
-                                        {sampleImages.length === 0 && <div className="small-hint">暂无示例图</div>}
-                                        {sampleImages.map((img, idx) => (
-                                            <div
-                                                key={idx}
-                                                className={`sample-item ${selectedSample.includes(img.url) ? 'selected' : ''}`}
-                                                onClick={() => toggleSample(img)}
-                                            >
-                                                <img src={img.url} alt={img.filename || 'sample'} />
-                                            </div>
-                                        ))}
+                                    <div className="sample-scroll" ref={sampleScrollRef}>
+                                        <div className="sample-grid">
+                                            {sampleLoading && <div className="small-hint">加载中...</div>}
+                                            {!sampleLoading && sampleImages.length === 0 && <div className="small-hint">暂无示例图</div>}
+                                            {!sampleLoading && sampleImages.map((img, idx) => (
+                                                <div
+                                                    key={img.id || img.key || img.url || idx}
+                                                    className={`sample-item ${selectedSample.includes(img.url) ? 'selected' : ''}`}
+                                                    onClick={() => toggleSample(img)}
+                                                >
+                                                    <img src={img.url} alt={img.filename || 'sample'} loading="lazy" />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="sample-toolbar">
+                                        <div className="small-hint">共 {sampleTotal} 张，每页 {SAMPLE_PAGE_SIZE} 张</div>
+                                        <div className="sample-pagination">
+                                            <button
+                                                type="button"
+                                                className="btn btn-secondary"
+                                                disabled={samplePage <= 1 || sampleLoading}
+                                                onClick={() => setSamplePage(page => Math.max(1, page - 1))}
+                                            >上一页</button>
+                                            <div className="sample-page-status">{samplePage} / {sampleTotalPages}</div>
+                                            <button
+                                                type="button"
+                                                className="btn btn-secondary"
+                                                disabled={samplePage >= sampleTotalPages || sampleLoading}
+                                                onClick={() => setSamplePage(page => Math.min(sampleTotalPages, page + 1))}
+                                            >下一页</button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1475,12 +1570,29 @@
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
             gap: 10px;
-            max-height: 300px;
+            height: 300px;
             overflow-y: auto;
             padding: 10px;
             background: #f8f9ff;
             border-radius: 8px;
             border: 2px solid #e0e0e0;
+            align-content: start;
+        }
+        
+        .sample-images-pagination {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .sample-images-page-status {
+            min-width: 80px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
         }
         
         .sample-image-item {
@@ -1679,6 +1791,7 @@
                         <div class="sample-images-grid" id="sampleImagesGrid">
                             <div class="sample-images-loading">加载中...</div>
                         </div>
+                        <div class="sample-images-pagination" id="sampleImagesPagination"></div>
                         <p class="sample-images-hint">
                             💡 点击选择1-4张示例图作为参考图，可与手动上传的图片一起使用
                         </p>
@@ -3086,11 +3199,15 @@
         
         // 示例图类别（image_material/recent）
         let sampleCategory = 'image_material';
+        let samplePage = 1;
+        let sampleTotal = 0;
+        const samplePageSize = 20;
 
         
 
         function switchSampleCategory(cat) {
             sampleCategory = cat;
+            samplePage = 1;
             // 清除所有按钮的 btn-primary 类，然后只给当前选中的按钮添加
             const btnImage = document.getElementById('sampleImageMaterialBtn');
             const btnR = document.getElementById('sampleRecentBtn');
@@ -3115,12 +3232,14 @@
         async function loadRecentImages() {
             const grid = document.getElementById('sampleImagesGrid');
             grid.innerHTML = '<div class="sample-images-loading">加载中...</div>';
+            grid.scrollTop = 0;
             try {
-                const response = await fetch('/api/recent-images?limit=50');
+                const response = await fetch(`/api/recent-images?page=${samplePage}&page_size=${samplePageSize}`);
                 const data = await response.json();
 
                 if (data.success && data.images.length > 0) {
                     sampleImages = data.images;
+                    sampleTotal = Number(data.total || data.images.length || 0);
                     grid.innerHTML = '';
                     data.images.forEach((img, index) => {
                         const div = document.createElement('div');
@@ -3144,6 +3263,7 @@
                     });
                     // 加载完成后更新UI状态
                     updateSampleImagesUI();
+                    renderSamplePagination();
                     console.log('最近生成图片加载完成，共', sampleImages.length, '张');
                     
                     // 如果有待选择的重新生成参考图，自动选择（延迟稍长以确保UI已更新）
@@ -3154,11 +3274,15 @@
                         }, 500);
                     }
                 } else {
+                    sampleImages = [];
+                    sampleTotal = Number(data.total || 0);
                     grid.innerHTML = '<div class="sample-images-loading">💭 暂无最近生成的图片（仅显示OSS URL的图片）</div>';
+                    renderSamplePagination();
                 }
             } catch (error) {
                 console.error('加载最近生成图片失败:', error);
                 grid.innerHTML = '<div class="sample-images-loading">❌ 加载失败: ' + (error.message || '未知错误') + '</div>';
+                renderSamplePagination();
             }
         }
 
@@ -3172,11 +3296,12 @@
             
             console.log('开始加载示例图，类别:', category);
             grid.innerHTML = '<div class="sample-images-loading">加载中...</div>';
+            grid.scrollTop = 0;
             
             try {
                 const apiUrl = category === 'image_material'
-                    ? '/api/content-library?type=image_material'
-                    : '/api/sample-images?category=' + encodeURIComponent(category || 'image_material');
+                    ? `/api/content-library?type=image_material&page=${samplePage}&page_size=${samplePageSize}`
+                    : `/api/sample-images?category=${encodeURIComponent(category || 'image_material')}&page=${samplePage}&page_size=${samplePageSize}`;
                 console.log('请求URL:', apiUrl);
                 
                 // 添加超时处理（30秒超时）
@@ -3211,6 +3336,7 @@
                 }
 
                 const images = data.images || data.assets || [];
+                sampleTotal = Number(data.total || images.length || 0);
                 if (images && images.length > 0) {
                     console.log('加载到', images.length, '张图片');
                     sampleImages = images;
@@ -3237,6 +3363,7 @@
                     });
                     // 加载完成后更新UI状态
                     updateSampleImagesUI();
+                    renderSamplePagination();
                     console.log('示例图加载完成，共', sampleImages.length, '张');
                     
                     // 如果有待选择的重新生成参考图，自动选择（延迟稍长以确保UI已更新）
@@ -3248,13 +3375,39 @@
                     }
                 } else {
                     console.log('没有找到示例图片');
+                    sampleImages = [];
                     grid.innerHTML = '<div class="sample-images-loading">💭 暂无示例图片<br><small style="color:#999;">提示：请检查OSS配置或上传示例图片</small></div>';
+                    renderSamplePagination();
                 }
             } catch (error) {
                 console.error('加载示例图失败:', error);
                 console.error('错误堆栈:', error.stack);
                 const errorMsg = error.message || '未知错误';
                 grid.innerHTML = '<div class="sample-images-loading">❌ 加载失败: ' + errorMsg + '<br><small style="color:#999;">请检查浏览器控制台查看详细错误信息</small></div>';
+                renderSamplePagination();
+            }
+        }
+
+        function renderSamplePagination() {
+            const pagination = document.getElementById('sampleImagesPagination');
+            if (!pagination) return;
+
+            const totalPages = Math.max(1, Math.ceil(sampleTotal / samplePageSize));
+            pagination.innerHTML = `
+                <span style="color:#666;">共 ${sampleTotal} 张，每页 ${samplePageSize} 张</span>
+                <button type="button" class="btn" ${samplePage <= 1 ? 'disabled' : ''} onclick="changeSamplePage(${samplePage - 1})">上一页</button>
+                <span class="sample-images-page-status">${samplePage} / ${totalPages}</span>
+                <button type="button" class="btn" ${samplePage >= totalPages ? 'disabled' : ''} onclick="changeSamplePage(${samplePage + 1})">下一页</button>
+            `;
+        }
+
+        function changeSamplePage(nextPage) {
+            const totalPages = Math.max(1, Math.ceil(sampleTotal / samplePageSize));
+            samplePage = Math.min(Math.max(1, nextPage), totalPages);
+            if (sampleCategory === 'recent') {
+                loadRecentImages();
+            } else {
+                loadSampleImages(sampleCategory);
             }
         }
 

@@ -52,6 +52,89 @@ def _append_image_material_assets(target: list[dict], items: list[dict], prefix:
         )
 
 
+def _append_oss_image_material_assets(target: list[dict], items: list[dict], prefix: str, origin: str) -> None:
+    for item in items:
+        target.append(
+            {
+                "id": item.get("key", f"{prefix}_{origin}"),
+                "url": item.get("url"),
+                "filename": item.get("filename"),
+                "type": "image",
+                "source": "oss",
+                "created_at": item.get("last_modified"),
+                "meta": {"source_library": origin},
+            }
+        )
+
+
+def _matches_search(item: dict, search: str) -> bool:
+    if not search:
+        return True
+    return search.lower() in str(item.get("filename") or "").lower()
+
+
+def _extend_paged_image_material_assets(
+    target: list[dict],
+    *,
+    items: list[dict] | None = None,
+    total: int | None = None,
+    loader=None,
+    prefix: str,
+    origin: str,
+    skip_state: dict[str, int],
+    append_items=None,
+) -> None:
+    segment_total = len(items) if items is not None else int(total or 0)
+    if skip_state["skip"] >= segment_total:
+        skip_state["skip"] -= segment_total
+        return
+    if skip_state["remaining"] <= 0:
+        return
+
+    take_offset = skip_state["skip"]
+    take_limit = min(skip_state["remaining"], segment_total - take_offset)
+    if take_limit <= 0:
+        return
+
+    if items is not None:
+        page_items = items[take_offset : take_offset + take_limit]
+    else:
+        page_items, _ = loader(limit=take_limit, offset=take_offset)
+
+    if append_items:
+        append_items(target, page_items, prefix, origin)
+    else:
+        _append_image_material_assets(target, page_items, prefix, origin)
+    skip_state["remaining"] -= len(page_items)
+    skip_state["skip"] = 0
+
+
+def _extend_paged_assets(
+    target: list[dict],
+    *,
+    total: int,
+    loader,
+    prefix: str,
+    asset_type: str,
+    skip_state: dict[str, int],
+) -> None:
+    if skip_state["skip"] >= total:
+        skip_state["skip"] -= total
+        return
+    if skip_state["remaining"] <= 0:
+        return
+
+    take_offset = skip_state["skip"]
+    take_limit = min(skip_state["remaining"], total - take_offset)
+    if take_limit <= 0:
+        return
+
+    page_items, _ = loader(limit=take_limit, offset=take_offset)
+    _append_assets(target, page_items, prefix, asset_type)
+    skip_state["remaining"] -= len(page_items)
+    skip_state["skip"] = 0
+
+
 def _public_asset_url(path_or_url: str) -> str:
     if not path_or_url:
         return path_or_url
@@ -154,6 +237,7 @@ def get_content_library():
     user_id = session.get("user_id")
     project_id = session.get("current_project_id")
     library_type = request.args.get("type", "all")
+    pagination_requested = "page" in request.args or "page_size" in request.args
     page = max(1, _safe_int(request.args.get("page", "1"), 1))
     page_size = max(1, min(200, _safe_int(request.args.get("page_size", "500"), 500)))
     search = (request.args.get("search") or "").strip()
@@ -161,6 +245,162 @@ def get_content_library():
 
     assets: list[dict] = []
     total = 0
+
+    if pagination_requested and library_type == "image":
+        image_assets, total = database.query_image_assets(
+            user_id=user_id,
+            project_id=project_id,
+            limit=page_size,
+            offset=offset,
+            search=search,
+        )
+        _append_assets(assets, image_assets, "db_image", "image")
+        for asset in assets:
+            asset["url"] = _public_asset_url(str(asset.get("url") or ""))
+        return jsonify(
+            {
+                "success": True,
+                "assets": assets,
+                "items": assets,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }
+        )
+
+    if pagination_requested and library_type == "image_material":
+        oss_person_assets: list[dict] = []
+        oss_scene_assets: list[dict] = []
+        if oss_service.is_available():
+            oss_person_assets = [
+                item
+                for item in oss_service.list_sample_images(user_id, project_id, "person")
+                if _matches_search(item, search)
+            ]
+            oss_scene_assets = [
+                item
+                for item in oss_service.list_sample_images(user_id, project_id, "scene")
+                if _matches_search(item, search)
+            ]
+
+        person_total = database.count_person_assets(user_id, project_id, search=search)
+        scene_total = database.count_scene_assets(user_id, project_id, search=search)
+        total = len(oss_person_assets) + len(oss_scene_assets) + person_total + scene_total
+
+        skip_state = {"skip": offset, "remaining": page_size}
+        _extend_paged_image_material_assets(
+            assets,
+            items=oss_person_assets,
+            prefix="oss_person",
+            origin="person",
+            skip_state=skip_state,
+            append_items=_append_oss_image_material_assets,
+        )
+        _extend_paged_image_material_assets(
+            assets,
+            items=oss_scene_assets,
+            prefix="oss_scene",
+            origin="scene",
+            skip_state=skip_state,
+            append_items=_append_oss_image_material_assets,
+        )
+        _extend_paged_image_material_assets(
+            assets,
+            total=person_total,
+            loader=lambda limit, offset: database.query_person_assets(
+                user_id,
+                project_id,
+                limit=limit,
+                offset=offset,
+                search=search,
+            ),
+            prefix="db_person",
+            origin="person",
+            skip_state=skip_state,
+        )
+        _extend_paged_image_material_assets(
+            assets,
+            total=scene_total,
+            loader=lambda limit, offset: database.query_scene_assets(
+                user_id,
+                project_id,
+                limit=limit,
+                offset=offset,
+                search=search,
+            ),
+            prefix="db_scene",
+            origin="scene",
+            skip_state=skip_state,
+        )
+
+        for asset in assets:
+            asset["url"] = _public_asset_url(str(asset.get("url") or ""))
+        return jsonify(
+            {
+                "success": True,
+                "assets": assets,
+                "items": assets,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }
+        )
+
+    if pagination_requested and library_type == "media":
+        _, video_total = database.query_video_assets(
+            user_id=user_id,
+            project_id=project_id,
+            limit=1,
+            offset=0,
+            search=search,
+            library_kind="media",
+        )
+        audio_total = database.count_audio_assets(user_id, project_id, search=search)
+        total = video_total + audio_total
+
+        skip_state = {"skip": offset, "remaining": page_size}
+        _extend_paged_assets(
+            assets,
+            total=video_total,
+            loader=lambda limit, offset: database.query_video_assets(
+                user_id=user_id,
+                project_id=project_id,
+                limit=limit,
+                offset=offset,
+                search=search,
+                library_kind="media",
+            ),
+            prefix="db_video",
+            asset_type="video",
+            skip_state=skip_state,
+        )
+        _extend_paged_assets(
+            assets,
+            total=audio_total,
+            loader=lambda limit, offset: database.query_audio_assets(
+                user_id,
+                project_id,
+                limit=limit,
+                offset=offset,
+                search=search,
+            ),
+            prefix="db_audio",
+            asset_type="audio",
+            skip_state=skip_state,
+        )
+
+        for asset in assets:
+            asset["url"] = _public_asset_url(str(asset.get("url") or ""))
+        return jsonify(
+            {
+                "success": True,
+                "assets": assets,
+                "items": assets,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }
+        )
 
     if oss_service.is_available():
         if library_type in ("person", "all", "image_material"):
@@ -262,7 +502,21 @@ def get_content_library():
             }
         )
 
-    return jsonify({"success": True, "assets": assets, "items": assets, "total": len(assets), "page": 1, "page_size": len(assets)})
+    total = len(assets)
+    if pagination_requested:
+        paged_assets = assets[offset : offset + page_size]
+        return jsonify(
+            {
+                "success": True,
+                "assets": paged_assets,
+                "items": paged_assets,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }
+        )
+
+    return jsonify({"success": True, "assets": assets, "items": assets, "total": total, "page": 1, "page_size": len(assets)})
 
 
 @content_bp.route("/api/upload-media-asset", methods=["POST"])
