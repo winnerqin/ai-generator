@@ -4,10 +4,13 @@
 import sqlite3
 import json
 import hashlib
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
+from dotenv import load_dotenv
 
-DB_PATH = 'generation_records.db'
+load_dotenv()
+DB_PATH = os.environ.get("DB_PATH", "generation_records.db")
 
 
 def ensure_media_library_tables():

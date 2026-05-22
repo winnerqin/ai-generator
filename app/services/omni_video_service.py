@@ -518,16 +518,29 @@ def _download_and_upload_to_oss(
         response = requests.get(video_url, timeout=120, stream=True)
         response.raise_for_status()
 
-        temp_dir = tempfile.gettempdir()
-        temp_file = os.path.join(temp_dir, filename)
+        file_suffix = os.path.splitext(filename)[1] or ".mp4"
+        # Use a unique temp file path to avoid concurrent tasks clobbering
+        # each other when they share the same filename.
+        fd, temp_file = tempfile.mkstemp(prefix="omni_video_", suffix=file_suffix)
+        os.close(fd)
 
         file_size = 0
+        content_length = response.headers.get("Content-Length")
+        expected_size = int(content_length) if content_length and content_length.isdigit() else None
         with open(temp_file, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
                     file_size += len(chunk)
 
+        if expected_size is not None and file_size != expected_size:
+            try:
+                os.unlink(temp_file)
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"Downloaded video size mismatch: expected={expected_size}, actual={file_size}"
+            )
         logger.info("[omni-video] Video downloaded to temp: %s, size=%d", temp_file, file_size)
 
         oss_url = oss_service.upload_file(

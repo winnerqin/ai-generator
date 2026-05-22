@@ -129,6 +129,17 @@ class OSSService:
             with open(file_path, "rb") as f:
                 self._bucket.put_object(object_key, f)
 
+            # Verify uploaded object size to reduce silent corruption risk.
+            head = self._bucket.head_object(object_key)
+            remote_size = getattr(head, "content_length", None)
+            if remote_size is not None and int(remote_size) != int(file_size):
+                try:
+                    self._bucket.delete_object(object_key)
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    f"OSS upload size mismatch: local={file_size}, remote={remote_size}, key={object_key}"
+                )
             # 返回公网访问 URL（使用外网endpoint，确保外网用户可访问）
             public_url = f"https://{self._external_endpoint}/{object_key}"
             duration_ms = int((time.time() - start_time) * 1000)
