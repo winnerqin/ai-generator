@@ -10,7 +10,27 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
-DB_PATH = os.environ.get("DB_PATH", "generation_records.db")
+
+
+def _resolve_db_path() -> str:
+    """
+    解析数据库路径，兼容 Windows / Linux 环境。
+
+    优先级：
+    - Windows: DB_PATH_WINDOWS > DB_PATH
+    - Linux/macOS: DB_PATH_LINUX > DB_PATH
+    - 默认: generation_records.db
+    """
+    if os.name == "nt":
+        raw = os.environ.get("DB_PATH_WINDOWS") or os.environ.get("DB_PATH") or "generation_records.db"
+    else:
+        raw = os.environ.get("DB_PATH_LINUX") or os.environ.get("DB_PATH") or "generation_records.db"
+
+    expanded = os.path.expanduser(os.path.expandvars(raw))
+    return os.path.normpath(expanded)
+
+
+DB_PATH = _resolve_db_path()
 
 
 def ensure_media_library_tables():
