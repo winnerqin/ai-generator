@@ -17,11 +17,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import database
 from dotenv import load_dotenv
 from flask import Flask, abort, g, render_template, request, send_file, session
 
 load_dotenv()
+import database
 
 logger = logging.getLogger(__name__)
 
