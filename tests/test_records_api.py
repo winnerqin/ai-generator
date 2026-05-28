@@ -48,4 +48,4 @@ def test_delete_record_returns_json_success(auth_client, monkeypatch):
     assert response.status_code == 200
     data = response.get_json()
     assert data["success"] is True
-    assert deleted == {"record_id": 123, "user_id": 1, "project_id": None}
+    assert deleted == {"record_id": 123, "user_id": 1, "project_id": 1}

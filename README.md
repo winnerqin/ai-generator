@@ -65,9 +65,24 @@ Copy-Item .env.example .env
 - `FLASK_DEBUG`：是否开启调试
 - `DB_TYPE`：`sqlite` 或 `mysql`
 - `DB_PATH`：SQLite 文件路径
+- `MYSQL_HOST`、`MYSQL_PORT`：MySQL 8.0 服务地址和端口
+- `MYSQL_USER`、`MYSQL_PASSWORD`、`MYSQL_DATABASE`：MySQL 连接账号、密码和库名
+- `MYSQL_CHARSET`：MySQL 字符集，推荐 `utf8mb4`
 - `ARK_API_KEY`：Seedance / 方舟接口密钥
 - `OSS_ENABLED`：是否启用 OSS
 - `OSS_ENDPOINT`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET`
+
+切换到 MySQL 8.0 时，在 `.env` 中设置：
+
+```text
+DB_TYPE=mysql
+MYSQL_HOST=your-mysql-host
+MYSQL_PORT=3306
+MYSQL_USER=ai_app
+MYSQL_PASSWORD=your-password
+MYSQL_DATABASE=ai_generator
+MYSQL_CHARSET=utf8mb4
+```
 
 ## 启动方式
 

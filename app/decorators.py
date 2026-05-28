@@ -11,6 +11,24 @@ from flask import redirect, session, url_for
 from app.utils import ApiResponse
 
 
+def _ensure_current_project() -> None:
+    """Populate the current project for older sessions that do not have one."""
+    if "user_id" not in session:
+        return
+
+    current_project_id = session.get("current_project_id")
+    if current_project_id:
+        return
+
+    import database
+
+    projects = database.get_user_projects(session.get("user_id"))
+    if projects:
+        first_project = projects[0]
+        session["current_project_id"] = first_project.get("id")
+        session["current_project_name"] = first_project.get("name")
+
+
 def login_required(f):
     """
     登录验证装饰器
@@ -31,6 +49,7 @@ def login_required(f):
                 return ApiResponse.unauthorized("请先登录")
             else:
                 return redirect(url_for("auth.login"))
+        _ensure_current_project()
         return f(*args, **kwargs)
 
     return decorated_function

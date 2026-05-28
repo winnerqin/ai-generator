@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS generation_records (
     filename VARCHAR(512) NOT NULL,
     batch_id VARCHAR(255),
     status VARCHAR(64) DEFAULT 'success',
+    token_usage INT,
     INDEX idx_user_created (user_id, created_at DESC),
     INDEX idx_batch_id (batch_id),
     INDEX idx_records_user_project_created (user_id, project_id, created_at DESC)
@@ -187,6 +188,26 @@ CREATE TABLE IF NOT EXISTS video_library (
     INDEX idx_video_user_project_created (user_id, project_id, created_at DESC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS audio_library (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    project_id INT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    filename VARCHAR(512) NOT NULL,
+    url TEXT NOT NULL,
+    meta TEXT,
+    INDEX idx_audio_user_project_created (user_id, project_id, created_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS deleted_video_library_tasks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    project_id INT NULL,
+    task_id VARCHAR(255) NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY idx_deleted_video_task_unique (user_id, project_id, task_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- 视频任务表
 CREATE TABLE IF NOT EXISTS video_tasks (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -212,9 +233,95 @@ CREATE TABLE IF NOT EXISTS video_tasks (
     video_url TEXT,
     last_frame_image_url TEXT,
     token INT,
-    usage TEXT,
+    `usage` TEXT,
     content LONGTEXT,
     error_message TEXT,
     UNIQUE KEY uk_task_id (task_id),
+    INDEX idx_video_tasks_user_id (user_id),
+    INDEX idx_video_tasks_task_id (task_id),
+    INDEX idx_video_tasks_status (status),
+    INDEX idx_video_tasks_created_at (created_at),
     INDEX idx_video_tasks_user_project_created (user_id, project_id, created_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS omni_video_tasks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    task_id VARCHAR(255) NOT NULL UNIQUE,
+    project_id INT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    status VARCHAR(64) DEFAULT 'queued',
+    model VARCHAR(255),
+    mode VARCHAR(64),
+    prompt TEXT,
+    input_payload_json LONGTEXT,
+    raw_response_json LONGTEXT,
+    result_json LONGTEXT,
+    fail_reason TEXT,
+    video_url TEXT,
+    cover_url TEXT,
+    first_frame_url TEXT,
+    last_frame_url TEXT,
+    reference_urls_json LONGTEXT,
+    duration INT,
+    frame_count INT,
+    resolution VARCHAR(64),
+    aspect_ratio VARCHAR(64),
+    filename VARCHAR(512),
+    seed INT,
+    token_usage INT,
+    usage_json LONGTEXT,
+    INDEX idx_omni_video_tasks_user_id (user_id),
+    INDEX idx_omni_video_tasks_task_id (task_id),
+    INDEX idx_omni_video_tasks_status (status),
+    INDEX idx_omni_video_tasks_created_at (created_at),
+    INDEX idx_omni_video_tasks_user_project_created (user_id, project_id, created_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS video_enhance_tasks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    task_id VARCHAR(255) NOT NULL UNIQUE,
+    project_id INT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    status VARCHAR(64) DEFAULT 'queued',
+    source_video_url TEXT NOT NULL,
+    source_video_id VARCHAR(255),
+    source_filename VARCHAR(512),
+    input_payload_json LONGTEXT,
+    tool_version VARCHAR(64) NOT NULL DEFAULT 'standard',
+    resolution VARCHAR(64) NOT NULL DEFAULT '1080p',
+    raw_response_json LONGTEXT,
+    result_json LONGTEXT,
+    video_url TEXT,
+    output_filename VARCHAR(512),
+    cover_url TEXT,
+    fail_reason TEXT,
+    token_usage INT,
+    usage_json LONGTEXT,
+    INDEX idx_video_enhance_tasks_user_id (user_id),
+    INDEX idx_video_enhance_tasks_task_id (task_id),
+    INDEX idx_video_enhance_tasks_status (status),
+    INDEX idx_video_enhance_tasks_created_at (created_at),
+    INDEX idx_video_enhance_tasks_user_project_created (user_id, project_id, created_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS operation_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NULL,
+    username VARCHAR(255),
+    project_id INT NULL,
+    request_path VARCHAR(1024) NOT NULL,
+    request_method VARCHAR(32) NOT NULL,
+    request_params LONGTEXT,
+    response_status INT,
+    response_summary LONGTEXT,
+    ip_address VARCHAR(128),
+    duration_ms INT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_operation_logs_user_created (user_id, created_at DESC),
+    INDEX idx_operation_logs_path_created (request_path(255), created_at DESC),
+    INDEX idx_operation_logs_project_created (project_id, created_at DESC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

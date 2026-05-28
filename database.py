@@ -8,6 +8,7 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
+from db_adapter import initialize_mysql_schema, is_mysql_enabled
 
 load_dotenv()
 
@@ -32,9 +33,19 @@ def _resolve_db_path() -> str:
 
 DB_PATH = _resolve_db_path()
 
+if is_mysql_enabled():
+    import db_adapter
+
+    sqlite3.connect = db_adapter.connect
+    sqlite3.IntegrityError = db_adapter.IntegrityError
+
 
 def ensure_media_library_tables():
     """Ensure media library tables exist for older databases."""
+    if is_mysql_enabled():
+        initialize_mysql_schema()
+        return
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
@@ -116,6 +127,11 @@ def ensure_media_library_tables():
 
 def init_database():
     """初始化数据库"""
+    if is_mysql_enabled():
+        initialize_mysql_schema()
+        print("数据库初始化完成: MySQL")
+        return
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
@@ -1381,6 +1397,9 @@ def is_video_task_deleted_from_library(user_id, task_id, project_id=None):
 
 
 def _ensure_omni_video_task_schema(cursor):
+    if is_mysql_enabled():
+        return
+
     cursor.execute(
         '''
         CREATE TABLE IF NOT EXISTS omni_video_tasks (
@@ -1648,6 +1667,9 @@ def delete_omni_video_task(task_id, user_id=None, project_id=None):
 
 def _ensure_video_enhance_tasks_schema(cursor):
     """确保视频画质增强任务表存在。"""
+    if is_mysql_enabled():
+        return
+
     cursor.execute(
         '''
         CREATE TABLE IF NOT EXISTS video_enhance_tasks (
@@ -3100,7 +3122,7 @@ def get_report_overview(start_date=None, end_date=None):
             SELECT duration FROM video_tasks
             UNION ALL
             SELECT duration FROM omni_video_tasks
-        )
+        ) video_union
     ''')
     row = cursor.fetchone()
     video_stats['total'] = row[0] or 0
@@ -3112,7 +3134,7 @@ def get_report_overview(start_date=None, end_date=None):
             SELECT duration, created_at FROM video_tasks
             UNION ALL
             SELECT duration, created_at FROM omni_video_tasks
-        ) WHERE DATE(created_at) = ?
+        ) video_union WHERE DATE(created_at) = ?
     ''', (today,))
     row = cursor.fetchone()
     video_stats['today'] = row[0] or 0
@@ -3124,7 +3146,7 @@ def get_report_overview(start_date=None, end_date=None):
             SELECT duration, created_at FROM video_tasks
             UNION ALL
             SELECT duration, created_at FROM omni_video_tasks
-        ) WHERE DATE(created_at) BETWEEN ? AND ?
+        ) video_union WHERE DATE(created_at) BETWEEN ? AND ?
     ''', (last7days_start, yesterday))
     row = cursor.fetchone()
     video_stats['last7days'] = row[0] or 0
@@ -3137,7 +3159,7 @@ def get_report_overview(start_date=None, end_date=None):
                 SELECT duration, created_at FROM video_tasks
                 UNION ALL
                 SELECT duration, created_at FROM omni_video_tasks
-            ) WHERE DATE(created_at) BETWEEN ? AND ?
+            ) video_union WHERE DATE(created_at) BETWEEN ? AND ?
         ''', (start_date, end_date))
         row = cursor.fetchone()
         video_stats['period'] = row[0] or 0
@@ -3208,6 +3230,13 @@ def get_user_report(start_date=None, end_date=None, username_filter=None):
     # 使用LEFT JOIN确保所有用户都被包含，即使没有记录
     # Token只统计全能视频(omni_video_tasks)
     # 视频统计合并 video_tasks 和 omni_video_tasks
+    last_active_expr = (
+        "GREATEST(COALESCE(g.last_active, ''), COALESCE(v.last_active, ''), "
+        "COALESCE(e.last_active, ''), COALESCE(ov.last_active, ''))"
+        if is_mysql_enabled()
+        else "MAX(COALESCE(g.last_active, ''), COALESCE(v.last_active, ''), "
+        "COALESCE(e.last_active, ''), COALESCE(ov.last_active, ''))"
+    )
     query = f'''
         SELECT
             u.id as user_id,
@@ -3217,7 +3246,7 @@ def get_user_report(start_date=None, end_date=None, username_filter=None):
             COALESCE(v.video_duration, 0) as video_duration,
             COALESCE(e.enhance_count, 0) as enhance_count,
             COALESCE(ov.video_tokens, 0) as video_tokens,
-            MAX(COALESCE(g.last_active, ''), COALESCE(v.last_active, ''), COALESCE(e.last_active, ''), COALESCE(ov.last_active, '')) as last_active
+            {last_active_expr} as last_active
         FROM users u
         LEFT JOIN (
             SELECT user_id, COUNT(*) as image_count, MAX(created_at) as last_active
@@ -3231,7 +3260,7 @@ def get_user_report(start_date=None, end_date=None, username_filter=None):
                 SELECT user_id, duration, created_at FROM video_tasks WHERE 1=1 {date_condition}
                 UNION ALL
                 SELECT user_id, COALESCE(duration, 0) as duration, created_at FROM omni_video_tasks WHERE 1=1 {date_condition}
-            )
+            ) video_union
             GROUP BY user_id
         ) v ON u.id = v.user_id
         LEFT JOIN (
@@ -3338,11 +3367,13 @@ def get_daily_report(start_date=None, end_date=None, days=30):
 
     # 如果需要补全日期（无数据的日期也要显示）
     # 获取日期范围内的所有日期
-    cursor.execute('''
-        WITH dates(date) AS (
+    dates_cte = "WITH RECURSIVE" if is_mysql_enabled() else "WITH"
+    next_date_expr = "DATE_ADD(date, INTERVAL 1 DAY)" if is_mysql_enabled() else "DATE(date, '+1 day')"
+    cursor.execute(f'''
+        {dates_cte} dates(date) AS (
             SELECT DATE(?) as date
             UNION ALL
-            SELECT DATE(date, '+1 day')
+            SELECT {next_date_expr}
             FROM dates
             WHERE date < DATE(?)
         )
@@ -3592,6 +3623,10 @@ def get_token_usage_report(start_date=None, end_date=None):
 
 def _ensure_operation_logs_schema():
     """确保操作日志表存在。"""
+    if is_mysql_enabled():
+        initialize_mysql_schema()
+        return
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
