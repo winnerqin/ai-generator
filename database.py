@@ -497,6 +497,9 @@ def init_database():
         'CREATE INDEX IF NOT EXISTS idx_omni_video_tasks_created_at ON omni_video_tasks(created_at)'
     )
 
+    # 先确保视频增强任务表存在，再创建其相关索引
+    _ensure_video_enhance_tasks_schema(cursor)
+
     # 添加复合索引以优化日期范围查询和用户统计查询
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_user_date ON generation_records(user_id, DATE(created_at))')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_gen_date ON generation_records(DATE(created_at))')
