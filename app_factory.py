@@ -13,17 +13,29 @@ import json
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 from flask import Flask, abort, g, render_template, request, send_file, session
+from flask.json.provider import DefaultJSONProvider
 
 load_dotenv()
 import database
 
 logger = logging.getLogger(__name__)
+
+
+class AppJSONProvider(DefaultJSONProvider):
+    """JSON provider that normalizes date/time output format."""
+
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, datetime):
+            return obj.strftime("%Y-%m-%d %H:%M:%S")
+        if isinstance(obj, date):
+            return obj.strftime("%Y-%m-%d")
+        return super().default(obj)
 
 try:
     from app.api import (
@@ -277,6 +289,7 @@ def create_app(config_name: str | None = None) -> Flask:
 
     database.init_database()
     app = Flask(__name__)
+    app.json = AppJSONProvider(app)
     app.config.update(
         SECRET_KEY=os.environ.get("SECRET_KEY", config.SECRET_KEY),
         UPLOAD_FOLDER=os.environ.get("UPLOAD_FOLDER", config.UPLOAD_FOLDER),

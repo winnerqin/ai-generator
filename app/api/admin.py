@@ -16,17 +16,16 @@ admin_bp = Blueprint("admin", __name__)
 def calculate_date_range(period, start_date=None, end_date=None):
     """计算日期范围"""
     today = datetime.now().date()
-    yesterday = today - timedelta(days=1)
 
     if period == 'day':
         start = today  # 今日：当天数据
         end = today
     elif period == 'last7days':
-        start = yesterday - timedelta(days=6)  # 近7天：前一天开始往前6天（不含今天）
-        end = yesterday
+        start = today - timedelta(days=6)  # 近7天：包含今天
+        end = today
     elif period == 'month':
-        start = yesterday - timedelta(days=29)  # 近30天：前一天开始往前29天（不含今天）
-        end = yesterday
+        start = today - timedelta(days=29)  # 近30天：包含今天
+        end = today
     else:  # custom
         # start_date 和 end_date 已经是字符串格式
         return start_date or today.strftime('%Y-%m-%d'), end_date or today.strftime('%Y-%m-%d')

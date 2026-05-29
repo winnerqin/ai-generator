@@ -276,7 +276,9 @@ CREATE TABLE IF NOT EXISTS omni_video_tasks (
     INDEX idx_omni_video_tasks_task_id (task_id),
     INDEX idx_omni_video_tasks_status (status),
     INDEX idx_omni_video_tasks_created_at (created_at),
-    INDEX idx_omni_video_tasks_user_project_created (user_id, project_id, created_at DESC)
+    INDEX idx_omni_video_tasks_user_project_created (user_id, project_id, created_at DESC),
+    INDEX idx_omni_video_tasks_user_status_created (user_id, status, created_at DESC),
+    INDEX idx_omni_video_tasks_user_project_status_created (user_id, project_id, status, created_at DESC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS video_enhance_tasks (

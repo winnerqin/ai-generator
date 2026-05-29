@@ -113,6 +113,7 @@
                             <select id="resolution">
                                 <option value="720p" selected>720P</option>
                                 <option value="480p">480P</option>
+                                <option value="1080p">1080P</option>
                             </select>
                         </div>
                         <div class="field">
@@ -320,6 +321,25 @@
         function isIntlModelSelected() {
             const model = document.getElementById('model').value || '';
             return model.startsWith('dreamina-');
+        }
+
+        function supports1080p(model) {
+            return model === 'doubao-seedance-2-0-260128' || model === 'dreamina-seedance-2-0-260128';
+        }
+
+        function syncResolutionOptions() {
+            const model = document.getElementById('model').value || '';
+            const resolutionEl = document.getElementById('resolution');
+            const current = resolutionEl.value;
+            const option1080 = resolutionEl.querySelector('option[value="1080p"]');
+            const enabled1080 = supports1080p(model);
+            if (option1080) {
+                option1080.disabled = !enabled1080;
+                option1080.hidden = !enabled1080;
+            }
+            if (!enabled1080 && current === '1080p') {
+                resolutionEl.value = '720p';
+            }
         }
 
         function getAssetLabel(asset) {
@@ -733,11 +753,15 @@
         });
 
         // 模型选择变化时重新渲染素材列表，更新素材名称显示
-        document.getElementById('model').addEventListener('change', renderSelectedAssets);
+        document.getElementById('model').addEventListener('change', () => {
+            syncResolutionOptions();
+            renderSelectedAssets();
+        });
 
         renderSelectedAssets();
         syncDurationState();
         applyRegeneratePrefill();
+        syncResolutionOptions();
 
         // 账户余额查询逻辑
         const BALANCE_REFRESH_MS = 60 * 60 * 1000; // 1小时

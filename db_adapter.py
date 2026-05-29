@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -79,15 +80,8 @@ class MySQLConnection:
                 "DB_TYPE=mysql requires PyMySQL. Install dependencies with "
                 "`python -m pip install -r requirements.txt`."
             )
-        self._conn = pymysql.connect(
-            host=os.environ.get("MYSQL_HOST", "127.0.0.1"),
-            port=int(os.environ.get("MYSQL_PORT", "3306")),
-            user=os.environ.get("MYSQL_USER", "root"),
-            password=os.environ.get("MYSQL_PASSWORD", ""),
-            database=os.environ.get("MYSQL_DATABASE", "ai_generator"),
-            charset=os.environ.get("MYSQL_CHARSET", "utf8mb4"),
-            autocommit=False,
-        )
+        self._conn = _acquire_mysql_raw_connection()
+        self._closed = False
 
     def cursor(self) -> MySQLCursor:
         return MySQLCursor(self._conn.cursor())
@@ -99,7 +93,63 @@ class MySQLConnection:
         self._conn.rollback()
 
     def close(self) -> None:
-        self._conn.close()
+        if self._closed:
+            return
+        _release_mysql_raw_connection(self._conn)
+        self._closed = True
+
+
+_MYSQL_POOL_LOCK = threading.Lock()
+_MYSQL_POOL: list[Any] = []
+_MYSQL_POOL_MAX_SIZE = max(1, int(os.environ.get("MYSQL_POOL_SIZE", "10")))
+
+
+def _new_mysql_raw_connection() -> Any:
+    conn = pymysql.connect(
+        host=os.environ.get("MYSQL_HOST", "127.0.0.1"),
+        port=int(os.environ.get("MYSQL_PORT", "3306")),
+        user=os.environ.get("MYSQL_USER", "root"),
+        password=os.environ.get("MYSQL_PASSWORD", ""),
+        database=os.environ.get("MYSQL_DATABASE", "ai_generator"),
+        charset=os.environ.get("MYSQL_CHARSET", "utf8mb4"),
+        autocommit=False,
+    )
+    return conn
+
+
+def _acquire_mysql_raw_connection() -> Any:
+    with _MYSQL_POOL_LOCK:
+        while _MYSQL_POOL:
+            conn = _MYSQL_POOL.pop()
+            try:
+                conn.ping(reconnect=True)
+                return conn
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+    return _new_mysql_raw_connection()
+
+
+def _release_mysql_raw_connection(conn: Any) -> None:
+    try:
+        conn.ping(reconnect=True)
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return
+
+    with _MYSQL_POOL_LOCK:
+        if len(_MYSQL_POOL) < _MYSQL_POOL_MAX_SIZE:
+            _MYSQL_POOL.append(conn)
+            return
+    try:
+        conn.close()
+    except Exception:
+        pass
 
 
 def connect(db_path: str | None = None) -> sqlite3.Connection | MySQLConnection:

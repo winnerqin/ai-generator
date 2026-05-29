@@ -96,7 +96,7 @@
             </div>
             <div class="inline-options" style="margin-top: 12px;">
                 <label style="display:flex; align-items:center; gap:8px;">
-                    <input id="autoRefresh" type="checkbox">
+                    <input id="autoRefresh" type="checkbox" checked>
                     <span>自动刷新未完成任务</span>
                 </label>
                 <span class="small-hint">开启后每 5 分钟自动刷新一次当前筛选结果。</span>
@@ -155,42 +155,12 @@
         </div>
     </div>
 
-    <div id="enhanceModal" class="preview-modal" style="display:none;">
-        <div class="preview-inner" style="width:min(500px, 92vw);">
-            <div class="preview-header">
-                <div id="enhanceModalTitle" style="font-weight:600;">画质增强</div>
-                <button class="btn btn-secondary" id="enhanceModalClose">关闭</button>
-            </div>
-            <div style="padding:12px 0;">
-                <div class="small-hint" style="margin-bottom:12px;">原视频：<span id="enhanceSourceFilename"></span></div>
-                <div>
-                    <label for="enhanceToolVersion" style="display:block;margin-bottom:6px;">工具版本</label>
-                    <select id="enhanceToolVersion" style="width:100%;padding:8px;border-radius:8px;">
-                        <option value="standard" selected>standard（推荐）</option>
-                        <option value="professional">professional</option>
-                    </select>
-                </div>
-                <div style="margin-top:12px;">
-                    <label for="enhanceResolution" style="display:block;margin-bottom:6px;">目标分辨率</label>
-                    <select id="enhanceResolution" style="width:100%;padding:8px;border-radius:8px;">
-                        <option value="720p">720p</option>
-                        <option value="1080p" selected>1080p（推荐）</option>
-                        <option value="2k">2K</option>
-                        <option value="4k">4K</option>
-                    </select>
-                </div>
-                <button id="submitEnhanceBtn" class="btn btn-primary" style="width:100%;margin-top:16px;">开始增强</button>
-            </div>
-        </div>
-    </div>
-
     <script src="/static/sidebar-nav.js"></script>
     <script src="/static/sidebar-shared.js"></script>
     <script>
         const PAGE_SIZE = 10;
         const AUTO_REFRESH_MS = 5 * 60 * 1000;
         const TERMINAL_STATUSES = ['succeeded', 'success', 'completed', 'done', 'finished', 'failed', 'cancelled', 'canceled', 'expired'];
-        const COMPLETED_STATUSES = ['succeeded', 'success', 'completed', 'done', 'finished'];
 
         let currentTaskId = null;
         let currentItems = [];
@@ -198,7 +168,6 @@
         let currentTotal = 0;
         let detailExpanded = false;
         let autoRefreshTimer = null;
-        let currentEnhanceTask = null;
 
         function debugLog(label, payload) {
             console.group(`[OmniVideoTasks] ${label}`);
@@ -252,13 +221,9 @@
             return !['running', 'cancelled', 'canceled'].includes(status);
         }
 
-        function isCompletedTask(task) {
+        function canRefreshTask(task) {
             const status = String(task?.status || '').toLowerCase();
-            return COMPLETED_STATUSES.includes(status);
-        }
-
-        function canEnhance(task) {
-            return Boolean(task && task.video_url) && isCompletedTask(task);
+            return ['running', 'queued'].includes(status);
         }
 
         function collapseDetails(message = '点击上方任务的“查看”按钮查看详情。') {
@@ -323,7 +288,7 @@
                             <button class="btn btn-secondary" onclick="viewTask('${encodeURIComponent(task.task_id || '')}')">${currentTaskId === task.task_id && detailExpanded ? '收起' : '查看'}</button>
                             <button class="btn btn-secondary" onclick="previewTask('${encodeURIComponent(task.task_id || '')}')">预览</button>
                             <button class="btn btn-secondary" ${canDownload(task) ? '' : 'disabled title="视频生成成功后可下载"'} onclick="${canDownload(task) ? `downloadTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">下载</button>
-                            <button class="btn btn-secondary" ${canEnhance(task) ? '' : 'disabled title="仅可对已完成且已有视频的任务执行增强"'} onclick="${canEnhance(task) ? `openEnhanceModal('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">增强</button>
+                            <button class="btn btn-secondary" ${canRefreshTask(task) ? '' : 'disabled title="仅 queued/running 状态可刷新"'} onclick="${canRefreshTask(task) ? `refreshTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">刷新</button>
                             <button class="btn btn-secondary" onclick="regenerateTask('${encodeURIComponent(task.task_id || '')}')">重做</button>
                             <button class="btn btn-danger" ${canDelete(task) ? '' : 'disabled'} onclick="${canDelete(task) ? `deleteTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">删除</button>
                         </div>
@@ -473,67 +438,27 @@
             await loadTasks(currentPage);
         }
 
-        async function openEnhanceModal(taskId) {
+        async function refreshTask(taskId) {
             const decodedTaskId = decodeURIComponent(taskId);
-            let task = currentItems.find((item) => item.task_id === decodedTaskId);
-            if (!task) {
-                try {
-                    task = await fetchTask(taskId);
-                } catch (error) {
-                    alert(error.message || '加载任务失败');
-                    return;
-                }
-            }
-
-            if (!canEnhance(task)) {
-                alert('当前任务不可执行画质增强');
+            const task = currentItems.find((item) => item.task_id === decodedTaskId);
+            if (!task || !canRefreshTask(task)) {
                 return;
             }
-
-            currentEnhanceTask = task;
-            document.getElementById('enhanceSourceFilename').textContent = task.filename || task.task_id || '-';
-            document.getElementById('enhanceToolVersion').value = 'standard';
-            document.getElementById('enhanceResolution').value = '1080p';
-            document.getElementById('enhanceModal').style.display = 'flex';
-        }
-
-        function closeEnhanceModal() {
-            document.getElementById('enhanceModal').style.display = 'none';
-            currentEnhanceTask = null;
-        }
-
-        async function submitEnhance() {
-            if (!currentEnhanceTask) return;
-            const toolVersion = document.getElementById('enhanceToolVersion').value;
-            const resolution = document.getElementById('enhanceResolution').value;
-            const submitBtn = document.getElementById('submitEnhanceBtn');
-            submitBtn.disabled = true;
-            submitBtn.textContent = '提交中...';
-
             try {
-                const resp = await fetch('/api/video-enhance/tasks', {
+                const resp = await fetch(`/api/omni-video/tasks/${encodeURIComponent(decodedTaskId)}/refresh`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        source_video_url: currentEnhanceTask.video_url,
-                        source_video_id: currentEnhanceTask.task_id,
-                        source_filename: currentEnhanceTask.filename || `${currentEnhanceTask.task_id}.mp4`,
-                        tool_version: toolVersion,
-                        resolution: resolution
-                    })
                 });
                 const data = await resp.json();
                 if (!resp.ok || !data.success) {
-                    alert(data.error || '画质增强任务创建失败');
+                    alert(data.error || '刷新任务失败');
                     return;
                 }
-                alert(`画质增强任务已创建，任务ID: ${data.task_id}\n请前往"增强任务"页面查看进度。`);
-                closeEnhanceModal();
+                if (currentTaskId === decodedTaskId && detailExpanded) {
+                    document.getElementById('detailBox').innerHTML = renderDetails(data.task || task);
+                }
+                await loadTasks(currentPage);
             } catch (error) {
-                alert('提交失败: ' + error.message);
-            } finally {
-                submitBtn.disabled = false;
-                submitBtn.textContent = '开始增强';
+                alert('刷新失败: ' + error.message);
             }
         }
 
@@ -622,14 +547,6 @@
                 closePreviewModal();
             }
         });
-        document.getElementById('enhanceModalClose').addEventListener('click', closeEnhanceModal);
-        document.getElementById('enhanceModal').addEventListener('click', (event) => {
-            if (event.target === event.currentTarget) {
-                closeEnhanceModal();
-            }
-        });
-        document.getElementById('submitEnhanceBtn').addEventListener('click', submitEnhance);
-
         loadTasks(1);
         setupAutoRefresh();
 

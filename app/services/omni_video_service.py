@@ -30,7 +30,11 @@ SUPPORTED_OMNI_MODELS = {
     "doubao-seedance-2-0-fast-260128",
     "dreamina-seedance-2-0-260128",  # 国际版模型
 }
-SUPPORTED_OMNI_RESOLUTIONS = {"480p", "720p"}
+SUPPORTED_OMNI_RESOLUTIONS_BY_MODEL = {
+    "doubao-seedance-2-0-260128": {"480p", "720p", "1080p"},
+    "dreamina-seedance-2-0-260128": {"480p", "720p", "1080p"},
+    "doubao-seedance-2-0-fast-260128": {"480p", "720p"},
+}
 SUPPORTED_OMNI_ASPECT_RATIOS = {"16:9", "9:16", "1:1", "4:3", "3:4"}
 SUCCESS_STATUSES = {"succeeded", "success", "completed", "done", "finished"}
 TERMINAL_STATUSES = SUCCESS_STATUSES | {"failed", "cancelled", "canceled", "expired"}
@@ -198,8 +202,10 @@ def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
 
     if model not in SUPPORTED_OMNI_MODELS:
         raise ValueError("不支持的全能视频模型")
-    if resolution not in SUPPORTED_OMNI_RESOLUTIONS:
-        raise ValueError("全能视频仅支持 480P 和 720P")
+    allowed_resolutions = SUPPORTED_OMNI_RESOLUTIONS_BY_MODEL.get(model, {"480p", "720p"})
+    if resolution not in allowed_resolutions:
+        allowed_text = "、".join(sorted(r.upper() for r in allowed_resolutions))
+        raise ValueError(f"当前模型仅支持 {allowed_text}")
     if aspect_ratio not in SUPPORTED_OMNI_ASPECT_RATIOS:
         raise ValueError("不支持的视频比例")
 
@@ -901,19 +907,10 @@ class OmniVideoService:
             end_date=end_date,
         )
 
-        synced_items: list[dict[str, Any]] = []
-        for item in items:
-            normalized = _decorate_task(item)
-            current_status = str(normalized.get("status") or "").lower()
-            if current_status and current_status not in TERMINAL_STATUSES:
-                try:
-                    normalized = self._sync_task_from_remote(normalized)
-                except Exception:
-                    pass
-            else:
-                self._ensure_video_library_entry(normalized)
-            synced_items.append(_decorate_task(normalized))
-        return synced_items, total
+        # Keep task listing local-only for faster page loads.
+        # Remote sync remains available via get_task/refresh_task.
+        local_items = [_decorate_task(item) for item in items]
+        return local_items, total
 
     def get_task(self, user_id: int, project_id: int | None, task_id: str) -> dict[str, Any] | None:
         existing = database.get_omni_video_task(task_id, user_id=user_id, project_id=project_id)

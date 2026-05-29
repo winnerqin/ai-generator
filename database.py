@@ -561,6 +561,8 @@ def init_database():
     cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_deleted_video_task_unique ON deleted_video_library_tasks(user_id, project_id, task_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_tasks_user_project_created ON video_tasks(user_id, project_id, created_at DESC)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_omni_video_tasks_user_project_created ON omni_video_tasks(user_id, project_id, created_at DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_omni_video_tasks_user_status_created ON omni_video_tasks(user_id, status, created_at DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_omni_video_tasks_user_project_status_created ON omni_video_tasks(user_id, project_id, status, created_at DESC)')
     
     # 为现有用户创建默认项目并回填 project_id
     cursor.execute('SELECT id FROM users')
@@ -1598,10 +1600,10 @@ def get_omni_video_tasks(user_id, project_id=None, status=None, search=None, sta
         like = f'%{search}%'
         params.extend([like, like, like])
     if start_date:
-        query += ' AND DATE(created_at) >= DATE(?)'
-        params.append(start_date)
+        query += ' AND created_at >= ?'
+        params.append(f'{start_date} 00:00:00')
     if end_date:
-        query += ' AND DATE(created_at) <= DATE(?)'
+        query += ' AND created_at < DATE_ADD(?, INTERVAL 1 DAY)' if is_mysql_enabled() else ' AND created_at < datetime(?, \'+1 day\')'
         params.append(end_date)
 
     query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
@@ -1630,10 +1632,10 @@ def count_omni_video_tasks(user_id, project_id=None, status=None, search=None, s
         like = f'%{search}%'
         params.extend([like, like, like])
     if start_date:
-        query += ' AND DATE(created_at) >= DATE(?)'
-        params.append(start_date)
+        query += ' AND created_at >= ?'
+        params.append(f'{start_date} 00:00:00')
     if end_date:
-        query += ' AND DATE(created_at) <= DATE(?)'
+        query += ' AND created_at < DATE_ADD(?, INTERVAL 1 DAY)' if is_mysql_enabled() else ' AND created_at < datetime(?, \'+1 day\')'
         params.append(end_date)
 
     cursor.execute(query, params)
