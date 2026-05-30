@@ -517,10 +517,71 @@
                 autoRefreshTimer = null;
             }
             if (!document.getElementById('autoRefresh').checked) return;
-            autoRefreshTimer = setInterval(() => {
-                const hasPending = currentItems.some((item) => !TERMINAL_STATUSES.includes(String(item.status || '').toLowerCase()));
-                if (hasPending) {
-                    loadTasks(currentPage);
+            autoRefreshTimer = setInterval(async () => {
+                // 先获取最新列表
+                await loadTasks(currentPage);
+
+                // 然后对 running/queued 状态的任务主动刷新状态
+                const pendingTasks = currentItems.filter((item) => canRefreshTask(item));
+                if (pendingTasks.length > 0) {
+                    debugLog('auto refresh pending tasks', pendingTasks.map(t => t.task_id));
+                    // 并行刷新所有未完成任务
+                    const refreshPromises = pendingTasks.map(async (task) => {
+                        try {
+                            const resp = await fetch(`/api/omni-video/tasks/${encodeURIComponent(task.task_id)}/refresh`, {
+                                method: 'POST',
+                            });
+                            const data = await resp.json();
+                            if (data.success && data.task) {
+                                // 更新 currentItems 中对应任务的状态
+                                const idx = currentItems.findIndex((item) => item.task_id === task.task_id);
+                                if (idx !== -1) {
+                                    currentItems[idx] = data.task;
+                                }
+                            }
+                        } catch (error) {
+                            debugLog('auto refresh error', { taskId: task.task_id, error: error.message });
+                        }
+                    });
+                    await Promise.all(refreshPromises);
+
+                    // 刷新完成后重新渲染列表
+                    const tbody = document.getElementById('taskRows');
+                    tbody.innerHTML = currentItems.map((task) => `
+                        <tr>
+                            <td>${escapeHtml(task.task_id || '-')}</td>
+                            <td><span class="status-pill">${escapeHtml(task.status || '-')}</span></td>
+                            <td>${escapeHtml(task.model || '-')}</td>
+                            <td>${escapeHtml(task.resolution || '-')}</td>
+                            <td class="filename-cell">${escapeHtml(renderFilename(task))}</td>
+                            <td>${escapeHtml(task.seed ?? '-')}</td>
+                            <td>${escapeHtml(renderDuration(task))}</td>
+                            <td>${escapeHtml(task.aspect_ratio || '-')}</td>
+                            <td>${escapeHtml(renderTokenUsage(task))}</td>
+                            <td>${escapeHtml(task.created_at || '-')}</td>
+                            <td>${escapeHtml(task.updated_at || '-')}</td>
+                            <td>
+                                <div class="actions">
+                                    <button class="btn btn-secondary" onclick="viewTask('${encodeURIComponent(task.task_id || '')}')">${currentTaskId === task.task_id && detailExpanded ? '收起' : '查看'}</button>
+                                    <button class="btn btn-secondary" onclick="previewTask('${encodeURIComponent(task.task_id || '')}')">预览</button>
+                                    <button class="btn btn-secondary" ${canDownload(task) ? '' : 'disabled title="视频生成成功后可下载"'} onclick="${canDownload(task) ? `downloadTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">下载</button>
+                                    <button class="btn btn-secondary" ${canRefreshTask(task) ? '' : 'disabled title="仅 queued/running 状态可刷新"'} onclick="${canRefreshTask(task) ? `refreshTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">刷新</button>
+                                    <button class="btn btn-secondary" onclick="regenerateTask('${encodeURIComponent(task.task_id || '')}')">重做</button>
+                                    <button class="btn btn-danger" ${canDelete(task) ? '' : 'disabled'} onclick="${canDelete(task) ? `deleteTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">删除</button>
+                                </div>
+                            </td>
+                        </tr>
+                    `).join('');
+
+                    // 如果当前查看的任务被刷新了，更新详情
+                    if (currentTaskId && detailExpanded) {
+                        const updatedTask = currentItems.find((item) => item.task_id === currentTaskId);
+                        if (updatedTask) {
+                            document.getElementById('detailBox').innerHTML = renderDetails(updatedTask);
+                        }
+                    }
+
+                    debugLog('auto refresh completed', { refreshedCount: pendingTasks.length });
                 }
             }, AUTO_REFRESH_MS);
         }
