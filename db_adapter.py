@@ -1,26 +1,38 @@
-"""Database connection adapter for SQLite and MySQL validation."""
+"""Database connection adapter for the MySQL-only runtime."""
 
 from __future__ import annotations
 
 import os
 import re
-import sqlite3
 import threading
 from pathlib import Path
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 
 def is_mysql_enabled() -> bool:
-    return os.environ.get("DB_TYPE", "sqlite").lower() == "mysql"
+    db_type = os.environ.get("DB_TYPE", "mysql").lower()
+    if db_type != "mysql":
+        raise RuntimeError(
+            f"Unsupported DB_TYPE={db_type!r}. SQLite has been retired; set DB_TYPE=mysql."
+        )
+    return True
 
 
-try:
+if TYPE_CHECKING:
     import pymysql
-except ImportError:  # pragma: no cover - exercised when MySQL mode is disabled
-    pymysql = None
 
+    IntegrityError = pymysql.IntegrityError
+else:
+    try:
+        import pymysql
 
-IntegrityError = pymysql.IntegrityError if pymysql is not None else sqlite3.IntegrityError
+        IntegrityError = pymysql.IntegrityError
+    except ImportError:  # pragma: no cover
+        pymysql = None  # type: ignore[misc,assignment]
+
+        # Placeholder used until PyMySQL is installed
+        class IntegrityError(Exception):
+            pass
 
 
 class CompatRow(dict):
@@ -77,7 +89,7 @@ class MySQLConnection:
     def __init__(self) -> None:
         if pymysql is None:
             raise RuntimeError(
-                "DB_TYPE=mysql requires PyMySQL. Install dependencies with "
+                "MySQL mode requires PyMySQL. Install dependencies with "
                 "`python -m pip install -r requirements.txt`."
             )
         self._conn = _acquire_mysql_raw_connection()
@@ -105,6 +117,11 @@ _MYSQL_POOL_MAX_SIZE = max(1, int(os.environ.get("MYSQL_POOL_SIZE", "10")))
 
 
 def _new_mysql_raw_connection() -> Any:
+    if pymysql is None:
+        raise RuntimeError(
+            "MySQL mode requires PyMySQL. Install dependencies with "
+            "`python -m pip install -r requirements.txt`."
+        )
     conn = pymysql.connect(
         host=os.environ.get("MYSQL_HOST", "127.0.0.1"),
         port=int(os.environ.get("MYSQL_PORT", "3306")),
@@ -152,10 +169,9 @@ def _release_mysql_raw_connection(conn: Any) -> None:
         pass
 
 
-def connect(db_path: str | None = None) -> sqlite3.Connection | MySQLConnection:
-    if is_mysql_enabled():
-        return MySQLConnection()
-    return sqlite3.connect(db_path or os.environ.get("DB_PATH", "generation_records.db"))
+def connect() -> MySQLConnection:
+    is_mysql_enabled()
+    return MySQLConnection()
 
 
 def initialize_mysql_schema() -> None:

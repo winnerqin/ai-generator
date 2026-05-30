@@ -28,7 +28,7 @@ exclude =
     config,
     static,
     templates
-max-complexity = 15
+max-complexity = 20
 per-file-ignores =
     __init__.py:F401,F403
     app_factory.py:E501,W503

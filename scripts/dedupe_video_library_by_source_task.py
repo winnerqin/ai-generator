@@ -13,19 +13,23 @@
 用法：
     python scripts/dedupe_video_library_by_source_task.py
     python scripts/dedupe_video_library_by_source_task.py --apply
-    python scripts/dedupe_video_library_by_source_task.py --db-path generation_records.db --apply
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from db_adapter import connect
 
 
 @dataclass
@@ -39,22 +43,20 @@ class AssetRow:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="按 source_task_id + filename + user_id + project_id 去重 video_library。")
-    parser.add_argument("--db-path", default="generation_records.db", help="SQLite 数据库路径（默认: generation_records.db）")
+    parser = argparse.ArgumentParser(
+        description="按 source_task_id + filename + user_id + project_id 去重 video_library。"
+    )
     parser.add_argument("--apply", action="store_true", help="执行删除（默认仅预览，不删除）")
     return parser.parse_args()
 
 
-def load_rows(conn: sqlite3.Connection) -> list[AssetRow]:
-    conn.row_factory = sqlite3.Row
+def load_rows(conn: Any) -> list[AssetRow]:
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         SELECT id, user_id, project_id, filename, created_at, meta
         FROM video_library
         WHERE meta IS NOT NULL AND meta != ''
-        """
-    )
+        """)
     rows: list[AssetRow] = []
     for row in cur.fetchall():
         meta_raw = row["meta"] or "{}"
@@ -78,7 +80,9 @@ def load_rows(conn: sqlite3.Connection) -> list[AssetRow]:
     return rows
 
 
-def build_delete_plan(rows: list[AssetRow]) -> tuple[list[AssetRow], dict[tuple[Any, ...], list[AssetRow]]]:
+def build_delete_plan(
+    rows: list[AssetRow],
+) -> tuple[list[AssetRow], dict[tuple[Any, ...], list[AssetRow]]]:
     groups: dict[tuple[Any, ...], list[AssetRow]] = defaultdict(list)
     for r in rows:
         key = (r.source_task_id, r.filename, r.user_id, r.project_id)
@@ -94,24 +98,21 @@ def build_delete_plan(rows: list[AssetRow]) -> tuple[list[AssetRow], dict[tuple[
     return to_delete, groups
 
 
-def apply_delete(conn: sqlite3.Connection, rows: list[AssetRow]) -> int:
+def apply_delete(conn: Any, rows: list[AssetRow]) -> int:
     if not rows:
         return 0
     ids = [r.id for r in rows]
     cur = conn.cursor()
-    cur.executemany("DELETE FROM video_library WHERE id = ?", [(i,) for i in ids])
+    for asset_id in ids:
+        cur.execute("DELETE FROM video_library WHERE id = ?", (asset_id,))
     conn.commit()
-    return cur.rowcount
+    return len(ids)
 
 
 def main() -> int:
     args = parse_args()
-    db_path = Path(args.db_path)
-    if not db_path.exists():
-        print(f"[ERROR] 数据库不存在: {db_path}")
-        return 1
 
-    conn = sqlite3.connect(str(db_path))
+    conn = connect()
     try:
         rows = load_rows(conn)
         to_delete, groups = build_delete_plan(rows)
@@ -147,8 +148,7 @@ if __name__ == "__main__":
     # Windows 终端编码友好
     if sys.platform == "win32":
         try:
-            sys.stdout.reconfigure(encoding="utf-8")
+            sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
         except Exception:
             pass
     raise SystemExit(main())
-

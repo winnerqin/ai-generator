@@ -6,15 +6,19 @@ import os
 
 # 在导入 app 之前设置 JWT 密钥
 os.environ["JWT_SECRET_KEY"] = "test-jwt-secret-key-that-is-32-bytes-long-for-security"
+os.environ["DB_TYPE"] = "mysql"
 
 import pytest
-from app_factory import create_app
+
 import database
+from app_factory import create_app
 
 
 @pytest.fixture
-def app():
+def app(monkeypatch):
     """创建测试应用实例"""
+    monkeypatch.setattr(database, "init_database", lambda: None)
+    monkeypatch.setattr(database, "save_operation_log", lambda *args, **kwargs: None)
     app = create_app()
     app.config.update(
         {

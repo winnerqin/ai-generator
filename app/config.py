@@ -24,8 +24,7 @@ class Config:
     TEMPLATES_FOLDER: str = str(BASE_DIR / "templates")
 
     # ==================== 数据库配置 ====================
-    DB_TYPE: str = "sqlite"  # sqlite | mysql
-    DB_PATH: str = "generation_records.db"
+    DB_TYPE: str = "mysql"
 
     # MySQL 配置
     MYSQL_HOST: str = "127.0.0.1"
@@ -110,7 +109,10 @@ class Config:
 
         # 数据库配置
         self.DB_TYPE = os.environ.get("DB_TYPE", self.DB_TYPE).lower()
-        self.DB_PATH = os.environ.get("DB_PATH", self.DB_PATH)
+        if self.DB_TYPE != "mysql":
+            raise RuntimeError(
+                f"Unsupported DB_TYPE={self.DB_TYPE!r}. SQLite has been retired; set DB_TYPE=mysql."
+            )
 
         # MySQL 配置
         self.MYSQL_HOST = os.environ.get("MYSQL_HOST", self.MYSQL_HOST)
@@ -127,7 +129,9 @@ class Config:
         # OSS 配置
         self.OSS_ENABLED = os.environ.get("OSS_ENABLED", "false").lower() == "true"
         self.OSS_ENDPOINT = os.environ.get("OSS_ENDPOINT", self.OSS_ENDPOINT)
-        self.OSS_EXTERNAL_ENDPOINT = os.environ.get("OSS_EXTERNAL_ENDPOINT", self.OSS_EXTERNAL_ENDPOINT)
+        self.OSS_EXTERNAL_ENDPOINT = os.environ.get(
+            "OSS_EXTERNAL_ENDPOINT", self.OSS_EXTERNAL_ENDPOINT
+        )
         self.OSS_ACCESS_ENDPOINT = os.environ.get("OSS_ACCESS_ENDPOINT", self.OSS_ACCESS_ENDPOINT)
         self.OSS_ACCESS_KEY_ID = os.environ.get("OSS_ACCESS_KEY_ID", self.OSS_ACCESS_KEY_ID)
         self.OSS_ACCESS_KEY_SECRET = os.environ.get(
@@ -142,9 +146,7 @@ class Config:
         # 火山方舟 / Seedance 配置
         self.ARK_API_KEY = os.environ.get("ARK_API_KEY", self.ARK_API_KEY)
         self.ARK_BASE_URL = os.environ.get("ARK_BASE_URL", self.ARK_BASE_URL)
-        self.SEEDANCE_OMNI_MODEL = os.environ.get(
-            "SEEDANCE_OMNI_MODEL", self.SEEDANCE_OMNI_MODEL
-        )
+        self.SEEDANCE_OMNI_MODEL = os.environ.get("SEEDANCE_OMNI_MODEL", self.SEEDANCE_OMNI_MODEL)
         self.SEEDANCE_OMNI_CREATE_PATH = os.environ.get(
             "SEEDANCE_OMNI_CREATE_PATH", self.SEEDANCE_OMNI_CREATE_PATH
         )
@@ -193,7 +195,7 @@ class Config:
 
     def is_mysql_enabled(self) -> bool:
         """检查是否启用 MySQL"""
-        return self.DB_TYPE == "mysql"
+        return True
 
     def is_oss_enabled(self) -> bool:
         """检查是否启用 OSS"""

@@ -7,7 +7,7 @@
 1. 检测视频库中所有URL的可访问性
 2. 将未过期的临时URL视频迁移到OSS（获取永久URL）
 3. 删除已过期不可访问的视频记录
-4. 支持MySQL和SQLite数据库
+4. 支持MySQL数据库
 5. 支持dry-run模式预览操作
 
 使用方法：
@@ -30,11 +30,6 @@
     # 执行清理
     python cleanup_video_library_production.py
 
-    # 使用SQLite
-    export DB_TYPE=sqlite
-    export DB_PATH=/path/to/generation_records.db
-    python cleanup_video_library_production.py
-
 参数：
     --dry-run: 仅显示操作，不实际执行
     --batch-size: 每批处理数量，默认50
@@ -46,21 +41,22 @@ import argparse
 import json
 import logging
 import os
-import tempfile
 import sys
+import tempfile
 from datetime import datetime
 
 # Windows UTF-8编码支持
 if sys.platform == "win32":
     try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     except Exception:
         pass
 
 # 尝试导入MySQL依赖
 try:
     import pymysql
+
     MYSQL_AVAILABLE = True
 except ImportError:
     MYSQL_AVAILABLE = False
@@ -68,23 +64,23 @@ except ImportError:
 # 尝试导入OSS依赖
 try:
     import oss2
+
     OSS_AVAILABLE = True
 except ImportError:
     OSS_AVAILABLE = False
 
 import requests
 
-
 # ============================================================
 # 配置类
 # ============================================================
+
 
 class Config:
     """从环境变量加载配置"""
 
     # 数据库配置
-    DB_TYPE: str = os.environ.get("DB_TYPE", "sqlite").lower()
-    DB_PATH: str = os.environ.get("DB_PATH", "generation_records.db")
+    DB_TYPE: str = os.environ.get("DB_TYPE", "mysql").lower()
 
     # MySQL配置
     MYSQL_HOST: str = os.environ.get("MYSQL_HOST", "127.0.0.1")
@@ -103,7 +99,9 @@ class Config:
     OSS_ACCESS_KEY_SECRET: str = os.environ.get("OSS_ACCESS_KEY_SECRET", "")
 
     def is_mysql(self) -> bool:
-        return self.DB_TYPE == "mysql"
+        if self.DB_TYPE != "mysql":
+            raise RuntimeError(f"不支持的 DB_TYPE={self.DB_TYPE!r}，当前脚本仅支持 MySQL。")
+        return True
 
     def is_oss_enabled(self) -> bool:
         return self.OSS_ENABLED and bool(self.OSS_ACCESS_KEY_ID and self.OSS_ACCESS_KEY_SECRET)
@@ -115,6 +113,7 @@ config = Config()
 # ============================================================
 # 日志配置
 # ============================================================
+
 
 def setup_logging(log_file: str | None = None):
     """配置日志"""
@@ -136,8 +135,9 @@ logger = setup_logging()
 # 数据库操作
 # ============================================================
 
+
 class Database:
-    """数据库操作封装，支持MySQL和SQLite"""
+    """MySQL 数据库操作封装"""
 
     def __init__(self):
         self._conn = None
@@ -147,24 +147,19 @@ class Database:
 
     def connect(self):
         """建立数据库连接"""
-        if config.is_mysql():
-            if not MYSQL_AVAILABLE:
-                raise RuntimeError("MySQL模式需要安装pymysql: pip install pymysql")
-            self._conn = pymysql.connect(
-                host=config.MYSQL_HOST,
-                port=config.MYSQL_PORT,
-                user=config.MYSQL_USER,
-                password=config.MYSQL_PASSWORD,
-                database=config.MYSQL_DATABASE,
-                charset=config.MYSQL_CHARSET,
-                cursorclass=pymysql.cursors.DictCursor
-            )
-            logger.info(f"已连接MySQL: {config.MYSQL_HOST}:{config.MYSQL_PORT}/{config.MYSQL_DATABASE}")
-        else:
-            import sqlite3
-            self._conn = sqlite3.connect(config.DB_PATH)
-            self._conn.row_factory = sqlite3.Row
-            logger.info(f"已连接SQLite: {config.DB_PATH}")
+        config.is_mysql()
+        if not MYSQL_AVAILABLE:
+            raise RuntimeError("MySQL模式需要安装pymysql: pip install pymysql")
+        self._conn = pymysql.connect(
+            host=config.MYSQL_HOST,
+            port=config.MYSQL_PORT,
+            user=config.MYSQL_USER,
+            password=config.MYSQL_PASSWORD,
+            database=config.MYSQL_DATABASE,
+            charset=config.MYSQL_CHARSET,
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+        logger.info(f"已连接MySQL: {config.MYSQL_HOST}:{config.MYSQL_PORT}/{config.MYSQL_DATABASE}")
 
     def close(self):
         """关闭连接"""
@@ -175,19 +170,15 @@ class Database:
     def get_all_video_assets(self, limit: int = 1000):
         """获取所有视频库记录"""
         cursor = self._conn.cursor()
-        cursor.execute("SELECT * FROM video_library ORDER BY created_at DESC LIMIT ?", (limit,))
-
-        if config.is_mysql():
-            rows = cursor.fetchall()
-        else:
-            rows = [dict(r) for r in cursor.fetchall()]
+        cursor.execute("SELECT * FROM video_library ORDER BY created_at DESC LIMIT %s", (limit,))
+        rows = cursor.fetchall()
 
         # 解析meta字段
         for row in rows:
             try:
-                row['meta'] = json.loads(row.get('meta') or '{}')
+                row["meta"] = json.loads(row.get("meta") or "{}")
             except Exception:
-                row['meta'] = {}
+                row["meta"] = {}
 
         return rows
 
@@ -196,19 +187,19 @@ class Database:
         cursor = self._conn.cursor()
         cursor.execute("SELECT COUNT(*) as cnt FROM video_library")
         result = cursor.fetchone()
-        return result['cnt'] if config.is_mysql() else result['cnt']
+        return result["cnt"]
 
     def delete_video_asset(self, asset_id: int):
         """删除视频记录"""
         cursor = self._conn.cursor()
-        cursor.execute("DELETE FROM video_library WHERE id = ?", (asset_id,))
+        cursor.execute("DELETE FROM video_library WHERE id = %s", (asset_id,))
         self._conn.commit()
         logger.info(f"已删除记录: id={asset_id}")
 
     def update_video_url(self, asset_id: int, new_url: str):
         """更新视频URL"""
         cursor = self._conn.cursor()
-        cursor.execute("UPDATE video_library SET url = ? WHERE id = ?", (new_url, asset_id))
+        cursor.execute("UPDATE video_library SET url = %s WHERE id = %s", (new_url, asset_id))
         self._conn.commit()
         logger.info(f"已更新URL: id={asset_id} -> {new_url[:80]}...")
 
@@ -224,7 +215,9 @@ class Database:
         try:
             # 确定服务器内部访问OSS使用的endpoint
             # 优先级：OSS_ACCESS_ENDPOINT > OSS_EXTERNAL_ENDPOINT > OSS_ENDPOINT
-            access_endpoint = config.OSS_ACCESS_ENDPOINT or config.OSS_EXTERNAL_ENDPOINT or config.OSS_ENDPOINT
+            access_endpoint = (
+                config.OSS_ACCESS_ENDPOINT or config.OSS_EXTERNAL_ENDPOINT or config.OSS_ENDPOINT
+            )
 
             # 确定返回给前端的URL使用的endpoint
             # 优先级：OSS_EXTERNAL_ENDPOINT > OSS_ENDPOINT
@@ -251,7 +244,9 @@ class Database:
             logger.error(f"OSS初始化失败: {e}")
             return False
 
-    def upload_to_oss(self, local_path: str, user_id: int, project_id: int | None, filename: str) -> str | None:
+    def upload_to_oss(
+        self, local_path: str, user_id: int, project_id: int | None, filename: str
+    ) -> str | None:
         """上传文件到OSS"""
         if not self._bucket:
             return None
@@ -324,10 +319,10 @@ def check_url_accessible(url: str, timeout: int = 10) -> tuple[bool, str]:
             return False, f"HTTP {response.status_code}"
     except requests.exceptions.Timeout:
         return False, "请求超时"
-    except requests.exceptions.ConnectionError as e:
-        return False, f"连接错误"
-    except Exception as e:
-        return False, f"检测失败"
+    except requests.exceptions.ConnectionError:
+        return False, "连接错误"
+    except Exception:
+        return False, "检测失败"
 
 
 def download_video(url: str, filename: str, timeout: int = 120) -> tuple[str | None, str]:
@@ -363,6 +358,7 @@ def cleanup_temp_file(path: str):
 # ============================================================
 # 主处理逻辑
 # ============================================================
+
 
 def process_video_asset(asset: dict, dry_run: bool, timeout: int) -> dict:
     """处理单个视频记录"""
@@ -406,12 +402,14 @@ def process_video_asset(asset: dict, dry_run: bool, timeout: int) -> dict:
         if db._bucket:
             temp_file, download_result = download_video(url, result["filename"])
             if temp_file:
-                oss_url = db.upload_to_oss(
-                    temp_file,
-                    asset.get("user_id"),
-                    asset.get("project_id"),
-                    result["filename"]
-                )
+                user_id = asset.get("user_id")
+                project_id = asset.get("project_id")
+                if user_id is None:
+                    result["detail"] = "缺少user_id，跳过迁移"
+                    result["action"] = "keep"
+                    cleanup_temp_file(temp_file)
+                    return result
+                oss_url = db.upload_to_oss(temp_file, user_id, project_id, result["filename"])
                 cleanup_temp_file(temp_file)
 
                 if oss_url:
@@ -510,7 +508,9 @@ def main():
         result = process_video_asset(asset, args.dry_run, args.timeout)
 
         # 打印结果
-        logger.info(f"[{processed}/{total_count}] id={result['id']} filename={result['filename'][:30]}")
+        logger.info(
+            f"[{processed}/{total_count}] id={result['id']} filename={result['filename'][:30]}"
+        )
         logger.info(f"  URL类型: {result.get('url_type', 'unknown')}")
         logger.info(f"  操作: {result['action']} - {result['detail']}")
 

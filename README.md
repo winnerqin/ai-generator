@@ -7,7 +7,7 @@
 - `app_factory.py`：应用入口
 - `app/`：模块化 API、服务层、工具层
 - `templates/` + `static/`：前端页面与资源
-- `database.py`：SQLite 为主的数据访问层，保留 MySQL 迁移能力
+- `database.py`：MySQL 数据访问层
 - `tests/`：回归测试
 
 ## 功能概览
@@ -27,11 +27,10 @@
 
 - Python 3.10+
 - Windows / PowerShell 已验证
-- SQLite 默认开箱可用
+- MySQL 8.0
 - 可选接入：
   - 火山方舟 / Seedance
   - 阿里云 OSS
-  - MySQL
 
 ## 安装依赖
 
@@ -63,8 +62,7 @@ Copy-Item .env.example .env
 - `FLASK_HOST`：默认 `0.0.0.0`
 - `FLASK_PORT`：默认 `8090`
 - `FLASK_DEBUG`：是否开启调试
-- `DB_TYPE`：`sqlite` 或 `mysql`
-- `DB_PATH`：SQLite 文件路径
+- `DB_TYPE`：固定为 `mysql`
 - `MYSQL_HOST`、`MYSQL_PORT`：MySQL 8.0 服务地址和端口
 - `MYSQL_USER`、`MYSQL_PASSWORD`、`MYSQL_DATABASE`：MySQL 连接账号、密码和库名
 - `MYSQL_CHARSET`：MySQL 字符集，推荐 `utf8mb4`
@@ -72,7 +70,7 @@ Copy-Item .env.example .env
 - `OSS_ENABLED`：是否启用 OSS
 - `OSS_ENDPOINT`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET`
 
-切换到 MySQL 8.0 时，在 `.env` 中设置：
+在 `.env` 中设置 MySQL 8.0 连接信息：
 
 ```text
 DB_TYPE=mysql
