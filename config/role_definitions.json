@@ -1,0 +1,57 @@
+[
+  {
+    "code": "system_admin",
+    "name": "系统管理员",
+    "menu_keys": [
+      "index",
+      "batch",
+      "records",
+      "video_generate",
+      "omni_video",
+      "omni_video_tasks",
+      "enhance_tasks",
+      "content_management",
+      "user_center",
+      "admin",
+      "role_management",
+      "stats",
+      "video_tasks"
+    ],
+    "pricing_multiplier": 1.0,
+    "built_in": true
+  },
+  {
+    "code": "internal_user",
+    "name": "内部用户",
+    "menu_keys": [
+      "index",
+      "batch",
+      "records",
+      "video_generate",
+      "video_tasks",
+      "omni_video",
+      "omni_video_tasks",
+      "enhance_tasks",
+      "txt2csv",
+      "content_management",
+      "user_center"
+    ],
+    "pricing_multiplier": 1.0,
+    "built_in": true
+  },
+  {
+    "code": "external_user",
+    "name": "外部用户",
+    "menu_keys": [
+      "index",
+      "records",
+      "omni_video",
+      "omni_video_tasks",
+      "user_center",
+      "batch",
+      "content_management"
+    ],
+    "pricing_multiplier": 1.5,
+    "built_in": true
+  }
+]

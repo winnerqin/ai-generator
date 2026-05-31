@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Iterable, Optional
 
 import requests
@@ -52,7 +53,7 @@ def stream_generated_images(
 
             yield {"type": "generating", "index": index + 1, "total": total_needed}
 
-            response, _ = request_images(
+            response, total_tokens = request_images(
                 client=client,
                 prompt=full_prompt,
                 width=width,
@@ -61,6 +62,7 @@ def stream_generated_images(
                 image_urls=image_urls,
                 seed=per_seed,
             )
+            request_created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             if not response.data:
                 yield {
@@ -123,9 +125,11 @@ def stream_generated_images(
                     image_style=generation_request.image_style,
                     image_urls=image_urls,
                     seed=per_seed,
+                    created_at=request_created_at,
                     output_filename=generation_request.output_filename,
                     index=index,
                     group_index=group_index if use_group_images else None,
+                    token_usage=total_tokens,
                     content=download.content,
                 )
                 generated_count += 1

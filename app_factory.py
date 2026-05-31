@@ -8,8 +8,8 @@ direct imports from the old monolithic entry file.
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import os
 import threading
 import time
@@ -37,6 +37,7 @@ class AppJSONProvider(DefaultJSONProvider):
             return obj.strftime("%Y-%m-%d")
         return super().default(obj)
 
+
 try:
     from app.api import (
         admin_bp,
@@ -54,6 +55,7 @@ try:
     )
     from app.config import config
     from app.decorators import login_required
+    from app.services.omni_video_worker import start_omni_video_worker
     from app.utils import ApiResponse
     from app.utils.jwt_auth import JWTAuth
     from app.utils.sanitizer import (
@@ -197,7 +199,9 @@ def setup_operation_logging(app: Flask) -> None:
                     if isinstance(value, str) and len(value) > max_len:
                         truncated_data[key] = value[:max_len] + "...<truncated>"
                     elif isinstance(value, list) and len(value) > 20:
-                        truncated_data[key] = value[:20] + [f"...<truncated {len(value) - 20} items>"]
+                        truncated_data[key] = value[:20] + [
+                            f"...<truncated {len(value) - 20} items>"
+                        ]
                     elif isinstance(value, dict) and len(str(value)) > max_len:
                         truncated_data[key] = f"<dict size={len(str(value))}>"
                     else:
@@ -294,9 +298,7 @@ def create_app(config_name: str | None = None) -> Flask:
         SECRET_KEY=os.environ.get("SECRET_KEY", config.SECRET_KEY),
         UPLOAD_FOLDER=os.environ.get("UPLOAD_FOLDER", config.UPLOAD_FOLDER),
         OUTPUT_FOLDER=os.environ.get("OUTPUT_FOLDER", config.OUTPUT_FOLDER),
-        MAX_CONTENT_LENGTH=int(
-            os.environ.get("MAX_CONTENT_LENGTH", str(config.MAX_VIDEO_SIZE))
-        ),
+        MAX_CONTENT_LENGTH=int(os.environ.get("MAX_CONTENT_LENGTH", str(config.MAX_VIDEO_SIZE))),
     )
 
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
@@ -322,6 +324,12 @@ def create_app(config_name: str | None = None) -> Flask:
     register_error_handlers(app)
     register_context_processors(app)
     register_remaining_routes(app)
+
+    is_debug_env = (os.environ.get("FLASK_DEBUG", "false") or "false").lower() == "true"
+    is_reloader_child = os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    should_start_worker = (not is_debug_env) or is_reloader_child
+    if should_start_worker:
+        start_omni_video_worker()
     return app
 
 
@@ -360,11 +368,17 @@ def register_context_processors(app: Flask) -> None:
 def register_remaining_routes(app: Flask) -> None:
     """Register routes that have not been migrated to blueprints yet."""
 
+    def _current_user_context() -> dict[str, Any]:
+        return {
+            "username": session.get("username", ""),
+            "id": session.get("user_id"),
+            "role_code": session.get("role_code"),
+        }
+
     @app.route("/")
     @login_required
     def index():
-        user = {"username": session.get("username", ""), "id": session.get("user_id")}
-        return render_template("index.html", user=user)
+        return render_template("index.html", user=_current_user_context())
 
     @app.route("/uploads/<path:relative_path>")
     @login_required
@@ -379,7 +393,11 @@ def register_remaining_routes(app: Flask) -> None:
         user_id = session.get("user_id")
         username = session.get("username")
         normalized = relative_path.replace("\\", "/")
-        if username != "system_admin" and f"user_{user_id}/" not in normalized and f"user_{user_id}\\" not in relative_path:
+        if (
+            username != "system_admin"
+            and f"user_{user_id}/" not in normalized
+            and f"user_{user_id}\\" not in relative_path
+        ):
             abort(403)
         if not file_path.exists():
             abort(404)
@@ -402,20 +420,26 @@ def register_remaining_routes(app: Flask) -> None:
         ("/txt2csv", "txt2csv.html", "\u6587\u672c\u8f6cCSV"),
         ("/video-generate", "video_generate.html", "\u89c6\u9891\u751f\u6210"),
         ("/video-tasks", "video_tasks.html", "\u89c6\u9891\u4efb\u52a1"),
+        ("/user-center", "user_center.html", "\u7528\u6237\u4e2d\u5fc3"),
+        ("/role-management", "role_management.html", "\u89d2\u8272\u7ba1\u7406"),
     ]
+
+    admin_only_templates = {"stats.html", "role_management.html"}
 
     def make_route(template_name: str, page_title: str):
         @login_required
         def route():
-            user = {"username": session.get("username", ""), "id": session.get("user_id")}
-            return render_template(template_name, title=page_title, user=user)
+            if template_name in admin_only_templates:
+                role_code = session.get("role_code")
+                if role_code != "system_admin" and session.get("username") != "system_admin":
+                    return redirect(url_for("index"))
+            return render_template(template_name, title=page_title, user=_current_user_context())
 
         return route
 
     for path, template, title in page_routes:
         endpoint = f"page_{path.strip('/').replace('-', '_')}"
         app.add_url_rule(path, endpoint=endpoint, view_func=make_route(template, title))
-
 
 
 app = create_app()

@@ -310,6 +310,7 @@
                                                 <th className="prompt-cell">提示词</th>
                                                 <th>比例</th>
                                                 <th>尺寸</th>
+                                                <th>Token</th>
                                                 <th>参考图</th>
                                                 <th>时间</th>
                                                 <th style={{ width: '100px' }}>操作</th>
@@ -327,6 +328,7 @@
                                                     <td className="prompt-cell" title={record.prompt || ''}>{record.prompt || '-'}</td>
                                                     <td>{record.aspect_ratio || '-'}</td>
                                                     <td>{record.width}×{record.height}</td>
+                                                    <td>{record.token_usage ?? '-'}</td>
                                                     <td>
                                                         {(record.sample_images && record.sample_images.length > 0) ? (
                                                             <div className="ref-thumbs" title="点击预览参考图">
@@ -420,6 +422,7 @@
                                     <span style={{ color: 'rgba(255,255,255,0.6)' }}>尺寸</span><span>{modalRecord.width} × {modalRecord.height}</span>
                                     <span style={{ color: 'rgba(255,255,255,0.6)' }}>比例</span><span>{modalRecord.aspect_ratio || '-'}</span>
                                     <span style={{ color: 'rgba(255,255,255,0.6)' }}>分辨率</span><span>{modalRecord.resolution || '-'}</span>
+                                    <span style={{ color: 'rgba(255,255,255,0.6)' }}>Token</span><span>{modalRecord.token_usage ?? '-'}</span>
                                     <span style={{ color: 'rgba(255,255,255,0.6)' }}>种子</span><span>{modalRecord.seed != null ? modalRecord.seed : '-'}</span>
                                     <span style={{ color: 'rgba(255,255,255,0.6)' }}>生成时间</span><span>{modalRecord.created_at || '-'}</span>
                                     <span style={{ color: 'rgba(255,255,255,0.6)', alignSelf: 'start' }}>提示词</span><span style={{ wordBreak: 'break-word' }}>{modalRecord.prompt || '-'}</span>

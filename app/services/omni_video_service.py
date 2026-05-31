@@ -7,6 +7,7 @@ import os
 import tempfile
 import time
 import uuid
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse, urlunparse
@@ -15,7 +16,8 @@ import requests
 
 import database
 from app.config import config
-from app.services.omni_video_client import omni_video_client, is_intl_model
+from app.services.billing_service import ensure_min_balance_for_omni_video, settle_omni_video_charge
+from app.services.omni_video_client import is_intl_model, omni_video_client
 from app.services.operation_log_service import (
     log_external_api_call,
     log_task_operation,
@@ -64,6 +66,35 @@ def _normalize_reference_urls(reference_urls: list[str] | None) -> list[str]:
     if not reference_urls:
         return []
     return [url.strip() for url in reference_urls if isinstance(url, str) and url.strip()]
+
+
+def _to_cent(value: Decimal) -> int:
+    return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _has_video_reference_urls(reference_urls: list[str] | None) -> bool:
+    if not reference_urls:
+        return False
+    video_exts = {".mp4", ".mov", ".webm", ".avi", ".mkv", ".m4v"}
+    for url in reference_urls:
+        suffix = Path(str(url or "")).suffix.lower()
+        if suffix in video_exts:
+            return True
+    return False
+
+
+def _pricing_to_cny_cent(price_per_million_token_cent: int, currency_code: str) -> Decimal:
+    value = Decimal(str(price_per_million_token_cent or 0))
+    if (currency_code or "").upper() == database.MODEL_CURRENCY_USD:
+        return value * Decimal(str(database.USD_TO_CNY_RATE))
+    return value
+
+
+def _effective_multiplier(user: dict) -> Decimal:
+    role_code = user.get("role_code") or database.ROLE_EXTERNAL_USER
+    role_multiplier = Decimal(str(database.get_role_pricing_multiplier(role_code) or 1))
+    user_multiplier = Decimal(str(user.get("pricing_multiplier") or 1))
+    return role_multiplier if role_multiplier > 0 else user_multiplier
 
 
 def _normalize_filename(value: Any) -> str | None:
@@ -168,6 +199,12 @@ def _coerce_bool(value: Any, default: bool = True) -> bool:
     return bool(value)
 
 
+def _get_supported_omni_models() -> set[str]:
+    configured = set(config.get_omni_model_list_internal() + config.get_omni_model_list_external())
+    configured = {item.strip() for item in configured if str(item).strip()}
+    return set(SUPPORTED_OMNI_MODELS) | configured
+
+
 def _content_item_for_url(url: str) -> dict[str, Any]:
     # 虚拟人像URL格式: asset://asset-xxx
     if url.startswith("asset://"):
@@ -200,7 +237,7 @@ def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
     raw_duration = data.get("duration", -1)
     raw_frame_count = data.get("frame_count")
 
-    if model not in SUPPORTED_OMNI_MODELS:
+    if model not in _get_supported_omni_models():
         raise ValueError("不支持的全能视频模型")
     allowed_resolutions = SUPPORTED_OMNI_RESOLUTIONS_BY_MODEL.get(model, {"480p", "720p"})
     if resolution not in allowed_resolutions:
@@ -249,6 +286,62 @@ def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
         content.append(_content_item_for_url(url))
     payload["content"] = content
     return payload
+
+
+def _model_for_role(role_code: str | None, requested_model: str | None) -> str:
+    role = (role_code or "").strip() or database.ROLE_EXTERNAL_USER
+    req = (requested_model or "").strip()
+    internal_models = config.get_omni_model_list_internal()
+    external_models = config.get_omni_model_list_external()
+
+    if role == database.ROLE_INTERNAL_USER:
+        return req if req in internal_models else (internal_models[0] if internal_models else "")
+    if role == database.ROLE_EXTERNAL_USER:
+        return req if req in external_models else (external_models[0] if external_models else "")
+    # system_admin and fallback: allow requested model directly, else internal first.
+    if req:
+        return req
+    if internal_models:
+        return internal_models[0]
+    if external_models:
+        return external_models[0]
+    return ""
+
+
+def get_models_for_role(role_code: str | None) -> list[str]:
+    role = (role_code or "").strip() or database.ROLE_EXTERNAL_USER
+    internal_models = config.get_omni_model_list_internal()
+    external_models = config.get_omni_model_list_external()
+    if role == database.ROLE_INTERNAL_USER:
+        return internal_models
+    if role == database.ROLE_EXTERNAL_USER:
+        return external_models
+    if role == database.ROLE_SYSTEM_ADMIN:
+        # 管理员可查看并选择内外全部配置模型，按“内部列表 -> 外部列表”顺序去重拼接
+        combined = []
+        for model in internal_models + external_models:
+            if model and model not in combined:
+                combined.append(model)
+        return combined
+    return external_models or internal_models
+
+
+def _pricing_model_candidates(model_code_or_alias: str | None) -> list[str]:
+    value = (model_code_or_alias or "").strip()
+    if not value:
+        return []
+    alias_map = config.get_omni_model_alias_map()
+    reverse_map = {
+        str(alias).strip(): code for code, alias in alias_map.items() if str(alias).strip()
+    }
+    candidates = [value]
+    alias_value = (alias_map.get(value) or "").strip()
+    reverse_value = (reverse_map.get(value) or "").strip()
+    if alias_value and alias_value not in candidates:
+        candidates.append(alias_value)
+    if reverse_value and reverse_value not in candidates:
+        candidates.append(reverse_value)
+    return candidates
 
 
 def _pick_nested(source: Any, *paths: tuple[str, ...]) -> Any:
@@ -305,7 +398,9 @@ def _extract_usage(remote: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw_usage, dict):
         return {}
     return {
-        "total_tokens": raw_usage.get("total_tokens") or raw_usage.get("tokens") or raw_usage.get("total"),
+        "total_tokens": raw_usage.get("total_tokens")
+        or raw_usage.get("tokens")
+        or raw_usage.get("total"),
         "input_tokens": raw_usage.get("prompt_tokens") or raw_usage.get("input_tokens"),
         "output_tokens": raw_usage.get("completion_tokens") or raw_usage.get("output_tokens"),
         "raw": raw_usage,
@@ -323,7 +418,9 @@ def _normalize_token_usage(remote: dict[str, Any]) -> int | None:
         return None
 
 
-def _normalize_duration(local_payload: dict[str, Any], remote: dict[str, Any], result: dict[str, Any]) -> int | None:
+def _normalize_duration(
+    local_payload: dict[str, Any], remote: dict[str, Any], result: dict[str, Any]
+) -> int | None:
     value = _pick_nested(
         remote,
         ("duration",),
@@ -342,7 +439,9 @@ def _normalize_duration(local_payload: dict[str, Any], remote: dict[str, Any], r
         return None
 
 
-def _normalize_frame_count(local_payload: dict[str, Any], remote: dict[str, Any], result: dict[str, Any]) -> int | None:
+def _normalize_frame_count(
+    local_payload: dict[str, Any], remote: dict[str, Any], result: dict[str, Any]
+) -> int | None:
     value = _pick_nested(
         remote,
         ("frames",),
@@ -371,7 +470,9 @@ def _normalize_frame_count(local_payload: dict[str, Any], remote: dict[str, Any]
         return None
 
 
-def _normalize_seed(local_payload: dict[str, Any], remote: dict[str, Any], result: dict[str, Any]) -> int | None:
+def _normalize_seed(
+    local_payload: dict[str, Any], remote: dict[str, Any], result: dict[str, Any]
+) -> int | None:
     value = _pick_nested(
         remote,
         ("seed",),
@@ -390,7 +491,9 @@ def _normalize_seed(local_payload: dict[str, Any], remote: dict[str, Any], resul
         return None
 
 
-def _normalize_text_field(local_payload: dict[str, Any], remote: dict[str, Any], result: dict[str, Any], *keys: str) -> str | None:
+def _normalize_text_field(
+    local_payload: dict[str, Any], remote: dict[str, Any], result: dict[str, Any], *keys: str
+) -> str | None:
     nested_paths = (
         [(key,) for key in keys]
         + [("data", key) for key in keys]
@@ -432,9 +535,11 @@ def _task_record_from_remote(
         "project_id": project_id,
         "task_id": _extract_task_id(remote),
         "status": _extract_status(remote),
-        "model": _normalize_text_field(local_payload, remote, result, "model") or local_payload.get("model"),
+        "model": _normalize_text_field(local_payload, remote, result, "model")
+        or local_payload.get("model"),
         "mode": local_payload.get("mode"),
-        "prompt": _normalize_text_field(local_payload, remote, result, "prompt") or local_payload.get("prompt"),
+        "prompt": _normalize_text_field(local_payload, remote, result, "prompt")
+        or local_payload.get("prompt"),
         "input_payload_json": local_payload,
         "raw_response_json": remote,
         "result_json": result,
@@ -447,7 +552,9 @@ def _task_record_from_remote(
         "duration": _normalize_duration(local_payload, remote, result),
         "frame_count": _normalize_frame_count(local_payload, remote, result),
         "resolution": _normalize_text_field(local_payload, remote, result, "resolution"),
-        "aspect_ratio": _normalize_text_field(local_payload, remote, result, "aspect_ratio", "ratio"),
+        "aspect_ratio": _normalize_text_field(
+            local_payload, remote, result, "aspect_ratio", "ratio"
+        ),
         "filename": _normalize_filename(local_payload.get("filename")),
         "seed": _normalize_seed(local_payload, remote, result),
         "token_usage": _normalize_token_usage(remote),
@@ -462,9 +569,13 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
     usage = task.get("usage_json") or _extract_usage(raw_response)
 
     if task.get("resolution") in (None, ""):
-        task["resolution"] = _normalize_text_field(local_payload, raw_response, result, "resolution")
+        task["resolution"] = _normalize_text_field(
+            local_payload, raw_response, result, "resolution"
+        )
     if task.get("aspect_ratio") in (None, ""):
-        task["aspect_ratio"] = _normalize_text_field(local_payload, raw_response, result, "aspect_ratio", "ratio")
+        task["aspect_ratio"] = _normalize_text_field(
+            local_payload, raw_response, result, "aspect_ratio", "ratio"
+        )
     if task.get("duration") in (None, ""):
         task["duration"] = _normalize_duration(local_payload, raw_response, result)
     if task.get("frame_count") in (None, ""):
@@ -476,7 +587,9 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
     if task.get("video_url") in (None, ""):
         task["video_url"] = _normalize_text_field({}, raw_response, result, "video_url", "url")
     if task.get("cover_url") in (None, ""):
-        task["cover_url"] = _normalize_text_field({}, raw_response, result, "cover_url", "poster_url", "cover")
+        task["cover_url"] = _normalize_text_field(
+            {}, raw_response, result, "cover_url", "poster_url", "cover"
+        )
     task["filename"] = _normalize_filename(task.get("filename") or local_payload.get("filename"))
     task["download_filename"] = task["filename"] or (
         _guess_video_filename(task.get("task_id") or "video", task.get("video_url") or "")
@@ -489,6 +602,51 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
         token_usage = _normalize_token_usage(raw_response)
     task["token_usage"] = token_usage
     task["usage_json"] = usage if isinstance(usage, dict) else {}
+
+    # 金额：优先展示已入账金额；未入账则按 token*模型价格*倍率 估算
+    amount_cent = None
+    if task.get("task_id") and task.get("user_id"):
+        amount_cent = database.get_ledger_debit_amount_cent(
+            task.get("user_id"),
+            "omni_video",
+            task.get("task_id"),
+        )
+    if (
+        amount_cent is None
+        and token_usage not in (None, "")
+        and task.get("model")
+        and task.get("user_id")
+    ):
+        try:
+            pricing = None
+            for candidate in _pricing_model_candidates(task.get("model")):
+                pricing = database.resolve_model_pricing(
+                    model_code=candidate,
+                    resolution=task.get("resolution"),
+                    has_video_reference=_has_video_reference_urls(
+                        task.get("reference_urls_json") or []
+                    ),
+                )
+                if pricing:
+                    break
+            user = database.get_user_by_id(task.get("user_id"))
+            if pricing and user:
+                tokens_billed = database.compute_tokens_billed(token_usage)
+                price_per_million_cny_cent = _pricing_to_cny_cent(
+                    int(pricing.get("price_per_million_token_cent") or 0),
+                    str(pricing.get("currency_code") or database.MODEL_CURRENCY_CNY),
+                )
+                unit_price_cent_per_ktoken = price_per_million_cny_cent / Decimal(1000)
+                multiplier = _effective_multiplier(user)
+                amount_cent = _to_cent(
+                    (Decimal(tokens_billed) / Decimal(1000))
+                    * unit_price_cent_per_ktoken
+                    * multiplier
+                )
+        except Exception:
+            amount_cent = None
+    task["amount_cent"] = amount_cent
+    task["amount_yuan"] = (amount_cent / 100.0) if amount_cent is not None else None
     return task
 
 
@@ -641,8 +799,20 @@ class OmniVideoService:
     def __init__(self) -> None:
         self.client = omni_video_client
 
+    def _is_configured(self, model: str | None = None) -> bool:
+        try:
+            return self.client.is_configured(model=model)
+        except TypeError:
+            return self.client.is_configured()
+
+    def _get_remote_task(self, task_id: str, model: str | None = None) -> dict[str, Any]:
+        try:
+            return self.client.get_task(task_id, model=model)
+        except TypeError:
+            return self.client.get_task(task_id)
+
     def is_configured(self) -> bool:
-        return self.client.is_configured()
+        return self._is_configured()
 
     def _ensure_video_library_entry(self, task: dict[str, Any]) -> None:
         status = str(task.get("status") or "").lower()
@@ -675,7 +845,9 @@ class OmniVideoService:
                 return
             # 如果原始URL仍是临时URL，尝试迁移到OSS
             if is_tos_temp_url(existing_url):
-                filename = existing.get("filename") or _guess_video_filename(task["task_id"], existing_url)
+                filename = existing.get("filename") or _guess_video_filename(
+                    task["task_id"], existing_url
+                )
                 oss_url, is_expired = _download_and_upload_to_oss(
                     existing_url,
                     filename,
@@ -692,10 +864,14 @@ class OmniVideoService:
                 elif is_expired:
                     # 标记URL过期，不再重复尝试
                     database.update_video_asset_meta(existing["id"], {"url_expired": True})
-                    logger.info("[omni-video] Marked video URL as expired: task_id=%s", task["task_id"])
+                    logger.info(
+                        "[omni-video] Marked video URL as expired: task_id=%s", task["task_id"]
+                    )
             return
 
-        filename = task.get("download_filename") or _guess_video_filename(task["task_id"], video_url)
+        filename = task.get("download_filename") or _guess_video_filename(
+            task["task_id"], video_url
+        )
 
         # 先保存到视频库（使用原始URL），作为占位防止并发重复
         database.save_video_asset(
@@ -749,7 +925,9 @@ class OmniVideoService:
                 )
                 if existing_video:
                     database.update_video_asset_meta(existing_video["id"], {"url_expired": True})
-                    logger.info("[omni-video] Marked new video URL as expired: task_id=%s", task["task_id"])
+                    logger.info(
+                        "[omni-video] Marked new video URL as expired: task_id=%s", task["task_id"]
+                    )
 
     def _persist_and_load(self, record: dict[str, Any]) -> dict[str, Any]:
         database.save_omni_video_task(record)
@@ -762,6 +940,9 @@ class OmniVideoService:
             or record
         )
         task = _decorate_task(task)
+        status = str(task.get("status") or "").lower()
+        if status in SUCCESS_STATUSES:
+            settle_omni_video_charge(task)
         self._ensure_video_library_entry(task)
         return task
 
@@ -769,7 +950,7 @@ class OmniVideoService:
         local_payload = task.get("input_payload_json", {})
         model = local_payload.get("model") or task.get("model")
 
-        if not self.client.is_configured(model=model):
+        if not self._is_configured(model=model):
             task = _decorate_task(task)
             self._ensure_video_library_entry(task)
             return task
@@ -780,7 +961,7 @@ class OmniVideoService:
             self._ensure_video_library_entry(task)
             return task
 
-        remote = self.client.get_task(task_id, model=model)
+        remote = self._get_remote_task(task_id, model=model)
         record = _task_record_from_remote(
             user_id=task["user_id"],
             project_id=task.get("project_id"),
@@ -789,10 +970,18 @@ class OmniVideoService:
         )
         return self._persist_and_load(record)
 
-    def create_task(self, user_id: int, project_id: int | None, data: dict[str, Any]) -> dict[str, Any]:
+    def create_task(
+        self, user_id: int, project_id: int | None, data: dict[str, Any]
+    ) -> dict[str, Any]:
         start_time = time.time()
         username = data.get("_username")
-        payload = build_omni_video_payload(data)
+        user = database.get_user_by_id(user_id)
+        role_code = user.get("role_code") if user else database.ROLE_EXTERNAL_USER
+        payload_input = dict(data)
+        payload_input["model"] = _model_for_role(role_code, data.get("model"))
+        payload = build_omni_video_payload(payload_input)
+        if user:
+            ensure_min_balance_for_omni_video(user, payload.get("model"))
         if not payload["prompt"]:
             error_msg = "提示词不能为空"
             log_task_operation(
@@ -807,8 +996,10 @@ class OmniVideoService:
             raise ValueError(error_msg)
 
         model = payload.get("model")
-        is_configured = self.client.is_configured(model=model)
-        api_endpoint = self.client._url(self.client.create_path, model=model) if is_configured else "local"
+        is_configured = self._is_configured(model=model)
+        api_endpoint = (
+            self.client._url(self.client.create_path, model=model) if is_configured else "local"
+        )
 
         if is_configured:
             remote = self.client.create_task(payload)
@@ -886,6 +1077,7 @@ class OmniVideoService:
         end_date: str | None = None,
         page: int = 1,
         page_size: int = 20,
+        sync_running: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         offset = max(page - 1, 0) * page_size
         items = database.get_omni_video_tasks(
@@ -897,6 +1089,7 @@ class OmniVideoService:
             end_date=end_date,
             limit=page_size,
             offset=offset,
+            include_heavy_fields=False,
         )
         total = database.count_omni_video_tasks(
             user_id,
@@ -907,10 +1100,20 @@ class OmniVideoService:
             end_date=end_date,
         )
 
-        # Keep task listing local-only for faster page loads.
-        # Remote sync remains available via get_task/refresh_task.
-        local_items = [_decorate_task(item) for item in items]
-        return local_items, total
+        # Keep list API fast: avoid remote polling and OSS backfill by default.
+        # Detail/refresh endpoints remain the explicit sync path.
+        if not sync_running:
+            return [_decorate_task(item) for item in items], total
+
+        synced_items = []
+        for item in items:
+            normalized = _decorate_task(item)
+            current_status = str(normalized.get("status") or "").lower()
+            if current_status and current_status in TERMINAL_STATUSES:
+                synced_items.append(normalized)
+            else:
+                synced_items.append(self._sync_task_from_remote(item))
+        return synced_items, total
 
     def get_task(self, user_id: int, project_id: int | None, task_id: str) -> dict[str, Any] | None:
         existing = database.get_omni_video_task(task_id, user_id=user_id, project_id=project_id)
@@ -934,6 +1137,23 @@ class OmniVideoService:
             return normalized
         return self._sync_task_from_remote(existing)
 
+    def refresh_pending_tasks(self, limit: int = 200) -> dict[str, int]:
+        items = database.get_omni_video_tasks_by_statuses(["queued", "running"], limit=limit)
+        refreshed = 0
+        failed = 0
+        for item in items:
+            try:
+                self._sync_task_from_remote(item)
+                refreshed += 1
+            except Exception:
+                failed += 1
+                logger.exception(
+                    "[omni-video][worker] refresh failed: task_id=%s user_id=%s",
+                    item.get("task_id"),
+                    item.get("user_id"),
+                )
+        return {"scanned": len(items), "refreshed": refreshed, "failed": failed}
+
     def cancel_task(self, user_id: int, project_id: int | None, task_id: str) -> dict[str, Any]:
         existing = database.get_omni_video_task(task_id, user_id=user_id, project_id=project_id)
         if not existing:
@@ -942,7 +1162,7 @@ class OmniVideoService:
         local_payload = existing.get("input_payload_json", {})
         model = local_payload.get("model") or existing.get("model")
 
-        if self.client.is_configured(model=model):
+        if self._is_configured(model=model):
             remote = self.client.cancel_task(task_id, model=model)
             status = _extract_status(remote, "cancelled")
         else:

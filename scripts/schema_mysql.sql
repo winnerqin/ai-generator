@@ -9,8 +9,14 @@ CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(255) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
+    role_code VARCHAR(32) NOT NULL DEFAULT 'external_user',
+    status VARCHAR(32) NOT NULL DEFAULT 'active',
+    balance_cent BIGINT NOT NULL DEFAULT 0,
+    pricing_multiplier DECIMAL(10,4) NOT NULL DEFAULT 1.0000,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_login DATETIME NULL
+    last_login DATETIME NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_users_role_status (role_code, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 生成记录表
@@ -326,4 +332,41 @@ CREATE TABLE IF NOT EXISTS operation_logs (
     INDEX idx_operation_logs_user_created (user_id, created_at DESC),
     INDEX idx_operation_logs_path_created (request_path(255), created_at DESC),
     INDEX idx_operation_logs_project_created (project_id, created_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS model_pricing (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    model_code VARCHAR(255) NOT NULL,
+    model_name VARCHAR(255) NOT NULL,
+    currency_code VARCHAR(8) NOT NULL DEFAULT 'CNY',
+    resolution_code VARCHAR(16) NOT NULL DEFAULT '',
+    reference_video_mode VARCHAR(32) NOT NULL DEFAULT 'any',
+    price_per_million_token_cent BIGINT NOT NULL,
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_model_pricing_enabled (enabled),
+    UNIQUE KEY uk_model_pricing_rule (model_code, currency_code, resolution_code, reference_video_mode)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS account_ledger (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    entry_type VARCHAR(16) NOT NULL,
+    amount_cent BIGINT NOT NULL,
+    balance_before_cent BIGINT NOT NULL,
+    balance_after_cent BIGINT NOT NULL,
+    biz_type VARCHAR(64) NOT NULL,
+    biz_id VARCHAR(255),
+    model_code VARCHAR(255),
+    tokens_raw BIGINT,
+    tokens_billed BIGINT,
+    unit_price_cent_per_ktoken BIGINT,
+    multiplier DECIMAL(10,4),
+    snapshot_json LONGTEXT,
+    operator_user_id INT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_account_ledger_user_created (user_id, created_at DESC),
+    INDEX idx_account_ledger_biz (biz_type, biz_id),
+    UNIQUE KEY uk_account_ledger_user_biz_entry (user_id, entry_type, biz_type, biz_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

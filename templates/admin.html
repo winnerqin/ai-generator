@@ -51,8 +51,25 @@
 
             const [newUsername, setNewUsername] = useState('');
             const [newPassword, setNewPassword] = useState('');
+            const [newRoleCode, setNewRoleCode] = useState('external_user');
             const [newProjectName, setNewProjectName] = useState('');
             const [assignUserByProject, setAssignUserByProject] = useState({});
+            const [editRoleByUser, setEditRoleByUser] = useState({});
+            const [modelPricingList, setModelPricingList] = useState([]);
+            const [newModelCode, setNewModelCode] = useState('');
+            const [newModelName, setNewModelName] = useState('');
+            const [newModelCurrency, setNewModelCurrency] = useState('CNY');
+            const [newModelResolution, setNewModelResolution] = useState('');
+            const [newModelRefMode, setNewModelRefMode] = useState('any');
+            const [newModelPriceYuan, setNewModelPriceYuan] = useState('');
+            const [newModelEnabled, setNewModelEnabled] = useState(true);
+            const [editingPricing, setEditingPricing] = useState(null);
+            const [editModelName, setEditModelName] = useState('');
+            const [editModelCurrency, setEditModelCurrency] = useState('CNY');
+            const [editModelResolution, setEditModelResolution] = useState('');
+            const [editModelRefMode, setEditModelRefMode] = useState('any');
+            const [editModelPriceYuan, setEditModelPriceYuan] = useState('');
+            const [editModelEnabled, setEditModelEnabled] = useState(true);
 
             useEffect(() => {
                 document.body.classList.add('react-theme', 'sidebar-compact');
@@ -80,6 +97,16 @@
                     if (!pData.success) throw new Error(pData.error || '加载项目失败');
                     setUsers(uData.users || []);
                     setProjectsAdmin(pData.projects || []);
+                    const roleMap = {};
+                    (uData.users || []).forEach((u) => {
+                        roleMap[String(u.id)] = u.role_code || 'external_user';
+                    });
+                    setEditRoleByUser(roleMap);
+                    const pricingResp = await fetch('/api/admin/model-pricing');
+                    const pricingData = await pricingResp.json();
+                    if (pricingData.success) {
+                        setModelPricingList(pricingData.items || []);
+                    }
                 } catch (e) {
                     setError(e.message || '加载失败');
                 } finally {
@@ -119,11 +146,11 @@
                 const resp = await fetch('/api/admin/users', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
+                    body: JSON.stringify({ username, password, role_code: newRoleCode })
                 });
                 const data = await resp.json();
                 if (!data.success) { setError(data.error || '创建失败'); return; }
-                setNewUsername(''); setNewPassword('');
+                setNewUsername(''); setNewPassword(''); setNewRoleCode('external_user');
                 refresh();
             };
 
@@ -146,6 +173,42 @@
                 const data = await resp.json();
                 if (!data.success) { setError(data.error || '修改失败'); return; }
                 alert('密码已更新');
+            };
+
+            const adjustBalance = async (user) => {
+                if ((user.role_code || 'external_user') !== 'external_user') {
+                    setError('仅外部用户支持手动余额加减');
+                    return;
+                }
+                const raw = prompt('请输入调整金额（元，可正可负，例如 100 或 -20）');
+                if (raw == null) return;
+                const amountYuan = Number(raw);
+                if (!Number.isFinite(amountYuan) || amountYuan === 0) {
+                    setError('金额格式错误');
+                    return;
+                }
+                const amountCent = Math.round(amountYuan * 100);
+                const resp = await fetch(`/api/admin/users/${user.id}/recharge`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount_cent: amountCent })
+                });
+                const data = await resp.json();
+                if (!data.success) { setError(data.error || '余额调整失败'); return; }
+                refresh();
+            };
+
+            const updateUserRole = async (userId) => {
+                const roleCode = editRoleByUser[String(userId)];
+                if (!roleCode) return;
+                const resp = await fetch(`/api/admin/users/${userId}/role`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role_code: roleCode })
+                });
+                const data = await resp.json();
+                if (!data.success) { setError(data.error || '角色更新失败'); return; }
+                refresh();
             };
 
             const createProject = async () => {
@@ -196,6 +259,79 @@
                 refresh();
             };
 
+            const createModelPricing = async () => {
+                const modelCode = (newModelCode || '').trim();
+                const modelName = (newModelName || '').trim();
+                const priceYuan = Number(newModelPriceYuan);
+                if (!modelCode || !modelName || !Number.isFinite(priceYuan) || priceYuan <= 0) {
+                    setError('请填写完整且有效的模型价格信息');
+                    return;
+                }
+                const resp = await fetch('/api/admin/model-pricing', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model_code: modelCode,
+                        model_name: modelName,
+                        currency_code: newModelCurrency,
+                        resolution_code: (newModelResolution || '').trim().toLowerCase(),
+                        reference_video_mode: newModelRefMode,
+                        price_per_million_token_cent: Math.round(priceYuan * 100),
+                        enabled: !!newModelEnabled,
+                    }),
+                });
+                const data = await resp.json();
+                if (!data.success) { setError(data.error || '模型价格保存失败'); return; }
+                setNewModelCode('');
+                setNewModelName('');
+                setNewModelCurrency('CNY');
+                setNewModelResolution('');
+                setNewModelRefMode('any');
+                setNewModelPriceYuan('');
+                setNewModelEnabled(true);
+                refresh();
+            };
+
+            const openEditPricing = (item) => {
+                setEditingPricing(item);
+                setEditModelName(item.model_name || '');
+                setEditModelCurrency(item.currency_code || 'CNY');
+                setEditModelResolution(item.resolution_code || '');
+                setEditModelRefMode(item.reference_video_mode || 'any');
+                setEditModelPriceYuan(((Number(item.price_per_million_token_cent || 0)) / 100).toFixed(2));
+                setEditModelEnabled(!!item.enabled);
+            };
+
+            const closeEditPricing = () => {
+                setEditingPricing(null);
+            };
+
+            const updateModelPricing = async () => {
+                if (!editingPricing) return;
+                const modelName = (editModelName || '').trim();
+                const priceYuan = Number(editModelPriceYuan);
+                if (!modelName || !Number.isFinite(priceYuan) || priceYuan <= 0) {
+                    setError('请填写有效的模型价格信息');
+                    return;
+                }
+                const resp = await fetch(`/api/admin/model-pricing/${editingPricing.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model_name: modelName,
+                        currency_code: editModelCurrency,
+                        resolution_code: (editModelResolution || '').trim().toLowerCase(),
+                        reference_video_mode: editModelRefMode,
+                        price_per_million_token_cent: Math.round(priceYuan * 100),
+                        enabled: !!editModelEnabled,
+                    }),
+                });
+                const data = await resp.json();
+                if (!data.success) { setError(data.error || '模型价格更新失败'); return; }
+                closeEditPricing();
+                refresh();
+            };
+
             return (
                 <div className="app-shell">
                     <Sidebar
@@ -218,6 +354,11 @@
                                     <div className="admin-actions" style={{ marginTop: 10 }}>
                                         <input className="admin-input" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder="用户名" />
                                         <input className="admin-input" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="初始密码" />
+                                        <select className="admin-select" value={newRoleCode} onChange={(e) => setNewRoleCode(e.target.value)}>
+                                            <option value="external_user">外部用户</option>
+                                            <option value="internal_user">内部用户</option>
+                                            <option value="system_admin">系统管理员</option>
+                                        </select>
                                         <button className="btn-convert" type="button" onClick={createUser} disabled={loading}>添加用户</button>
                                     </div>
                                     <div className="admin-table-wrap">
@@ -226,21 +367,37 @@
                                                 <tr>
                                                     <th style={{ width: 80 }}>ID</th>
                                                     <th>用户名</th>
+                                                    <th>角色</th>
+                                                    <th>余额(元)</th>
                                                     <th>创建时间</th>
                                                     <th>最后登录</th>
-                                                    <th style={{ width: 170 }}>操作</th>
+                                                    <th style={{ width: 360 }}>操作</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {users.length === 0 ? (
-                                                    <tr><td colSpan="5" className="small-hint">暂无用户</td></tr>
+                                                    <tr><td colSpan="7" className="small-hint">暂无用户</td></tr>
                                                 ) : users.map(u => (
                                                     <tr key={u.id}>
                                                         <td>{u.id}</td>
                                                         <td>{u.username}</td>
+                                                        <td>
+                                                            <select
+                                                                className="admin-select"
+                                                                value={editRoleByUser[String(u.id)] || (u.role_code || 'external_user')}
+                                                                onChange={(e) => setEditRoleByUser(prev => ({ ...prev, [String(u.id)]: e.target.value }))}
+                                                            >
+                                                                <option value="external_user">外部用户</option>
+                                                                <option value="internal_user">内部用户</option>
+                                                                <option value="system_admin">系统管理员</option>
+                                                            </select>
+                                                        </td>
+                                                        <td>{((Number(u.balance_cent || 0)) / 100).toFixed(2)}</td>
                                                         <td>{u.created_at || '-'}</td>
                                                         <td>{u.last_login || '-'}</td>
                                                         <td>
+                                                            <button type="button" className="btn-export" onClick={() => updateUserRole(u.id)}>改角色</button>
+                                                            <button type="button" className="btn-export" style={{ marginLeft: 6 }} onClick={() => adjustBalance(u)}>调余额</button>
                                                             <button type="button" className="btn-export" onClick={() => resetPassword(u.id)}>改密码</button>
                                                             <button type="button" className="btn-export" style={{ marginLeft: 6, color: '#ff9aa2', borderColor: 'rgba(255,120,120,0.5)' }} onClick={() => deleteUser(u.id)}>删除</button>
                                                         </td>
@@ -299,9 +456,100 @@
                                         </table>
                                     </div>
                                 </div>
+
+                                <div>
+                                    <div style={{ fontWeight: 700 }}>模型价格管理</div>
+                                    <div className="admin-actions" style={{ marginTop: 10 }}>
+                                        <input className="admin-input" value={newModelCode} onChange={(e) => setNewModelCode(e.target.value)} placeholder="模型编码（如 doubao-seedance-2-0-260128）" />
+                                        <input className="admin-input" value={newModelName} onChange={(e) => setNewModelName(e.target.value)} placeholder="模型名称" />
+                                        <select className="admin-select" value={newModelCurrency} onChange={(e) => setNewModelCurrency(e.target.value)}>
+                                            <option value="CNY">CNY</option>
+                                            <option value="USD">USD</option>
+                                        </select>
+                                        <input className="admin-input" value={newModelResolution} onChange={(e) => setNewModelResolution(e.target.value)} placeholder="分辨率（如 720p / 1080p，空=任意）" />
+                                        <select className="admin-select" value={newModelRefMode} onChange={(e) => setNewModelRefMode(e.target.value)}>
+                                            <option value="any">任意参考素材</option>
+                                            <option value="with_video_ref">含视频参考素材</option>
+                                            <option value="without_video_ref">不含视频参考素材</option>
+                                        </select>
+                                        <input className="admin-input" type="number" min="0" step="0.01" value={newModelPriceYuan} onChange={(e) => setNewModelPriceYuan(e.target.value)} placeholder="价格/百万Token（按币种）" />
+                                        <label className="small-hint" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                            <input type="checkbox" checked={newModelEnabled} onChange={(e) => setNewModelEnabled(e.target.checked)} />
+                                            启用
+                                        </label>
+                                        <button className="btn-convert" type="button" onClick={createModelPricing}>新增/保存</button>
+                                    </div>
+                                    <div className="admin-table-wrap">
+                                        <table className="admin-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>ID</th>
+                                                    <th>模型编码</th>
+                                                    <th>模型名称</th>
+                                                    <th>币种</th>
+                                                    <th>分辨率</th>
+                                                    <th>参考素材</th>
+                                                    <th>价格/百万Token</th>
+                                                    <th>启用</th>
+                                                    <th>操作</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {modelPricingList.length === 0 ? (
+                                                    <tr><td colSpan="9" className="small-hint">暂无模型价格配置</td></tr>
+                                                ) : modelPricingList.map(item => (
+                                                    <tr key={item.id}>
+                                                        <td>{item.id}</td>
+                                                        <td>{item.model_code}</td>
+                                                        <td>{item.model_name}</td>
+                                                        <td>{item.currency_code || 'CNY'}</td>
+                                                        <td>{item.resolution_code || '任意'}</td>
+                                                        <td>{item.reference_video_mode === 'with_video_ref' ? '含视频参考素材' : item.reference_video_mode === 'without_video_ref' ? '不含视频参考素材' : '任意'}</td>
+                                                        <td>{((Number(item.price_per_million_token_cent || 0)) / 100).toFixed(2)}</td>
+                                                        <td>{item.enabled ? '是' : '否'}</td>
+                                                        <td>
+                                                            <button type="button" className="btn-export" onClick={() => openEditPricing(item)}>编辑</button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
                             </div>
                         </div>
                     </div>
+
+                    {editingPricing ? (
+                        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+                            <div className="panel" style={{ width: 'min(680px, 92vw)', marginBottom: 0 }}>
+                                <div style={{ fontWeight: 700, marginBottom: 12 }}>编辑模型价格：{editingPricing.model_code}</div>
+                                <div className="admin-actions">
+                                    <input className="admin-input" value={editModelName} onChange={(e) => setEditModelName(e.target.value)} placeholder="模型名称" />
+                                    <select className="admin-select" value={editModelCurrency} onChange={(e) => setEditModelCurrency(e.target.value)}>
+                                        <option value="CNY">CNY</option>
+                                        <option value="USD">USD</option>
+                                    </select>
+                                    <input className="admin-input" value={editModelResolution} onChange={(e) => setEditModelResolution(e.target.value)} placeholder="分辨率（空=任意）" />
+                                    <select className="admin-select" value={editModelRefMode} onChange={(e) => setEditModelRefMode(e.target.value)}>
+                                        <option value="any">任意参考素材</option>
+                                        <option value="with_video_ref">含视频参考素材</option>
+                                        <option value="without_video_ref">不含视频参考素材</option>
+                                    </select>
+                                    <input className="admin-input" type="number" min="0" step="0.01" value={editModelPriceYuan} onChange={(e) => setEditModelPriceYuan(e.target.value)} placeholder="价格/百万Token（按币种）" />
+                                    <label className="small-hint" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                        <input type="checkbox" checked={editModelEnabled} onChange={(e) => setEditModelEnabled(e.target.checked)} />
+                                        启用
+                                    </label>
+                                </div>
+                                <div className="admin-actions" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
+                                    <button type="button" className="btn-export" onClick={closeEditPricing}>取消</button>
+                                    <button type="button" className="btn-convert" onClick={updateModelPricing}>保存修改</button>
+                                </div>
+                            </div>
+                        </div>
+                    ) : null}
                 </div>
             );
         }

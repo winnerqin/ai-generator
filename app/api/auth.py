@@ -48,6 +48,7 @@ def login():
     # 设置会话
     session["user_id"] = user_id
     session["username"] = username
+    session["role_code"] = user.get("role_code")
     session.permanent = True
 
     # 确保用户有项目
@@ -91,8 +92,21 @@ def get_current_user():
         {
             "id": user_id,
             "username": username,
+            "role_code": session.get("role_code"),
             "project_id": project_id,
-            "is_system_admin": username == "system_admin",
+            "is_system_admin": session.get("role_code") == database.ROLE_SYSTEM_ADMIN,
+        }
+    )
+
+
+@auth_bp.route("/api/me/menu-permissions", methods=["GET"])
+@login_required
+def get_my_menu_permissions():
+    role_code = session.get("role_code") or database.ROLE_EXTERNAL_USER
+    return ApiResponse.success(
+        {
+            "role_code": role_code,
+            "menu_keys": database.get_user_menu_permissions(role_code),
         }
     )
 
@@ -169,8 +183,9 @@ def jwt_refresh():
             }
         }
     """
-    from flask_jwt_extended import get_jwt_identity, create_access_token
     import json
+
+    from flask_jwt_extended import create_access_token, get_jwt_identity
 
     @jwt_required(refresh=True)
     def do_refresh():
@@ -212,8 +227,9 @@ def jwt_me():
             }
         }
     """
-    from flask_jwt_extended import get_jwt_identity
     import json
+
+    from flask_jwt_extended import get_jwt_identity
 
     current_user = get_jwt_identity()
     # 如果身份是字符串，尝试解析为 JSON
@@ -223,3 +239,61 @@ def jwt_me():
         except json.JSONDecodeError:
             pass
     return ApiResponse.success(current_user)
+
+
+@auth_bp.route("/api/user/profile", methods=["GET"])
+@login_required
+def get_user_profile():
+    user = database.get_user_by_id(session.get("user_id"))
+    if not user:
+        return ApiResponse.not_found("用户不存在")
+    return ApiResponse.success(
+        {
+            "id": user.get("id"),
+            "username": user.get("username"),
+            "role_code": user.get("role_code"),
+            "status": user.get("status"),
+            "balance_cent": user.get("balance_cent", 0),
+            "pricing_multiplier": user.get("pricing_multiplier", 1.0),
+        }
+    )
+
+
+@auth_bp.route("/api/user/change-password", methods=["POST"])
+@login_required
+def change_password():
+    data = request.get_json(silent=True) or {}
+    old_password = data.get("old_password", "")
+    new_password = data.get("new_password", "")
+    confirm_password = data.get("confirm_password", "")
+    if not old_password or not new_password or not confirm_password:
+        return ApiResponse.bad_request("请完整填写密码信息")
+    if new_password != confirm_password:
+        return ApiResponse.bad_request("两次输入的新密码不一致")
+    if len(new_password) < 6:
+        return ApiResponse.bad_request("密码至少6个字符")
+    current = database.verify_user(session.get("username"), old_password)
+    if not current:
+        return ApiResponse.bad_request("旧密码错误")
+    database.update_user_password(session.get("user_id"), new_password)
+    return ApiResponse.success(message="密码修改成功")
+
+
+@auth_bp.route("/api/user/consumption-records", methods=["GET"])
+@login_required
+def get_user_consumption_records():
+    page = max(request.args.get("page", 1, type=int), 1)
+    page_size = min(max(request.args.get("page_size", 20, type=int), 1), 100)
+    offset = (page - 1) * page_size
+    items = database.get_user_consumption_records(
+        session.get("user_id"),
+        limit=page_size,
+        offset=offset,
+        biz_type="omni_video",
+    )
+    total = database.count_account_ledger(
+        user_id=session.get("user_id"),
+        entry_type="debit",
+        biz_type="omni_video",
+    )
+    return ApiResponse.paginated(items, total, page, page_size)

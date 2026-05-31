@@ -213,6 +213,14 @@
     margin: 10px 12px;
 }
 
+.sidebar-nav-group-title {
+    padding: 6px 12px;
+    color: rgba(255,255,255,0.55);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0;
+}
+
 .sidebar-nav-user {
     padding: 12px;
     border-top: 1px solid rgba(255,255,255,0.1);
@@ -305,15 +313,15 @@
     .sidebar-nav {
         width: 56px;
     }
-    
+
     .sidebar-nav.collapsed {
         width: 0;
     }
-    
+
     .main-content {
         margin-left: 56px;
     }
-    
+
     .sidebar-nav.collapsed ~ .main-content {
         margin-left: 0;
     }

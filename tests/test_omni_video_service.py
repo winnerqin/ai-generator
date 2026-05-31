@@ -165,10 +165,11 @@ def test_list_tasks_syncs_running_task_and_auto_saves_video(monkeypatch):
         "save_video_asset",
         lambda user_id, filename, url, meta=None, project_id=None: saved_video.update(
             {"filename": filename, "url": url, "meta": meta}
-        ) or 1,
+        )
+        or 1,
     )
 
-    items, total = service.list_tasks(7, 3, page=1, page_size=20)
+    items, total = service.list_tasks(7, 3, page=1, page_size=20, sync_running=True)
     assert total == 1
     assert items[0]["status"] == "succeeded"
     assert items[0]["video_url"] == "https://example.com/output/list-demo.mp4"
@@ -238,6 +239,7 @@ def test_list_tasks_does_not_recreate_deleted_library_video(monkeypatch):
         "get_omni_video_task",
         lambda task_id, user_id=None, project_id=None: dict(task_state),
     )
+
     def fake_save_task(data):
         task_state.update(data)
         return 1
@@ -252,10 +254,12 @@ def test_list_tasks_does_not_recreate_deleted_library_video(monkeypatch):
     monkeypatch.setattr(
         omni_module.database,
         "save_video_asset",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not re-add deleted video")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("should not re-add deleted video")
+        ),
     )
 
-    items, total = service.list_tasks(7, 3, page=1, page_size=20)
+    items, total = service.list_tasks(7, 3, page=1, page_size=20, sync_running=True)
     assert total == 1
     assert items[0]["status"] == "succeeded"
 
@@ -331,7 +335,8 @@ def test_get_task_extracts_video_url_from_content_blob(monkeypatch):
         "save_video_asset",
         lambda user_id, filename, url, meta=None, project_id=None: saved_video.update(
             {"filename": filename, "url": url, "meta": meta}
-        ) or 1,
+        )
+        or 1,
     )
 
     task = service.get_task(5, 2, "task-content-1")
@@ -397,7 +402,8 @@ def test_get_task_for_terminal_status_uses_local_data_only(monkeypatch):
         "save_video_asset",
         lambda user_id, filename, url, meta=None, project_id=None: saved_video.update(
             {"filename": filename, "url": url, "meta": meta}
-        ) or 1,
+        )
+        or 1,
     )
 
     task = service.get_task(8, 4, "task-local-only")
@@ -480,7 +486,10 @@ def test_build_payload_encodes_public_reference_urls():
     )
 
     assert payload["reference_urls"][0] == "https://cdn.example.com/material/last%20frame%20(2).jpg"
-    assert payload["content"][1]["image_url"]["url"] == "https://cdn.example.com/material/last%20frame%20(2).jpg"
+    assert (
+        payload["content"][1]["image_url"]["url"]
+        == "https://cdn.example.com/material/last%20frame%20(2).jpg"
+    )
     assert payload["content"][2]["video_url"]["url"] == "https://cdn.example.com/media/demo.mp4"
 
 
@@ -517,3 +526,55 @@ def test_build_payload_allows_site_upload_urls_without_oss(monkeypatch, tmp_path
     assert payload["content"][1]["image_url"]["url"] == (
         "http://short.wyydym.cc/uploads/user_1/material_image/demo.jpg"
     )
+
+
+def test_create_task_blocks_external_user_with_insufficient_balance(monkeypatch):
+    import importlib
+
+    from app.services.omni_video_service import OmniVideoService
+
+    omni_module = importlib.import_module("app.services.omni_video_service")
+    service = OmniVideoService()
+    service.client = type("StubClient", (), {"is_configured": lambda self, model=None: False})()
+
+    monkeypatch.setattr(
+        omni_module.database,
+        "get_user_by_id",
+        lambda user_id: {
+            "id": user_id,
+            "role_code": "external_user",
+            "balance_cent": 0,
+            "pricing_multiplier": 1.0,
+        },
+    )
+    monkeypatch.setattr(
+        omni_module.database,
+        "get_min_enabled_model_price_per_million_cent",
+        lambda: 100000,
+    )
+    monkeypatch.setattr(
+        omni_module.database,
+        "get_model_pricing",
+        lambda model_code: {
+            "model_code": model_code,
+            "price_per_million_token_cent": 100000,
+            "enabled": 1,
+        },
+    )
+
+    try:
+        service.create_task(
+            101,
+            1,
+            {
+                "_username": "u1",
+                "prompt": "test",
+                "model": "doubao-seedance-2-0-fast-260128",
+                "resolution": "480p",
+                "aspect_ratio": "16:9",
+                "duration": 5,
+            },
+        )
+        assert False, "should raise ValueError"
+    except ValueError as exc:
+        assert "余额不足" in str(exc)

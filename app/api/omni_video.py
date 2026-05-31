@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from io import BytesIO
 import logging
+from io import BytesIO
 
 import requests
-from flask import Blueprint, jsonify, render_template, request, send_file, session
-import volcenginesdkcore
 import volcenginesdkbilling
+import volcenginesdkcore
+from flask import Blueprint, jsonify, render_template, request, send_file, session
 from volcenginesdkcore.rest import ApiException
 
 from app.config import config
 from app.decorators import handle_api_error, login_required
-from app.services.omni_video_service import omni_video_service
+from app.services.omni_video_service import get_models_for_role, omni_video_service
 from app.services.operation_log_service import log_balance_query
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,11 @@ omni_video_bp = Blueprint("omni_video", __name__)
 
 
 def _current_user_context() -> dict[str, object]:
-    return {"username": session.get("username", ""), "id": session.get("user_id")}
+    return {
+        "username": session.get("username", ""),
+        "id": session.get("user_id"),
+        "role_code": session.get("role_code"),
+    }
 
 
 def _safe_log_payload(payload):
@@ -91,8 +95,9 @@ def list_omni_video_tasks():
     search = request.args.get("search") or None
     start_date = request.args.get("start_date") or None
     end_date = request.args.get("end_date") or None
+    sync_running = (request.args.get("sync_running", "false") or "false").lower() == "true"
     logger.info(
-        "[omni-video][list][request] user_id=%s project_id=%s page=%s page_size=%s status=%s search=%s start_date=%s end_date=%s",
+        "[omni-video][list][request] user_id=%s project_id=%s page=%s page_size=%s status=%s search=%s start_date=%s end_date=%s sync_running=%s",
         user_id,
         project_id,
         page,
@@ -101,6 +106,7 @@ def list_omni_video_tasks():
         search,
         start_date,
         end_date,
+        sync_running,
     )
 
     items, total = omni_video_service.list_tasks(
@@ -112,8 +118,11 @@ def list_omni_video_tasks():
         end_date=end_date,
         page=page,
         page_size=page_size,
+        sync_running=sync_running,
     )
-    logger.info("[omni-video][list][response] total=%s items=%s", total, _safe_log_payload({"items": items}))
+    logger.info(
+        "[omni-video][list][response] total=%s items=%s", total, _safe_log_payload({"items": items})
+    )
     return jsonify(
         {
             "success": True,
@@ -255,8 +264,20 @@ def delete_omni_video_task(task_id: str):
 @login_required
 def get_omni_video_config():
     configured = omni_video_service.is_configured()
+    role_code = session.get("role_code")
+    models = get_models_for_role(role_code)
+    default_model = models[0] if models else None
     logger.info("[omni-video][config] configured=%s", configured)
-    return jsonify({"success": True, "configured": configured})
+    return jsonify(
+        {
+            "success": True,
+            "configured": configured,
+            "models": models,
+            "default_model": default_model,
+            "model_aliases": config.get_omni_model_alias_map(),
+            "role_code": role_code,
+        }
+    )
 
 
 @omni_video_bp.route("/api/omni-video/balance", methods=["GET"])
@@ -264,6 +285,7 @@ def get_omni_video_config():
 def get_volcengine_balance():
     """查询火山引擎账户余额"""
     import time
+
     start_time = time.time()
     user_id = session.get("user_id")
     username = session.get("username")
@@ -296,7 +318,9 @@ def get_volcengine_balance():
         elif hasattr(result, "balance_amount"):
             balance = float(result.balance_amount) if result.balance_amount else 0
         elif hasattr(result, "result") and hasattr(result.result, "available_balance"):
-            balance = float(result.result.available_balance) if result.result.available_balance else 0
+            balance = (
+                float(result.result.available_balance) if result.result.available_balance else 0
+            )
 
         duration_ms = int((time.time() - start_time) * 1000)
         logger.info("[omni-video][balance] balance=%s", balance)

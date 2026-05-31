@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>角色管理 - AI创作工具</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/sidebar-nav.css">
+    <style>
+        .app-shell { display: flex; min-height: 100vh; }
+        .main-content { padding: 0; flex: 1; min-width: 0; }
+        .page-wrap { padding: 20px 24px 36px; }
+        .page-title { font-size: 1.4rem; font-weight: 600; margin: 0 0 4px; color: #e6ebff; }
+        .page-subtitle { color: #a9b3d3; margin: 0 0 16px; font-size: 0.9rem; }
+        .panel { border-radius: 16px; padding: 16px; margin-bottom: 16px; background: rgba(11,15,26,0.78); border: 1px solid rgba(86,111,255,0.22); }
+        .admin-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .admin-input { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(86,111,255,0.3); background: rgba(11,15,26,0.6); color: #e6ebff; font-size: 0.9rem; min-width: 220px; }
+        .admin-table-wrap { overflow-x: auto; margin-top: 10px; }
+        .admin-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .admin-table th, .admin-table td { border: 1px solid rgba(86,111,255,0.25); padding: 8px 10px; text-align: left; vertical-align: top; }
+        .admin-table th { background: rgba(86,111,255,0.15); font-weight: 600; }
+        .small-hint { color: #a9b3d3; font-size: 12px; }
+    </style>
+</head>
+<body>
+<div id="reactApp"></div>
+<script>
+window.__APP_CONTEXT__ = { username: "{{ user.username }}" };
+</script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="/static/sidebar-react.js"></script>
+<script src="/static/sidebar-nav.js"></script>
+{% raw %}
+<script type="text/babel">
+const { useEffect, useState } = React;
+const Sidebar = (props) => <window.AppSidebar {...props} activePage="role_management" />;
+
+function App() {
+  const [projects, setProjects] = useState([]);
+  const [currentProjectId, setCurrentProjectId] = useState('');
+  const [roles, setRoles] = useState([]);
+  const [menus, setMenus] = useState([]);
+  const [error, setError] = useState('');
+  const [newCode, setNewCode] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newMultiplier, setNewMultiplier] = useState('1');
+  const [newMenuKeys, setNewMenuKeys] = useState([]);
+
+  const loadData = async () => {
+    setError('');
+    try {
+      const [projectResp, rolesResp, permsResp] = await Promise.all([
+        fetch('/api/projects'),
+        fetch('/api/admin/roles'),
+        fetch('/api/admin/role-menu-permissions'),
+      ]);
+      const [projectData, rolesData, permsData] = await Promise.all([projectResp.json(), rolesResp.json(), permsResp.json()]);
+      if (projectData.success) {
+        setProjects(projectData.projects || []);
+        setCurrentProjectId(String(projectData.current_project_id || ''));
+      }
+      if (!rolesData.success) throw new Error(rolesData.error || '加载角色失败');
+      if (!permsData.success) throw new Error(permsData.error || '加载菜单失败');
+      setRoles(rolesData.roles || []);
+      setMenus((permsData.data && permsData.data.menus) || []);
+    } catch (e) {
+      setError(e.message || '加载失败');
+    }
+  };
+
+  useEffect(() => { loadData(); }, []);
+  useEffect(() => { document.body.classList.add('react-theme', 'sidebar-compact'); }, []);
+
+  const onProjectChange = async (pid) => {
+    const r = await fetch('/api/projects/switch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: pid })
+    });
+    const d = await r.json();
+    if (d.success) window.location.reload();
+  };
+
+  const toggleNewMenu = (menuKey) => {
+    setNewMenuKeys(prev => prev.includes(menuKey) ? prev.filter(x => x !== menuKey) : [...prev, menuKey]);
+  };
+
+  const createRole = async () => {
+    const code = (newCode || '').trim();
+    const name = (newName || '').trim();
+    const multiplier = Number(newMultiplier);
+    if (!code || !name || !Number.isFinite(multiplier) || multiplier <= 0) {
+      setError('请填写有效的角色编码、名称和倍率');
+      return;
+    }
+    const normalizedMultiplier = Math.round(multiplier * 10) / 10;
+    const resp = await fetch('/api/admin/roles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, name, pricing_multiplier: normalizedMultiplier, menu_keys: newMenuKeys }),
+    });
+    const data = await resp.json();
+    if (!data.success) { setError(data.error || '创建失败'); return; }
+    setNewCode(''); setNewName(''); setNewMultiplier('1'); setNewMenuKeys([]);
+    loadData();
+  };
+
+  const updateRole = async (role) => {
+    const name = prompt('角色名称', role.name || role.code);
+    if (name == null) return;
+    const multiplierRaw = prompt('角色组收费倍率（例如 1.0 / 1.5）', String(role.pricing_multiplier || 1));
+    if (multiplierRaw == null) return;
+    const multiplier = Number(multiplierRaw);
+    if (!Number.isFinite(multiplier) || multiplier <= 0) {
+      setError('角色倍率格式错误');
+      return;
+    }
+    const normalizedMultiplier = Math.round(multiplier * 10) / 10;
+    const resp = await fetch(`/api/admin/roles/${encodeURIComponent(role.code)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim(), pricing_multiplier: normalizedMultiplier, menu_keys: role.menu_keys || [] }),
+    });
+    const data = await resp.json();
+    if (!data.success) { setError(data.error || '更新失败'); return; }
+    loadData();
+  };
+
+  const toggleRoleMenu = async (role, menuKey) => {
+    const current = new Set(role.menu_keys || []);
+    if (current.has(menuKey)) current.delete(menuKey); else current.add(menuKey);
+    const resp = await fetch(`/api/admin/roles/${encodeURIComponent(role.code)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ menu_keys: Array.from(current) }),
+    });
+    const data = await resp.json();
+    if (!data.success) { setError(data.error || '菜单更新失败'); return; }
+    loadData();
+  };
+
+  const deleteRole = async (role) => {
+    if (role.built_in) { setError('内置角色不可删除'); return; }
+    if (!confirm(`确定删除角色 ${role.code} 吗？`)) return;
+    const resp = await fetch(`/api/admin/roles/${encodeURIComponent(role.code)}`, { method: 'DELETE' });
+    const data = await resp.json();
+    if (!data.success) { setError(data.error || '删除失败'); return; }
+    loadData();
+  };
+
+  return (
+    <div className="app-shell">
+      <Sidebar username={window.__APP_CONTEXT__?.username || 'system_admin'} projects={projects} currentProjectId={currentProjectId} onProjectChange={onProjectChange} />
+      <div className="main-content">
+        <div className="page-wrap">
+          <h1 className="page-title">角色管理</h1>
+          <div className="page-subtitle">创建角色、分配菜单权限与设置角色组收费倍率</div>
+          {error && <div className="small-hint" style={{ color: '#ff9aa2', marginBottom: 10 }}>{error}</div>}
+
+          <div className="panel">
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>创建角色</div>
+            <div className="admin-actions">
+              <input className="admin-input" value={newCode} onChange={(e)=>setNewCode(e.target.value)} placeholder="角色编码（如 partner_user）" />
+              <input className="admin-input" value={newName} onChange={(e)=>setNewName(e.target.value)} placeholder="角色名称" />
+              <input className="admin-input" type="number" step="0.1" min="0.1" value={newMultiplier} onChange={(e)=>setNewMultiplier(e.target.value)} placeholder="角色倍率（如 1.5）" />
+              <button className="btn-convert" onClick={createRole}>创建角色</button>
+            </div>
+            <div className="admin-actions" style={{marginTop: 10}}>
+              {menus.map(m => (
+                <label key={m.key} className="small-hint" style={{display:'inline-flex',alignItems:'center',gap:6}}>
+                  <input type="checkbox" checked={newMenuKeys.includes(m.key)} onChange={()=>toggleNewMenu(m.key)} />
+                  {m.label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel">
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>角色列表与菜单分配</div>
+            <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>角色编码</th>
+                  <th>角色名称</th>
+                  <th>组倍率</th>
+                  <th>内置</th>
+                  <th>菜单权限</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {roles.length === 0 ? (
+                  <tr><td colSpan="6" className="small-hint">暂无角色</td></tr>
+                ) : roles.map(role => (
+                  <tr key={role.code}>
+                    <td>{role.code}</td>
+                    <td>{role.name}</td>
+                    <td>{Number(role.pricing_multiplier || 1).toFixed(1)}</td>
+                    <td>{role.built_in ? '是' : '否'}</td>
+                    <td>
+                      <div className="admin-actions">
+                        {menus.map(m => (
+                          <label key={m.key} className="small-hint" style={{display:'inline-flex',alignItems:'center',gap:6}}>
+                            <input
+                              type="checkbox"
+                              checked={(role.menu_keys || []).includes(m.key)}
+                              onChange={()=>toggleRoleMenu(role, m.key)}
+                            />
+                            {m.label}
+                          </label>
+                        ))}
+                      </div>
+                    </td>
+                    <td>
+                      <button className="btn-export" onClick={()=>updateRole(role)}>编辑</button>
+                      <button className="btn-export" style={{marginLeft: 6, color:'#ff9aa2', borderColor:'rgba(255,120,120,0.5)'}} onClick={()=>deleteRole(role)}>删除</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('reactApp')).render(<App />);
+</script>
+{% endraw %}
+</body>
+</html>

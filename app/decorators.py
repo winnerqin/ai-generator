@@ -29,6 +29,16 @@ def _ensure_current_project() -> None:
         session["current_project_name"] = first_project.get("name")
 
 
+def _ensure_role_code() -> None:
+    if "user_id" not in session:
+        return
+    import database
+
+    user = database.get_user_by_id(session.get("user_id"))
+    if user:
+        session["role_code"] = user.get("role_code")
+
+
 def login_required(f):
     """
     登录验证装饰器
@@ -50,6 +60,8 @@ def login_required(f):
             else:
                 return redirect(url_for("auth.login"))
         _ensure_current_project()
+        _ensure_role_code()
+
         return f(*args, **kwargs)
 
     return decorated_function
@@ -59,7 +71,7 @@ def admin_required(f):
     """
     管理员权限验证装饰器
 
-    要求用户已登录且是系统管理员（username == 'system_admin'）
+    要求用户已登录且是系统管理员
     """
 
     @wraps(f)
@@ -67,7 +79,9 @@ def admin_required(f):
         if "user_id" not in session:
             return ApiResponse.unauthorized("请先登录")
 
-        if session.get("username") != "system_admin":
+        _ensure_role_code()
+        role_code = session.get("role_code")
+        if role_code != "system_admin" and session.get("username") != "system_admin":
             return ApiResponse.forbidden("需要管理员权限")
 
         return f(*args, **kwargs)
