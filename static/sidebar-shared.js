@@ -1,4 +1,30 @@
 (function () {
+    function hideAllMenuItems() {
+        document.querySelectorAll('.sidebar-nav-item[data-menu-key]').forEach((item) => {
+            item.style.display = 'none';
+        });
+    }
+
+    function applyMenuVisibility(menuKeys) {
+        const allowed = new Set(menuKeys || []);
+        document.querySelectorAll('.sidebar-nav-item[data-menu-key]').forEach((item) => {
+            const key = item.getAttribute('data-menu-key');
+            item.style.display = allowed.has(key) ? '' : 'none';
+        });
+    }
+
+    async function initMenuVisibility() {
+        hideAllMenuItems();
+        try {
+            const resp = await fetch('/api/me/menu-permissions');
+            const data = await resp.json();
+            const menuKeys = data && data.success && data.data ? data.data.menu_keys : [];
+            applyMenuVisibility(menuKeys);
+        } catch (_error) {
+            applyMenuVisibility(['index']);
+        }
+    }
+
     async function initSharedSidebarProjectSwitcher() {
         const select = document.getElementById('sidebarProjectSelect');
         if (!select) return;
@@ -43,10 +69,15 @@
     }
 
     window.initSharedSidebarProjectSwitcher = initSharedSidebarProjectSwitcher;
+    window.initSidebarRoleVisibility = initMenuVisibility;
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initSharedSidebarProjectSwitcher);
+        document.addEventListener('DOMContentLoaded', function () {
+            initMenuVisibility();
+            initSharedSidebarProjectSwitcher();
+        });
     } else {
+        initMenuVisibility();
         initSharedSidebarProjectSwitcher();
     }
 })();

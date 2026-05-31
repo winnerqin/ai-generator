@@ -4,7 +4,9 @@
 
 import hashlib
 import json
+import math
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -12,16 +14,302 @@ from db_adapter import IntegrityError, connect, initialize_mysql_schema
 
 load_dotenv()
 
+ROLE_SYSTEM_ADMIN = "system_admin"
+ROLE_INTERNAL_USER = "internal_user"
+ROLE_EXTERNAL_USER = "external_user"
+MODEL_CURRENCY_CNY = "CNY"
+MODEL_CURRENCY_USD = "USD"
+USD_TO_CNY_RATE = 7
+REFERENCE_VIDEO_MODE_ANY = "any"
+REFERENCE_VIDEO_MODE_WITH = "with_video_ref"
+REFERENCE_VIDEO_MODE_WITHOUT = "without_video_ref"
+
+STATUS_ACTIVE = "active"
+STATUS_DISABLED = "disabled"
+
+MENU_DEFINITIONS = [
+    {"key": "index", "label": "单图生成"},
+    {"key": "batch", "label": "批量生成"},
+    {"key": "records", "label": "生图任务"},
+    {"key": "video_generate", "label": "视频生成"},
+    {"key": "video_tasks", "label": "视频任务"},
+    {"key": "omni_video", "label": "全能视频"},
+    {"key": "omni_video_tasks", "label": "全能任务"},
+    {"key": "enhance_tasks", "label": "增强任务"},
+    {"key": "script_generate", "label": "剧本生成"},
+    {"key": "storyboard_studio", "label": "分镜制作"},
+    {"key": "txt2csv", "label": "转换工具"},
+    {"key": "content_management", "label": "内容管理"},
+    {"key": "user_center", "label": "用户中心"},
+    {"key": "admin", "label": "系统管理"},
+    {"key": "role_management", "label": "角色管理"},
+    {"key": "stats", "label": "系统统计"},
+]
+
+DEFAULT_ROLE_DEFINITIONS = [
+    {
+        "code": ROLE_SYSTEM_ADMIN,
+        "name": "系统管理员",
+        "menu_keys": [item["key"] for item in MENU_DEFINITIONS],
+        "pricing_multiplier": 1.0,
+        "built_in": True,
+    },
+    {
+        "code": ROLE_INTERNAL_USER,
+        "name": "内部用户",
+        "menu_keys": [
+            "index",
+            "batch",
+            "records",
+            "video_generate",
+            "video_tasks",
+            "omni_video",
+            "omni_video_tasks",
+            "enhance_tasks",
+            "script_generate",
+            "storyboard_studio",
+            "txt2csv",
+            "content_management",
+            "user_center",
+        ],
+        "pricing_multiplier": 1.0,
+        "built_in": True,
+    },
+    {
+        "code": ROLE_EXTERNAL_USER,
+        "name": "外部用户",
+        "menu_keys": [
+            "index",
+            "records",
+            "omni_video",
+            "omni_video_tasks",
+            "user_center",
+        ],
+        "pricing_multiplier": 1.0,
+        "built_in": True,
+    },
+]
+
 
 def ensure_media_library_tables():
     """Ensure MySQL media library tables exist."""
     initialize_mysql_schema()
 
 
+def _ensure_users_extended_columns():
+    """Backfill users table columns for older databases."""
+    conn = connect()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SHOW COLUMNS FROM users")
+        existing = {str(row["Field"]).lower() for row in cursor.fetchall()}
+
+        alters = []
+        if "role_code" not in existing:
+            alters.append(
+                "ALTER TABLE users ADD COLUMN role_code VARCHAR(32) NOT NULL DEFAULT 'external_user'"
+            )
+        if "status" not in existing:
+            alters.append(
+                "ALTER TABLE users ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'active'"
+            )
+        if "balance_cent" not in existing:
+            alters.append("ALTER TABLE users ADD COLUMN balance_cent BIGINT NOT NULL DEFAULT 0")
+        if "pricing_multiplier" not in existing:
+            alters.append(
+                "ALTER TABLE users ADD COLUMN pricing_multiplier DECIMAL(10,4) NOT NULL DEFAULT 1.0000"
+            )
+        if "updated_at" not in existing:
+            alters.append(
+                "ALTER TABLE users ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+            )
+
+        for sql in alters:
+            try:
+                cursor.execute(sql)
+            except Exception:
+                # Some deployed DB accounts may not have ALTER privilege.
+                # In that case we keep runtime compatibility fallbacks.
+                pass
+
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _ensure_model_pricing_columns():
+    conn = connect()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SHOW COLUMNS FROM model_pricing")
+        existing = {str(row["Field"]).lower() for row in cursor.fetchall()}
+        alters = []
+        if "currency_code" not in existing:
+            alters.append(
+                "ALTER TABLE model_pricing ADD COLUMN currency_code VARCHAR(8) NOT NULL DEFAULT 'CNY'"
+            )
+        if "resolution_code" not in existing:
+            alters.append(
+                "ALTER TABLE model_pricing ADD COLUMN resolution_code VARCHAR(16) NOT NULL DEFAULT ''"
+            )
+        if "reference_video_mode" not in existing:
+            alters.append(
+                "ALTER TABLE model_pricing ADD COLUMN reference_video_mode VARCHAR(32) NOT NULL DEFAULT 'any'"
+            )
+        for sql in alters:
+            try:
+                cursor.execute(sql)
+            except Exception:
+                pass
+        # Ensure column length is enough for value "without_video_ref".
+        try:
+            cursor.execute(
+                "ALTER TABLE model_pricing MODIFY COLUMN reference_video_mode VARCHAR(32) NOT NULL DEFAULT 'any'"
+            )
+        except Exception:
+            pass
+        # Drop legacy unique index on model_code so one model can have multiple pricing rules.
+        try:
+            cursor.execute("SHOW INDEX FROM model_pricing")
+            index_rows = cursor.fetchall()
+            unique_model_indexes = []
+            for row in index_rows:
+                if int(row["Non_unique"]) == 0 and str(row["Column_name"]).lower() == "model_code":
+                    key_name = str(row["Key_name"])
+                    if key_name != "PRIMARY":
+                        unique_model_indexes.append(key_name)
+            for key_name in sorted(set(unique_model_indexes)):
+                try:
+                    cursor.execute(f"ALTER TABLE model_pricing DROP INDEX `{key_name}`")
+                except Exception:
+                    pass
+            if not any(str(row["Key_name"]) == "uk_model_pricing_rule" for row in index_rows):
+                try:
+                    cursor.execute(
+                        "ALTER TABLE model_pricing ADD UNIQUE KEY uk_model_pricing_rule (model_code, currency_code, resolution_code, reference_video_mode)"
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _get_user_table_columns():
+    conn = connect()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SHOW COLUMNS FROM users")
+        return {str(row["Field"]).lower() for row in cursor.fetchall()}
+    finally:
+        conn.close()
+
+
 def init_database():
     """初始化 MySQL 数据库"""
     initialize_mysql_schema()
+    _ensure_users_extended_columns()
+    _ensure_model_pricing_columns()
     print("数据库初始化完成: MySQL")
+
+
+def _role_menu_config_path() -> Path:
+    return Path(__file__).parent / "config" / "role_definitions.json"
+
+
+def _normalize_role_definitions(raw):
+    all_menu_keys = {item["key"] for item in MENU_DEFINITIONS}
+    normalized = []
+    if not isinstance(raw, list):
+        raw = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or "").strip()
+        if not code:
+            continue
+        menu_keys = item.get("menu_keys")
+        if not isinstance(menu_keys, list):
+            menu_keys = []
+        menu_keys = [str(k) for k in menu_keys if str(k) in all_menu_keys]
+        try:
+            multiplier = float(item.get("pricing_multiplier", 1.0))
+        except (TypeError, ValueError):
+            multiplier = 1.0
+        normalized.append(
+            {
+                "code": code,
+                "name": str(item.get("name") or code),
+                "menu_keys": menu_keys,
+                "pricing_multiplier": max(multiplier, 0.0001),
+                "built_in": bool(item.get("built_in", False)),
+            }
+        )
+    return normalized
+
+
+def get_role_definitions():
+    defaults = [dict(x) for x in DEFAULT_ROLE_DEFINITIONS]
+    path = _role_menu_config_path()
+    if not path.exists():
+        return defaults
+    try:
+        loaded = _normalize_role_definitions(json.loads(path.read_text(encoding="utf-8")))
+        by_code = {r["code"]: r for r in loaded}
+        # Ensure built-in roles always exist
+        for d in defaults:
+            if d["code"] not in by_code:
+                by_code[d["code"]] = d
+            else:
+                by_code[d["code"]]["built_in"] = True
+                if not by_code[d["code"]].get("name"):
+                    by_code[d["code"]]["name"] = d["name"]
+        return list(by_code.values())
+    except Exception:
+        return defaults
+
+
+def save_role_definitions(role_definitions):
+    normalized = _normalize_role_definitions(role_definitions)
+    # always keep built-in roles
+    by_code = {r["code"]: r for r in normalized}
+    for d in DEFAULT_ROLE_DEFINITIONS:
+        if d["code"] not in by_code:
+            by_code[d["code"]] = dict(d)
+        else:
+            by_code[d["code"]]["built_in"] = True
+    values = list(by_code.values())
+    path = _role_menu_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(values, ensure_ascii=False, indent=2), encoding="utf-8")
+    return values
+
+
+def get_role_definition_map():
+    return {r["code"]: r for r in get_role_definitions()}
+
+
+def get_user_menu_permissions(role_code):
+    role = role_code or ROLE_EXTERNAL_USER
+    role_map = get_role_definition_map()
+    fallback = role_map.get(ROLE_EXTERNAL_USER, {"menu_keys": []})
+    return list(role_map.get(role, fallback).get("menu_keys", []))
+
+
+def get_role_pricing_multiplier(role_code):
+    role = role_code or ROLE_EXTERNAL_USER
+    role_map = get_role_definition_map()
+    fallback = role_map.get(ROLE_EXTERNAL_USER, {"pricing_multiplier": 1.0})
+    try:
+        return float(role_map.get(role, fallback).get("pricing_multiplier", 1.0))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def get_available_role_codes():
+    return [r["code"] for r in get_role_definitions()]
 
 
 def save_generation_record(data):
@@ -35,14 +323,15 @@ def save_generation_record(data):
             - width, height, num_images, seed, steps
             - sample_images (list), image_path, filename
             - batch_id (optional)
+            - created_at (optional) - 用于同批次请求归并标识
             - token_usage (optional) - 图片生成消耗的token
     """
     conn = connect()
     cursor = conn.cursor()
 
     sample_images_json = json.dumps(data.get("sample_images", []))
-    # 使用本地时间
-    local_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 使用调用方传入的 created_at 作为同批次标识；未传时使用当前时间
+    local_time = data.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # 防止重复保存相同的 image_path（避免前端/网络重试导致重复记录）
     existing = None
@@ -1065,12 +1354,22 @@ def get_omni_video_tasks(
     end_date=None,
     limit=20,
     offset=0,
+    include_heavy_fields=True,
 ):
     conn = connect()
     cursor = conn.cursor()
     _ensure_omni_video_task_schema(cursor)
 
-    query = "SELECT * FROM omni_video_tasks WHERE user_id = ?"
+    if include_heavy_fields:
+        select_fields = "*"
+    else:
+        select_fields = (
+            "id, user_id, task_id, project_id, created_at, updated_at, status, model, mode, prompt, "
+            "fail_reason, video_url, cover_url, first_frame_url, last_frame_url, "
+            "duration, frame_count, resolution, aspect_ratio, filename, seed, token_usage"
+        )
+
+    query = f"SELECT {select_fields} FROM omni_video_tasks WHERE user_id = ?"
     params = [user_id]
     if project_id is not None:
         query += " AND project_id = ?"
@@ -1127,6 +1426,28 @@ def count_omni_video_tasks(
     total = cursor.fetchone()[0]
     conn.close()
     return total
+
+
+def get_omni_video_tasks_by_statuses(statuses, limit=200):
+    conn = connect()
+    cursor = conn.cursor()
+    _ensure_omni_video_task_schema(cursor)
+
+    cleaned = [str(s).strip() for s in (statuses or []) if str(s).strip()]
+    if not cleaned:
+        conn.close()
+        return []
+
+    placeholders = ", ".join(["?"] * len(cleaned))
+    query = (
+        f"SELECT * FROM omni_video_tasks WHERE status IN ({placeholders}) "
+        "ORDER BY created_at ASC LIMIT ?"
+    )
+    params = list(cleaned) + [int(limit or 200)]
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return [_decode_omni_video_task(row) for row in rows]
 
 
 def delete_omni_video_task(task_id, user_id=None, project_id=None):
@@ -1580,19 +1901,36 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 
-def create_user(username, password):
+def create_user(
+    username,
+    password,
+    role_code=ROLE_EXTERNAL_USER,
+    status=STATUS_ACTIVE,
+    pricing_multiplier=None,
+):
     """创建新用户"""
     conn = connect()
     cursor = conn.cursor()
 
     try:
         password_hash = hash_password(password)
+        if pricing_multiplier is None:
+            pricing_multiplier = get_role_pricing_multiplier(role_code or ROLE_EXTERNAL_USER)
         cursor.execute(
             """
-            INSERT INTO users (username, password_hash, created_at)
-            VALUES (?, ?, ?)
+            INSERT INTO users (username, password_hash, role_code, status, balance_cent, pricing_multiplier, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-            (username, password_hash, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            (
+                username,
+                password_hash,
+                role_code or ROLE_EXTERNAL_USER,
+                status or STATUS_ACTIVE,
+                0,
+                pricing_multiplier if pricing_multiplier is not None else 1.0,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
         )
 
         user_id = cursor.lastrowid
@@ -1610,13 +1948,23 @@ def verify_user(username, password):
     cursor = conn.cursor()
 
     password_hash = hash_password(password)
-    cursor.execute(
-        """
-        SELECT * FROM users
-        WHERE username = ? AND password_hash = ?
-    """,
-        (username, password_hash),
-    )
+    columns = _get_user_table_columns()
+    if "status" in columns:
+        cursor.execute(
+            """
+            SELECT * FROM users
+            WHERE username = ? AND password_hash = ? AND status = ?
+        """,
+            (username, password_hash, STATUS_ACTIVE),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT * FROM users
+            WHERE username = ? AND password_hash = ?
+        """,
+            (username, password_hash),
+        )
 
     row = cursor.fetchone()
 
@@ -1647,6 +1995,10 @@ def get_user_by_id(user_id):
 
     if row:
         user = dict(row)
+        user.setdefault("role_code", ROLE_EXTERNAL_USER)
+        user.setdefault("status", STATUS_ACTIVE)
+        user.setdefault("balance_cent", 0)
+        user.setdefault("pricing_multiplier", 1.0)
         conn.close()
         return user
 
@@ -1659,10 +2011,25 @@ def get_all_users():
     conn = connect()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT id, username, created_at, last_login FROM users ORDER BY id")
+    columns = _get_user_table_columns()
+    if {"role_code", "status", "balance_cent", "pricing_multiplier"}.issubset(columns):
+        cursor.execute("""
+            SELECT id, username, role_code, status, balance_cent, pricing_multiplier, created_at, last_login
+            FROM users
+            ORDER BY id
+        """)
+    else:
+        cursor.execute("SELECT id, username, created_at, last_login FROM users ORDER BY id")
     rows = cursor.fetchall()
 
-    users = [dict(row) for row in rows]
+    users = []
+    for row in rows:
+        user = dict(row)
+        user.setdefault("role_code", ROLE_EXTERNAL_USER)
+        user.setdefault("status", STATUS_ACTIVE)
+        user.setdefault("balance_cent", 0)
+        user.setdefault("pricing_multiplier", 1.0)
+        users.append(user)
     conn.close()
     return users
 
@@ -1685,6 +2052,413 @@ def update_user_password(user_id, new_password):
     cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
     conn.commit()
     conn.close()
+
+
+def update_user_pricing_multiplier(user_id, pricing_multiplier):
+    conn = connect()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE users SET pricing_multiplier = ?, updated_at = ? WHERE id = ?",
+        (pricing_multiplier, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_id),
+    )
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return affected
+
+
+def update_user_role(user_id, role_code):
+    conn = connect()
+    cursor = conn.cursor()
+    columns = _get_user_table_columns()
+    if "role_code" in columns:
+        role_multiplier = get_role_pricing_multiplier(role_code)
+        if "updated_at" in columns:
+            cursor.execute(
+                "UPDATE users SET role_code = ?, pricing_multiplier = ?, updated_at = ? WHERE id = ?",
+                (role_code, role_multiplier, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_id),
+            )
+        else:
+            cursor.execute(
+                "UPDATE users SET role_code = ?, pricing_multiplier = ? WHERE id = ?",
+                (role_code, role_multiplier, user_id),
+            )
+    else:
+        conn.close()
+        return 0
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return affected
+
+
+def upsert_model_pricing(
+    model_code,
+    model_name,
+    currency_code,
+    price_per_million_token_cent,
+    resolution_code="",
+    reference_video_mode=REFERENCE_VIDEO_MODE_ANY,
+    enabled=True,
+):
+    conn = connect()
+    cursor = conn.cursor()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute(
+        """
+        SELECT id FROM model_pricing
+        WHERE model_code = ? AND currency_code = ? AND resolution_code = ? AND reference_video_mode = ?
+    """,
+        (model_code, currency_code, resolution_code, reference_video_mode),
+    )
+    row = cursor.fetchone()
+    if row:
+        cursor.execute(
+            """
+            UPDATE model_pricing
+            SET model_name = ?, price_per_million_token_cent = ?, enabled = ?, updated_at = ?
+            WHERE model_code = ? AND currency_code = ? AND resolution_code = ? AND reference_video_mode = ?
+        """,
+            (
+                model_name,
+                price_per_million_token_cent,
+                1 if enabled else 0,
+                now,
+                model_code,
+                currency_code,
+                resolution_code,
+                reference_video_mode,
+            ),
+        )
+        pricing_id = row[0]
+    else:
+        cursor.execute(
+            """
+            INSERT INTO model_pricing (
+                model_code, model_name, currency_code, resolution_code, reference_video_mode,
+                price_per_million_token_cent, enabled, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                model_code,
+                model_name,
+                currency_code,
+                resolution_code,
+                reference_video_mode,
+                price_per_million_token_cent,
+                1 if enabled else 0,
+                now,
+                now,
+            ),
+        )
+        pricing_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return pricing_id
+
+
+def update_model_pricing_by_id(
+    pricing_id,
+    model_name,
+    currency_code,
+    price_per_million_token_cent,
+    resolution_code="",
+    reference_video_mode=REFERENCE_VIDEO_MODE_ANY,
+    enabled=True,
+):
+    conn = connect()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE model_pricing
+        SET model_name = ?, currency_code = ?, resolution_code = ?, reference_video_mode = ?, price_per_million_token_cent = ?, enabled = ?, updated_at = ?
+        WHERE id = ?
+    """,
+        (
+            model_name,
+            currency_code,
+            resolution_code,
+            reference_video_mode,
+            price_per_million_token_cent,
+            1 if enabled else 0,
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            pricing_id,
+        ),
+    )
+    affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return affected
+
+
+def get_model_pricing(model_code):
+    conn = connect()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM model_pricing WHERE model_code = ?", (model_code,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    result = dict(row)
+    result.setdefault("currency_code", MODEL_CURRENCY_CNY)
+    result.setdefault("resolution_code", "")
+    result.setdefault("reference_video_mode", REFERENCE_VIDEO_MODE_ANY)
+    return result
+
+
+def resolve_model_pricing(model_code, resolution=None, has_video_reference=None):
+    conn = connect()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM model_pricing WHERE model_code = ? AND enabled = 1",
+        (model_code,),
+    )
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    if not rows:
+        return None
+
+    normalized_resolution = str(resolution or "").strip().lower()
+    mode = REFERENCE_VIDEO_MODE_ANY
+    if has_video_reference is True:
+        mode = REFERENCE_VIDEO_MODE_WITH
+    elif has_video_reference is False:
+        mode = REFERENCE_VIDEO_MODE_WITHOUT
+
+    def _score(item):
+        resolution_code = str(item.get("resolution_code") or "").strip().lower()
+        ref_mode = str(item.get("reference_video_mode") or REFERENCE_VIDEO_MODE_ANY).strip().lower()
+        score = 0
+        if resolution_code:
+            if normalized_resolution and resolution_code == normalized_resolution:
+                score += 100
+            else:
+                score -= 100
+        if ref_mode != REFERENCE_VIDEO_MODE_ANY:
+            if ref_mode == mode:
+                score += 10
+            else:
+                score -= 10
+        return score
+
+    best = max(rows, key=_score)
+    if _score(best) < 0:
+        return None
+    best.setdefault("currency_code", MODEL_CURRENCY_CNY)
+    best.setdefault("resolution_code", "")
+    best.setdefault("reference_video_mode", REFERENCE_VIDEO_MODE_ANY)
+    return best
+
+
+def get_model_pricing_list(enabled=None):
+    conn = connect()
+    cursor = conn.cursor()
+    query = "SELECT * FROM model_pricing"
+    params = []
+    if enabled is not None:
+        query += " WHERE enabled = ?"
+        params.append(1 if enabled else 0)
+    query += " ORDER BY model_code"
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    items = [dict(r) for r in rows]
+    for item in items:
+        item.setdefault("currency_code", MODEL_CURRENCY_CNY)
+        item.setdefault("resolution_code", "")
+        item.setdefault("reference_video_mode", REFERENCE_VIDEO_MODE_ANY)
+    return items
+
+
+def get_min_enabled_model_price_per_million_cent():
+    conn = connect()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT currency_code, price_per_million_token_cent FROM model_pricing WHERE enabled = 1"
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    if not rows:
+        return None
+    min_value = None
+    for row in rows:
+        currency_code = str(row.get("currency_code") or MODEL_CURRENCY_CNY).upper()
+        price = int(row.get("price_per_million_token_cent") or 0)
+        if currency_code == MODEL_CURRENCY_USD:
+            price *= USD_TO_CNY_RATE
+        if min_value is None or price < min_value:
+            min_value = price
+    return min_value
+
+
+def get_user_consumption_records(user_id, limit=100, offset=0, biz_type=None):
+    conn = connect()
+    cursor = conn.cursor()
+    if biz_type:
+        cursor.execute(
+            """
+            SELECT *
+            FROM account_ledger
+            WHERE user_id = ? AND entry_type = 'debit' AND biz_type = ?
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """,
+            (user_id, biz_type, limit, offset),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT *
+            FROM account_ledger
+            WHERE user_id = ? AND entry_type = 'debit'
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """,
+            (user_id, limit, offset),
+        )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_account_ledger(user_id=None, limit=100, offset=0):
+    conn = connect()
+    cursor = conn.cursor()
+    query = "SELECT * FROM account_ledger WHERE 1=1"
+    params = []
+    if user_id is not None:
+        query += " AND user_id = ?"
+        params.append(user_id)
+    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def count_account_ledger(user_id=None, entry_type=None, biz_type=None):
+    conn = connect()
+    cursor = conn.cursor()
+    query = "SELECT COUNT(*) FROM account_ledger WHERE 1=1"
+    params = []
+    if user_id is not None:
+        query += " AND user_id = ?"
+        params.append(user_id)
+    if entry_type:
+        query += " AND entry_type = ?"
+        params.append(entry_type)
+    if biz_type:
+        query += " AND biz_type = ?"
+        params.append(biz_type)
+    cursor.execute(query, params)
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total
+
+
+def has_ledger_entry(user_id, entry_type, biz_type, biz_id):
+    conn = connect()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT 1 FROM account_ledger
+        WHERE user_id = ? AND entry_type = ? AND biz_type = ? AND biz_id = ?
+        LIMIT 1
+    """,
+        (user_id, entry_type, biz_type, biz_id),
+    )
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
+
+
+def get_ledger_debit_amount_cent(user_id, biz_type, biz_id):
+    conn = connect()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT amount_cent
+        FROM account_ledger
+        WHERE user_id = ? AND entry_type = 'debit' AND biz_type = ? AND biz_id = ?
+        LIMIT 1
+    """,
+        (user_id, biz_type, biz_id),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return int(row[0]) if row and row[0] is not None else None
+
+
+def create_account_ledger_entry(
+    user_id,
+    entry_type,
+    amount_cent,
+    biz_type,
+    biz_id=None,
+    model_code=None,
+    tokens_raw=None,
+    tokens_billed=None,
+    unit_price_cent_per_ktoken=None,
+    multiplier=None,
+    snapshot_json=None,
+    operator_user_id=None,
+):
+    conn = connect()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT balance_cent FROM users WHERE id = ? FOR UPDATE", (user_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError("用户不存在")
+        before = int(row[0] or 0)
+        delta = int(amount_cent)
+        after = before + delta if entry_type == "credit" else before - abs(delta)
+        if after < 0:
+            raise ValueError("余额不足")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            "UPDATE users SET balance_cent = ?, updated_at = ? WHERE id = ?", (after, now, user_id)
+        )
+        cursor.execute(
+            """
+            INSERT INTO account_ledger (
+                user_id, entry_type, amount_cent, balance_before_cent, balance_after_cent,
+                biz_type, biz_id, model_code, tokens_raw, tokens_billed, unit_price_cent_per_ktoken,
+                multiplier, snapshot_json, operator_user_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                user_id,
+                entry_type,
+                abs(delta),
+                before,
+                after,
+                biz_type,
+                biz_id,
+                model_code,
+                tokens_raw,
+                tokens_billed,
+                unit_price_cent_per_ktoken,
+                multiplier,
+                json.dumps(snapshot_json or {}),
+                operator_user_id,
+                now,
+            ),
+        )
+        conn.commit()
+        return {"before": before, "after": after, "ledger_id": cursor.lastrowid}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def compute_tokens_billed(tokens_raw):
+    value = max(int(tokens_raw or 0), 1000)
+    return int(math.ceil(value / 1000.0) * 1000)
 
 
 def create_project(name, owner_id=None):

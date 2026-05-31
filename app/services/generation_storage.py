@@ -6,9 +6,9 @@ import os
 import random
 from typing import Any, Optional
 
-import database
 from werkzeug.utils import secure_filename
 
+import database
 from app.services.oss_service import oss_service
 
 
@@ -82,7 +82,9 @@ def save_uploaded_reference_images(
     return image_urls
 
 
-def _build_filename(output_folder: str, output_filename: str, index: int, group_index: Optional[int]) -> str:
+def _build_filename(
+    output_folder: str, output_filename: str, index: int, group_index: Optional[int]
+) -> str:
     if output_filename:
         base_name = output_filename[:-4] if output_filename.endswith(".jpg") else output_filename
         suffix = f"_g{index + 1}_{group_index + 1}" if group_index is not None else f"_{index + 1}"
@@ -106,9 +108,11 @@ def save_generated_image(
     image_style: str,
     image_urls: list[str],
     seed: int,
+    created_at: str,
     output_filename: str,
     index: int,
     group_index: Optional[int],
+    token_usage: Optional[int],
     content: bytes,
 ) -> dict[str, Any]:
     output_folder = get_user_output_folder(user_id, project_id)
@@ -140,11 +144,13 @@ def save_generated_image(
             "height": height,
             "num_images": 1,
             "seed": seed,
+            "created_at": created_at,
             "image_style": image_style,
             "sample_images": sample_images,
             "image_path": final_url,
             "filename": filename,
             "status": "success",
+            "token_usage": token_usage,
         }
     )
 

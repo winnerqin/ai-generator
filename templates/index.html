@@ -977,13 +977,13 @@
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
             margin: 0;
             padding: 0;
         }
-        
+
         .container {
             max-width: 1400px;
             margin: 0 auto;
@@ -992,32 +992,32 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
             overflow: hidden;
         }
-        
+
         .content {
             display: flex;
             flex-direction: column;
             gap: 20px;
             padding: 20px;
         }
-        
+
         .form-section {
             display: flex;
             flex-direction: column;
             gap: 15px;
         }
-        
+
         .form-group {
             display: flex;
             flex-direction: column;
             gap: 8px;
         }
-        
+
         .form-group label {
             font-weight: 600;
             color: #333;
             font-size: 0.95em;
         }
-        
+
         .form-group input[type="text"],
         .form-group textarea,
         .form-group select,
@@ -1028,14 +1028,14 @@
             font-size: 1em;
             transition: border-color 0.3s;
         }
-        
+
         .form-group input:focus,
         .form-group textarea:focus,
         .form-group select:focus {
             outline: none;
             border-color: #28a745; /* 绿色 */
         }
-        
+
         .form-group textarea {
             min-height: 100px;
             resize: vertical;
@@ -1057,12 +1057,12 @@
             align-items: center;
             height: 100%;
         }
-        
+
         /* 提示词输入框拉宽 */
         #prompt {
             width: 100%;
         }
-        
+
         .upload-area {
             border: 2px dashed #28a745; /* 绿色 */
             border-radius: 8px;
@@ -1072,33 +1072,33 @@
             transition: background-color 0.3s;
             background-color: #f0f9f4;
         }
-        
+
         .upload-area:hover {
             background-color: #e8f5ed;
         }
-        
+
         .upload-area input[type="file"] {
             display: none;
         }
-        
+
         .upload-icon {
             font-size: 2em;
             color: #28a745; /* 绿色 */
             margin-bottom: 5px;
         }
-        
+
         .upload-area p {
             margin: 5px 0;
             font-size: 0.9em;
         }
-        
+
         .preview-images {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
             gap: 10px;
             margin-top: 10px;
         }
-        
+
         .preview-image {
             position: relative;
             width: 100%;
@@ -1107,7 +1107,7 @@
             overflow: hidden;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
-        
+
         .preview-image img {
             position: absolute;
             top: 0;
@@ -1117,7 +1117,7 @@
             object-fit: contain;
             background: rgba(0,0,0,0.12);
         }
-        
+
         .preview-image .remove-btn {
             position: absolute;
             top: 5px;
@@ -1206,15 +1206,15 @@
             min-height: 120px;
             padding: 14px;
         }
-        
+
         .form-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 15px;
         }
-        
+
         .generate-btn {
-            background: #28a745; /* 绿色 */
+            background: #566fff;
             color: white;
             border: none;
             padding: 15px 30px;
@@ -1225,39 +1225,39 @@
             transition: transform 0.2s, box-shadow 0.2s;
             margin-top: 10px;
         }
-        
+
         .generate-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 10px 25px rgba(40, 167, 69, 0.4);
-            background: #218838;
+            box-shadow: 0 10px 25px rgba(86, 111, 255, 0.35);
+            background: #4b61e8;
         }
-        
+
         .generate-btn:active {
             transform: translateY(0);
         }
-        
+
         .generate-btn:disabled {
             opacity: 0.6;
             cursor: not-allowed;
             transform: none;
         }
-        
+
         .result-section {
             display: flex;
             flex-direction: column;
             gap: 20px;
         }
-        
+
         .loading {
             text-align: center;
             padding: 40px;
             display: none;
         }
-        
+
         .loading.active {
             display: block;
         }
-        
+
         .spinner {
             border: 4px solid #f3f3f3;
             border-top: 4px solid #28a745; /* 绿色 */
@@ -1267,19 +1267,19 @@
             animation: spin 1s linear infinite;
             margin: 0 auto 20px;
         }
-        
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        
+
         .result-images {
             display: grid;
             grid-template-columns: repeat(auto-fill, 200px);
             gap: 15px;
             margin-top: 20px;
         }
-        
+
         .result-image {
             width: 200px;
             border-radius: 8px;
@@ -1289,17 +1289,17 @@
             position: relative;
             cursor: pointer;
         }
-        
+
         .result-image:hover {
             transform: scale(1.02);
             box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         }
-        
+
         .result-image.selected {
             border: 3px solid #28a745;
             box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.3);
         }
-        
+
         .result-image img {
             width: 100%;
             height: auto;
@@ -1307,11 +1307,11 @@
             cursor: pointer;
             transition: opacity 0.3s;
         }
-        
+
         .result-image img:hover {
             opacity: 0.9;
         }
-        
+
         /* 占位符样式 */
         .result-image.placeholder {
             background: #f0f0f0;
@@ -1320,12 +1320,12 @@
             justify-content: center;
             min-height: 200px;
         }
-        
+
         .image-placeholder {
             text-align: center;
             color: #666;
         }
-        
+
         .image-placeholder .spinner {
             border: 4px solid #f3f3f3;
             border-top: 4px solid #28a745;
@@ -1335,12 +1335,12 @@
             animation: spin 1s linear infinite;
             margin: 0 auto 10px;
         }
-        
+
         .image-placeholder p {
             margin: 0;
             font-size: 0.9em;
         }
-        
+
         /* 图片选择复选框 */
         .result-image-checkbox {
             position: absolute;
@@ -1358,18 +1358,18 @@
             z-index: 10;
             transition: all 0.3s;
         }
-        
+
         .result-image-checkbox.checked {
             background: #28a745;
             color: white;
         }
-        
+
         .result-image-checkbox.checked::after {
             content: '✓';
             font-size: 16px;
             font-weight: bold;
         }
-        
+
         /* 图片操作按钮区域 */
         .result-image-actions {
             position: absolute;
@@ -1382,8 +1382,8 @@
             gap: 5px;
             flex-wrap: wrap;
         }
-        
-        
+
+
         /* 图片放大模态框 */
         .image-modal {
             display: none;
@@ -1396,30 +1396,30 @@
             background-color: rgba(0, 0, 0, 0.9);
             animation: fadeIn 0.3s;
         }
-        
+
         .image-modal.active {
             display: flex;
             align-items: center;
             justify-content: center;
         }
-        
+
         .image-modal-content {
             max-width: 90%;
             max-height: 90%;
             object-fit: contain;
             animation: zoomIn 0.3s;
         }
-        
+
         @keyframes fadeIn {
             from { opacity: 0; }
             to { opacity: 1; }
         }
-        
+
         @keyframes zoomIn {
             from { transform: scale(0.8); opacity: 0; }
             to { transform: scale(1); opacity: 1; }
         }
-        
+
         .image-modal-close {
             position: absolute;
             top: 20px;
@@ -1430,11 +1430,11 @@
             cursor: pointer;
             transition: transform 0.3s;
         }
-        
+
         .image-modal-close:hover {
             transform: scale(1.2);
         }
-        
+
         .image-modal-actions {
             position: absolute;
             bottom: 30px;
@@ -1444,7 +1444,7 @@
             gap: 15px;
             z-index: 10001;
         }
-        
+
         .image-modal-nav {
             position: absolute;
             top: 50%;
@@ -1463,30 +1463,30 @@
             z-index: 10001;
             user-select: none;
         }
-        
+
         .image-modal-nav:hover {
             background: rgba(0, 0, 0, 0.8);
             transform: translateY(-50%) scale(1.1);
         }
-        
+
         .image-modal-nav.prev {
             left: 20px;
         }
-        
+
         .image-modal-nav.next {
             right: 20px;
         }
-        
+
         .image-modal-nav:disabled {
             opacity: 0.3;
             cursor: not-allowed;
         }
-        
+
         .image-modal-nav:disabled:hover {
             transform: translateY(-50%);
             background: rgba(0, 0, 0, 0.5);
         }
-        
+
         .image-modal-btn {
             padding: 12px 24px;
             background: #28a745; /* 绿色 */
@@ -1498,31 +1498,31 @@
             cursor: pointer;
             transition: all 0.3s;
         }
-        
+
         .image-modal-btn:hover {
             background: #5568d3;
             transform: translateY(-2px);
         }
-        
+
         .image-modal-btn.selected {
             background: #28a745;
         }
-        
+
         .image-modal-btn.selected:hover {
             background: #218838;
         }
-        
+
         .result-info {
             padding: 15px;
             background: #f8f9fa;
         }
-        
+
         .result-info p {
             margin: 5px 0;
             font-size: 0.9em;
             color: #666;
         }
-        
+
         .download-btn {
             background: #28a745; /* 绿色 */
             color: white;
@@ -1534,11 +1534,11 @@
             margin-top: 10px;
             width: 100%;
         }
-        
+
         .download-btn:hover {
             background: #5568d3;
         }
-        
+
         .error-message {
             background: #fee;
             color: #c33;
@@ -1547,15 +1547,15 @@
             margin-bottom: 20px;
             display: none;
         }
-        
+
         .error-message.active {
             display: block;
         }
-        
+
         .sample-images-section {
             margin-bottom: 20px;
         }
-        
+
         .sample-images-title {
             font-weight: 600;
             color: #333;
@@ -1565,7 +1565,7 @@
             align-items: center;
             gap: 8px;
         }
-        
+
         .sample-images-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
@@ -1578,7 +1578,7 @@
             border: 2px solid #e0e0e0;
             align-content: start;
         }
-        
+
         .sample-images-pagination {
             display: flex;
             justify-content: flex-end;
@@ -1587,14 +1587,14 @@
             margin-top: 8px;
             flex-wrap: wrap;
         }
-        
+
         .sample-images-page-status {
             min-width: 80px;
             text-align: center;
             color: #666;
             font-size: 0.9em;
         }
-        
+
         .sample-image-item {
             position: relative;
             cursor: pointer;
@@ -1603,17 +1603,17 @@
             border: 3px solid transparent;
             transition: all 0.3s;
         }
-        
+
         .sample-image-item:hover {
             border-color: #28a745; /* 绿色 */
             transform: scale(1.05);
         }
-        
+
         .sample-image-item.selected {
             border-color: #28a745; /* 绿色 */
             box-shadow: 0 0 0 2px #28a745; /* 绿色 */
         }
-        
+
         .sample-image-item img {
             width: 100%;
             height: 100px;
@@ -1622,7 +1622,7 @@
             cursor: pointer;
             background: rgba(0,0,0,0.12);
         }
-        
+
         .sample-image-count {
             position: absolute;
             top: 5px;
@@ -1639,11 +1639,11 @@
             font-weight: bold;
             opacity: 0;
         }
-        
+
         .sample-image-item.selected .sample-image-count {
             opacity: 1;
         }
-        
+
         .sample-image-zoom {
             position: absolute;
             bottom: 5px;
@@ -1662,39 +1662,39 @@
             transition: opacity 0.3s, background 0.3s;
             z-index: 10;
         }
-        
+
         .sample-image-item:hover .sample-image-zoom {
             opacity: 1;
         }
-        
+
         .sample-image-zoom:hover {
             background: rgba(102, 126, 234, 0.8);
         }
-        
+
         .sample-images-loading {
             text-align: center;
             padding: 20px;
             color: #666;
         }
-        
+
         .sample-images-hint {
             font-size: 0.85em;
             color: #666;
             margin-top: 8px;
         }
-        
+
         @media (max-width: 768px) {
             .content {
                 grid-template-columns: 1fr;
             }
-            
+
             .form-row {
                 grid-template-columns: 1fr;
             }
         }
-        
+
         .btn {
-            
+
             padding: 8px 16px;
             border: none;
             border-radius: 6px;
@@ -1705,32 +1705,32 @@
             background: #f0f0f0;
             color: #333;
         }
-        
+
         .btn:hover {
             background: #e0e0e0;
         }
-        
+
         .btn-primary {
-            background: #28a745 !important; /* 绿色 */
+            background: #566fff !important;
             color: white !important;
         }
-        
+
         .btn-primary:hover {
-            background: #218838 !important;
+            background: #4b61e8 !important;
         }
     </style>
 </head>
 <body>
     <div id="reactApp"></div>
     <!-- 左侧导航栏 -->
-    
-    
+
+
     <div class="main-content">
         <div class="container">
         <div class="content" style="padding-top: 20px;">
             <div class="form-section">
                 <div class="error-message" id="errorMessage"></div>
-                
+
                 <form id="generateForm">
                     <div class="prompt-row">
                         <div class="form-group">
@@ -1761,7 +1761,7 @@
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- 生成的图片显示区域 -->
                     <div class="result-section" id="resultSection" style="display: none;">
                         <div class="loading" id="loading">
@@ -1779,7 +1779,7 @@
                         </div>
                         <div class="result-images" id="resultImages"></div>
                     </div>
-                    
+
                     <div class="sample-images-section">
                         <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
                             <div class="sample-images-title">🖼️ 选择示例图片（从OSS）</div>
@@ -1796,7 +1796,7 @@
                             💡 点击选择1-4张示例图作为参考图，可与手动上传的图片一起使用
                         </p>
                     </div>
-                    
+
                     <div class="form-row">
                         <div class="form-group">
                             <label for="aspect_ratio">图片比例：</label>
@@ -1810,7 +1810,7 @@
                                 <option value="16:9">16:9 (宽屏)</option>
                             </select>
                         </div>
-                        
+
                         <div class="form-group">
                             <label for="resolution">分辨率：</label>
                             <select id="resolution" name="resolution">
@@ -1819,7 +1819,7 @@
                             </select>
                         </div>
                     </div>
-                    
+
                     <div class="form-row">
                         <div class="form-group">
                             <label for="generate_mode">生图模式：</label>
@@ -1828,14 +1828,14 @@
                                 <option value="group">组图</option>
                             </select>
                         </div>
-                        
+
                         <div class="form-group">
                             <label for="num_images">生成数量：</label>
                             <input type="number" id="num_images" name="num_images" value="4" min="1" max="20">
                             <small style="color: #666; font-size: 0.85em;">单图模式：生成单图数量；组图模式：生成组数</small>
                         </div>
                     </div>
-                    
+
                     <div class="form-row">
                         <div class="form-group">
                             <label for="image_style">图片风格：</label>
@@ -1843,24 +1843,24 @@
                                 <option value="">无（使用默认风格）</option>
                             </select>
                         </div>
-                        
+
                         <div class="form-group">
                             <!-- 占位，保持布局 -->
                         </div>
                     </div>
-                    
+
                     <div class="form-row">
                         <div class="form-group">
                             <label for="seed">种子值（0 为随机）</label>
                             <input type="number" id="seed" name="seed" value="0" min="0" max="99999999">
                         </div>
-                        
+
                         <div class="form-group">
                             <label for="output_filename">文件名（可选，为空则随机生成）</label>
                             <input type="text" id="output_filename" name="output_filename" placeholder="例如: my_image">
                         </div>
                     </div>
-                    
+
                     <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap: wrap;">
                         <button type="button" id="clearCacheBtn" class="btn btn-secondary" onclick="clearIndexCache()">清除本地缓存</button>
                         <button type="button" id="clearGenerationStateBtn" class="btn btn-secondary" onclick="clearGenerationState()" style="display:none;">清除生成状态</button>
@@ -1871,10 +1871,10 @@
                     </div>
                 </form>
             </div>
-            
+
         </div>
     </div>
-    
+
     <!-- 图片放大模态框 -->
     <div id="imageModal" class="image-modal">
         <span class="image-modal-close">&times;</span>
@@ -1888,7 +1888,7 @@
         </div>
     </div>
     </div>
-    
+
     <script>
         // 侧边栏收缩功能
         function toggleSidebar() {
@@ -1899,7 +1899,7 @@
             // 保存状态到localStorage
             localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
         }
-        
+
         // 页面加载时恢复侧边栏状态
         document.addEventListener('DOMContentLoaded', function() {
             const sidebar = document.getElementById('sidebarNav');
@@ -1909,7 +1909,7 @@
                 sidebar.classList.add('collapsed');
                 toggleIcon.textContent = '›';
             }
-            
+
             // 更新当前页面的导航项active状态
             const currentPath = window.location.pathname;
             document.querySelectorAll('.sidebar-nav-item').forEach(item => {
@@ -1920,12 +1920,12 @@
             });
         });
     </script>
-    
+
     <script>
         let selectedFiles = [];
         let selectedSampleImages = [];
         let sampleImages = [];
-        
+
         // 保存表单数据到localStorage
         function saveFormData() {
             try {
@@ -1948,7 +1948,7 @@
                 console.error('保存表单数据失败:', e);
             }
         }
-        
+
         // 恢复表单数据
         function loadFormData() {
             try {
@@ -1987,7 +1987,7 @@
                         // 检查数据是否过期（5分钟内有效）
                         if (data.timestamp && Date.now() - data.timestamp < 5 * 60 * 1000) {
                             console.log('检测到重新生成数据，正在填充表单...');
-                            
+
                             // 填充基本表单字段
                             if (data.prompt) {
                                 document.getElementById('prompt').value = data.prompt;
@@ -2031,7 +2031,7 @@
                                 }
                                 console.log('设置分辨率:', document.getElementById('resolution').value);
                             }
-                            
+
                             // 处理参考图
                             if (data.sample_image_urls && data.sample_image_urls.length > 0) {
                                 // 直接填充参考图（避免仅依赖示例图库匹配）
@@ -2041,16 +2041,16 @@
                                     filename: '参考图'
                                 }));
                                 renderReferenceImages();
-                                
+
                                 // 保存参考图URL，等待示例图加载完成后自动选择高亮
                                 window.pendingRegenerateSampleUrls = urls;
                                 console.log('待选择的参考图URL:', window.pendingRegenerateSampleUrls);
                             }
-                            
+
                             // 清除重新生成数据，避免重复使用
                             sessionStorage.removeItem('regenerateData');
                             localStorage.removeItem('regenerateData');
-                            
+
                             // 显示提示
                             setTimeout(() => {
                                 const promptInput = document.getElementById('prompt');
@@ -2059,7 +2059,7 @@
                                     promptInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                 }
                             }, 500);
-                            
+
                             return; // 使用重新生成数据，不再加载普通缓存
                         } else {
                             // 数据过期，清除
@@ -2072,7 +2072,7 @@
                         localStorage.removeItem('regenerateData');
                     }
                 }
-                
+
                 // 如果没有重新生成数据，加载普通缓存
                 const saved = localStorage.getItem('indexFormData');
                 if (saved) {
@@ -2090,20 +2090,20 @@
                 console.error('恢复表单数据失败:', e);
             }
         }
-        
+
         // 自动选择重新生成的参考图
         function autoSelectRegenerateSamples() {
             if (!window.pendingRegenerateSampleUrls || window.pendingRegenerateSampleUrls.length === 0) {
                 return;
             }
-            
+
             const urlsToSelect = window.pendingRegenerateSampleUrls;
             console.log('开始自动选择参考图，URL数量:', urlsToSelect.length);
             console.log('待选择的URL列表:', urlsToSelect);
             console.log('当前示例图数量:', sampleImages.length);
-            
+
             const existingUrls = new Set(selectedSampleImages.map(img => img.url));
-            
+
             // 在已加载的示例图中查找匹配的URL
             let foundCount = 0;
             urlsToSelect.forEach((targetUrl, idx) => {
@@ -2111,14 +2111,14 @@
                     console.warn(`第 ${idx + 1} 个URL为空，跳过`);
                     return;
                 }
-                
+
                 // 标准化URL（移除查询参数、协议等）
                 const normalizeUrl = (url) => {
                     if (!url) return '';
                     try {
                         // 移除查询参数和锚点
                         let cleanUrl = url.split('?')[0].split('#')[0];
-                        
+
                         // 如果是完整URL，提取路径部分（保留域名后的路径）
                         if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')) {
                             try {
@@ -2140,20 +2140,20 @@
                         return url.split('?')[0].split('#')[0];
                     }
                 };
-                
+
                 const normalizedTarget = normalizeUrl(targetUrl);
                 console.log(`查找参考图 ${idx + 1}: 原始URL=${targetUrl}, 标准化后=${normalizedTarget}`);
-                
+
                 const index = sampleImages.findIndex(img => {
                     const imgUrl = img.url || '';
                     const normalizedImg = normalizeUrl(imgUrl);
-                    
+
                     // 多种匹配方式
                     const exactMatch = imgUrl === targetUrl;
                     const normalizedMatch = normalizedImg === normalizedTarget;
                     const containsMatch = imgUrl.includes(normalizedTarget) || normalizedTarget.includes(normalizedImg);
                     const endsWithMatch = imgUrl.endsWith(normalizedTarget) || normalizedTarget.endsWith(normalizedImg);
-                    
+
                     // 提取文件名进行匹配（作为备用方案）
                     const getFilename = (url) => {
                         try {
@@ -2164,16 +2164,16 @@
                         }
                     };
                     const filenameMatch = getFilename(imgUrl) === getFilename(targetUrl) && getFilename(imgUrl) !== '';
-                    
+
                     const matched = exactMatch || normalizedMatch || containsMatch || endsWithMatch || filenameMatch;
-                    
+
                     if (matched) {
                         console.log(`找到匹配: ${imgUrl} <-> ${targetUrl}`);
                     }
-                    
+
                     return matched;
                 });
-                
+
                 if (index >= 0 && selectedSampleImages.length < 4) {
                     // 检查是否已选择
                     const existingIndex = selectedSampleImages.findIndex(s => s.url === sampleImages[index].url);
@@ -2188,13 +2188,13 @@
                     console.warn(`✗ 未找到匹配的参考图: ${targetUrl}`);
                 }
             });
-            
+
             // 更新UI
             updateSampleImagesUI();
-            
+
             // 清除待选择列表
             window.pendingRegenerateSampleUrls = null;
-            
+
             if (foundCount > 0) {
                 console.log(`✅ 成功自动选择了 ${foundCount}/${urlsToSelect.length} 张参考图`);
                 // 显示提示
@@ -2228,34 +2228,34 @@
                 }
             }
         }
-        
+
         // 尝试从其他类别加载示例图以查找参考图
         async function tryLoadSamplesFromOtherCategories() {
             if (!window.pendingRegenerateSampleUrls || window.pendingRegenerateSampleUrls.length === 0) {
                 return;
             }
-            
+
             const currentCategory = sampleCategory;
-            const categoriesToTry = currentCategory === 'recent' ? ['person', 'scene'] : 
-                                   currentCategory === 'person' ? ['recent', 'scene'] : 
+            const categoriesToTry = currentCategory === 'recent' ? ['person', 'scene'] :
+                                   currentCategory === 'person' ? ['recent', 'scene'] :
                                    ['recent', 'person'];
-            
+
             console.log(`当前类别: ${currentCategory}, 尝试其他类别:`, categoriesToTry);
-            
+
             for (const category of categoriesToTry) {
                 try {
                     console.log(`尝试从 ${category} 类别加载示例图...`);
                     await loadSampleImages(category);
-                    
+
                     // 等待UI更新
                     await new Promise(resolve => setTimeout(resolve, 500));
-                    
+
                     // 尝试选择参考图
                     if (window.pendingRegenerateSampleUrls) {
                         const beforeCount = selectedSampleImages.length;
                         autoSelectRegenerateSamples();
                         const afterCount = selectedSampleImages.length;
-                        
+
                         if (afterCount > beforeCount) {
                             console.log(`✅ 在 ${category} 类别中找到并选择了参考图`);
                             return; // 找到了，停止尝试
@@ -2265,10 +2265,10 @@
                     console.error(`从 ${category} 类别加载示例图失败:`, error);
                 }
             }
-            
+
             console.warn('⚠️ 在所有类别中都未找到匹配的参考图');
         }
-        
+
         // 监听表单输入变化
         function setupAutoSave() {
             const inputs = ['prompt', 'aspect_ratio', 'resolution', 'generate_mode', 'num_images', 'image_style', 'seed', 'output_filename'];
@@ -2280,12 +2280,12 @@
                 }
             });
         }
-        
+
         async function handleFileSelect(event) {
             const files = Array.from(event.target.files);
-            
+
             if (files.length === 0) return;
-            
+
             // 检查总数限制
             const remainingSlots = 4 - selectedFiles.length;
             if (remainingSlots <= 0) {
@@ -2293,16 +2293,16 @@
                 event.target.value = ''; // 清空选择，允许重新选择
                 return;
             }
-            
+
             // 如果选择的文件超过剩余槽位，只取前N个并提示
             const filesToAdd = files.length > remainingSlots ? files.slice(0, remainingSlots) : files;
             if (files.length > remainingSlots) {
                 alert(`最多只能上传 4 张图片，当前已选 ${selectedFiles.length} 张，本次将只添加前 ${remainingSlots} 张`);
             }
-            
+
             // 添加到选中列表
             selectedFiles = selectedFiles.concat(filesToAdd);
-            
+
             // 自动上传到图片库（场景库）
             try {
                 const uploadPromises = filesToAdd.map(async (file) => {
@@ -2310,12 +2310,12 @@
                         const formData = new FormData();
                         formData.append('file', file);
                         formData.append('category', 'scene'); // 默认添加到场景库
-                        
+
                         const response = await fetch('/api/upload-sample-image', {
                             method: 'POST',
                             body: formData
                         });
-                        
+
                         const result = await response.json();
                         if (result.success) {
                             console.log('图片已自动添加到图片库:', result.filename);
@@ -2329,7 +2329,7 @@
                         return { success: false, file: file, error: error.message };
                     }
                 });
-                
+
                 // 等待所有上传完成（不阻塞UI）
                 Promise.all(uploadPromises).then(results => {
                     const successCount = results.filter(r => r.success).length;
@@ -2345,19 +2345,19 @@
                 console.error('自动上传到图片库失败:', error);
                 // 不影响正常使用，只记录错误
             }
-            
+
             updatePreview();
             // 清空文件输入，允许重复选择同一文件
             event.target.value = '';
         }
-        
+
         function renderReferenceImages() {
             const container = document.getElementById('referenceImages');
             if (!container) return;
-            
+
             container.innerHTML = '';
             let hasAny = false;
-            
+
             selectedSampleImages.forEach((img, index) => {
                 hasAny = true;
                 const div = document.createElement('div');
@@ -2378,13 +2378,13 @@
                 div.appendChild(removeBtn);
                 container.appendChild(div);
             });
-            
+
             selectedFiles.forEach((file, index) => {
                 hasAny = true;
                 const div = document.createElement('div');
                 div.className = 'reference-image';
                 container.appendChild(div);
-                
+
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     const imgEl = document.createElement('img');
@@ -2405,16 +2405,16 @@
                 };
                 reader.readAsDataURL(file);
             });
-            
+
             if (!hasAny) {
                 container.innerHTML = '<div class="reference-empty">暂无参考图，请从下方选择或右侧上传</div>';
             }
         }
-        
+
         function updatePreview() {
             renderReferenceImages();
         }
-        
+
         function removeFile(index) {
             selectedFiles.splice(index, 1);
             updatePreview();
@@ -2425,13 +2425,13 @@
             updateSampleImagesUI();
             renderReferenceImages();
         }
-        
+
         // 保持连接活跃，防止页面切换时中断请求
         let keepAliveController = null;
         let currentGenerationState = null;
         let generateAbortController = null;
         let resumeStreamController = null;
-        
+
         // 页面加载时恢复生成状态
         window.addEventListener('load', function() {
             const savedState = localStorage.getItem('singleGenerationState');
@@ -2440,7 +2440,7 @@
                     const state = JSON.parse(savedState);
                     currentGenerationState = state;
                     const elapsed = Date.now() - state.startTime;
-                    
+
                     // 如果是进行中的任务，不清除状态，让生成继续
                     // 生成任务会在后台继续执行（使用keepalive）
                     if (state.status === 'generating') {
@@ -2475,14 +2475,14 @@
                     resetGenerationUI();
                 }
             }
-            
+
             // 检查并显示清除状态按钮
             checkAndShowClearButton();
-            
+
             // 注意：不再在 beforeunload 时中止请求
             // 这样可以确保即使用户切换页面，生成任务也会继续在后台执行
         });
-        
+
         // 重置生成UI状态
         function resetGenerationUI() {
             const loading = document.getElementById('loading');
@@ -2503,7 +2503,7 @@
             const resultImages = document.getElementById('resultImages');
             const resultSection = document.getElementById('resultSection');
             const totalImages = state && state.totalImages ? state.totalImages : 0;
-            
+
             if (resultImages && !resultImages.hasChildNodes() && totalImages > 0) {
                 for (let i = 0; i < totalImages; i++) {
                     const placeholder = document.createElement('div');
@@ -2518,7 +2518,7 @@
                     resultImages.appendChild(placeholder);
                 }
             }
-            
+
             if (resultSection) resultSection.style.display = 'block';
             if (loading) loading.classList.add('active');
             generateBtn.disabled = true;
@@ -2549,20 +2549,20 @@
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
-            
+
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-                
+
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
-                
+
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
                         try {
                             const data = JSON.parse(line.slice(6));
-                            
+
                             if (currentGenerationState) {
                                 if (data.generation_id && !currentGenerationState.generationId) {
                                     currentGenerationState.generationId = data.generation_id;
@@ -2571,7 +2571,7 @@
                                     currentGenerationState.lastEventIndex = data.event_index;
                                 }
                             }
-                            
+
                             if (data.type === 'start') {
                                 console.log('流式生成开始，总共:', data.total);
                             } else if (data.type === 'image') {
@@ -2609,7 +2609,7 @@
                                     };
                                 }
                             }
-                            
+
                             persistGenerationState();
                         } catch (e) {
                             console.error('解析流式数据失败:', e, line);
@@ -2646,14 +2646,14 @@
                 resumeStreamController = null;
             }
         }
-        
+
         // 清除生成状态（手动清除）
         function clearGenerationState() {
             localStorage.removeItem('singleGenerationState');
             resetGenerationUI();
             alert('生成状态已清除。如果生成已完成，请在"生图任务"页面查看结果。');
         }
-        
+
         // 清除本地缓存（包括表单数据和生成状态）
         function clearIndexCache() {
             localStorage.removeItem('indexFormData');
@@ -2685,7 +2685,7 @@
             updateBatchActions();
             alert('本地缓存已清除，表单已重置为默认状态。');
         }
-        
+
         // 检查并显示清除状态按钮
         function checkAndShowClearButton() {
             const savedState = localStorage.getItem('singleGenerationState');
@@ -2705,17 +2705,17 @@
                 clearStateBtn.style.display = 'none';
             }
         }
-        
-        
+
+
         document.getElementById('generateForm').addEventListener('submit', async function(e) {
             e.preventDefault();
-            
+
             const errorMessage = document.getElementById('errorMessage');
             const loading = document.getElementById('loading');
             const resultImages = document.getElementById('resultImages');
             const resultSection = document.getElementById('resultSection');
             const generateBtn = document.getElementById('generateBtn');
-            
+
             // 如果有正在进行的请求，先取消它（仅在用户明确提交新请求时）
             if (generateAbortController) {
                 generateAbortController.abort();
@@ -2724,20 +2724,20 @@
                 resumeStreamController.abort();
                 resumeStreamController = null;
             }
-            
+
             // 创建新的 AbortController（仅用于取消当前请求，不用于页面切换）
             generateAbortController = new AbortController();
-            
+
             // 开始新的生成，清空之前的结果和状态
 
             errorMessage.classList.remove('active');
             if (loading) loading.classList.add('active');
-            
+
             // 获取生成数量和模式，提前创建占位区
             const generateMode = document.getElementById('generate_mode').value;
             const numImages = parseInt(document.getElementById('num_images').value) || 4;
             const totalImages = generateMode === 'group' ? numImages * 4 : numImages; // 组图每组4张
-            
+
             // 创建占位区
             if (resultImages) {
                 resultImages.innerHTML = '';
@@ -2754,11 +2754,11 @@
                     resultImages.appendChild(placeholder);
                 }
             }
-            
+
             if (resultSection) resultSection.style.display = 'block';
             generateBtn.disabled = true;
             generateBtn.textContent = '生成中...';
-            
+
             // 保存生成状态为进行中
             currentGenerationState = {
                 status: 'generating',
@@ -2771,22 +2771,22 @@
             persistGenerationState();
             // 显示清除状态按钮
             checkAndShowClearButton();
-            
+
             const formData = new FormData(this);
-            
+
             // 添加流式输出参数（默认启用）
             formData.append('stream', 'true');
-            
+
             // 添加手动上传的文件
             selectedFiles.forEach(file => {
                 formData.append('images', file);
             });
-            
+
             // 添加选中的示例图 URL
             selectedSampleImages.forEach(img => {
                 formData.append('sample_image_urls', img.url);
             });
-            
+
             try {
                 // 使用流式接收（Server-Sent Events）
                 const response = await fetch('/generate', {
@@ -2800,12 +2800,12 @@
                     currentGenerationState.generationId = headerGenerationId;
                     persistGenerationState();
                 }
-                
+
                 if (!response.ok) {
                     const errorData = await response.json();
                     throw new Error(errorData.error || '生成失败');
                 }
-                
+
                 // 检查是否是流式响应
                 const contentType = response.headers.get('content-type');
                 if (contentType && contentType.includes('text/event-stream')) {
@@ -2813,7 +2813,7 @@
                 } else {
                     // 非流式响应（兼容旧版本）
                     const data = await response.json();
-                    
+
                     if (data.error) {
                         errorMessage.textContent = data.error;
                         errorMessage.classList.add('active');
@@ -2846,13 +2846,13 @@
                     console.log('生成被用户取消');
                     return;
                 }
-                
+
                 let errorMsg = error.message;
                 if (error.message === 'Failed to fetch') {
                     console.log('网络请求失败，但生成任务可能仍在后台执行。请在生图任务中查看结果。');
                     return;
                 }
-                
+
                 errorMessage.textContent = '生成失败: ' + errorMsg;
                 errorMessage.classList.add('active');
                 currentGenerationState = {
@@ -2874,7 +2874,7 @@
                 generateAbortController = null;
             }
         });
-        
+
         // 监听页面可见性变化
         document.addEventListener('visibilitychange', function() {
             if (document.hidden) {
@@ -2925,17 +2925,17 @@
                 }
             }
         });
-        
+
         // 选中的图片集合
         let selectedResultImages = new Set();
         // 存储所有生成的图片，用于左右切换
         let allGeneratedImages = [];
-        
+
         // 更新占位符为实际图片
         function updateImagePlaceholder(index, img) {
             const resultImages = document.getElementById('resultImages');
             if (!resultImages) return;
-            
+
             const placeholder = resultImages.querySelector(`.result-image[data-image-index="${index}"]`);
             if (placeholder) {
                 placeholder.classList.remove('placeholder');
@@ -2946,7 +2946,7 @@
                     <div class="result-image-checkbox" onclick="toggleImageSelection(${index}, event)"></div>
                     <img src="${img.url}" alt="生成的图片 ${index + 1}" onclick="openResultImageModal(${index})">
                 `;
-                
+
                 // 更新allGeneratedImages数组
                 allGeneratedImages[index] = {
                     url: img.url,
@@ -2955,19 +2955,19 @@
                 };
             }
         }
-        
+
         function displayResults(data) {
             const resultImages = document.getElementById('resultImages');
             selectedResultImages.clear(); // 清空选中状态
             allGeneratedImages = []; // 重置数组
-            
+
             // 逐张显示图片
             if (data.images && data.images.length > 0) {
                 data.images.forEach((img, index) => {
                     updateImagePlaceholder(index, img);
                 });
             }
-            
+
             // 显示结果区域
             const resultSection = document.getElementById('resultSection');
             if (resultSection && data.images && data.images.length > 0) {
@@ -2982,7 +2982,7 @@
                 localStorage.setItem('lastGenerationPayload', JSON.stringify(payload));
             } catch (e) { console.error('保存最后生成参数失败', e); }
         }
-        
+
         // 打开生成的图片模态框（支持左右切换）
         function openResultImageModal(index) {
             if (!allGeneratedImages || allGeneratedImages.length === 0) {
@@ -2997,19 +2997,19 @@
                     }));
                 }
             }
-            
+
             if (allGeneratedImages && allGeneratedImages.length > 0 && allGeneratedImages[index]) {
                 const img = allGeneratedImages[index];
                 openImageModal(img.url, img.filename, index, 'result');
             }
         }
-        
+
         // 切换图片选择状态
         function toggleImageSelection(index, event) {
             event.stopPropagation();
             const imageDiv = document.querySelector(`.result-image[data-image-index="${index}"]`);
             if (!imageDiv) return;
-            
+
             const checkbox = imageDiv.querySelector('.result-image-checkbox');
             if (selectedResultImages.has(index)) {
                 selectedResultImages.delete(index);
@@ -3020,11 +3020,11 @@
                 imageDiv.classList.add('selected');
                 checkbox.classList.add('checked');
             }
-            
+
             // 更新批量操作按钮显示状态
             updateBatchActions();
         }
-        
+
         // 更新批量操作按钮显示状态
         function updateBatchActions() {
             const batchActions = document.getElementById('batchActions');
@@ -3039,7 +3039,7 @@
                 }
             }
         }
-        
+
         // 清除选择
         function clearSelection() {
             selectedResultImages.forEach(index => {
@@ -3053,7 +3053,7 @@
             selectedResultImages.clear();
             updateBatchActions();
         }
-        
+
         // 批量添加到素材库
         async function batchAddToMaterial() {
             if (selectedResultImages.size === 0) {
@@ -3092,18 +3092,18 @@
             alert(`成功添加 ${successCount}/${selectedUrls.length} 张图片到素材库`);
             clearSelection();
         }
-        
+
         // 批量删除图片
         async function batchDeleteImages() {
             if (selectedResultImages.size === 0) {
                 alert('请先选择图片');
                 return;
             }
-            
+
             if (!confirm(`确定要删除选中的 ${selectedResultImages.size} 张图片吗？删除后将从图片库中一并删除。`)) {
                 return;
             }
-            
+
             const selectedItems = [];
             selectedResultImages.forEach(index => {
                 const imageDiv = document.querySelector(`.result-image[data-image-index="${index}"]`);
@@ -3115,7 +3115,7 @@
                     });
                 }
             });
-            
+
             let successCount = 0;
             for (const item of selectedItems) {
                 if (item.recordId) {
@@ -3139,52 +3139,52 @@
                     successCount++;
                 }
             }
-            
+
             alert(`成功删除 ${successCount}/${selectedItems.length} 张图片`);
             updateBatchActions();
         }
-        
-        
+
+
         // 拖拽上传
         const uploadArea = document.querySelector('.upload-area');
-        
+
         if (uploadArea) {
             uploadArea.addEventListener('dragenter', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 uploadArea.style.backgroundColor = '#e8eaff';
             });
-            
+
             uploadArea.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 uploadArea.style.backgroundColor = '#e8eaff';
             });
-            
+
             uploadArea.addEventListener('dragleave', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 uploadArea.style.backgroundColor = '#f8f9ff';
             });
-            
+
             uploadArea.addEventListener('drop', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 uploadArea.style.backgroundColor = '#f8f9ff';
-                
+
                 const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
-                
+
                 if (files.length === 0) {
                     return;
                 }
-                
+
                 // 检查总数限制
                 const remainingSlots = 4 - selectedFiles.length;
                 if (remainingSlots <= 0) {
                     alert('最多只能上传 4 张图片，请先删除已选择的图片');
                     return;
                 }
-                
+
                 // 如果拖拽的文件超过剩余槽位，只取前N个并提示
                 if (files.length > remainingSlots) {
                     alert(`最多只能上传 4 张图片，当前已选 ${selectedFiles.length} 张，本次将只添加前 ${remainingSlots} 张`);
@@ -3192,18 +3192,18 @@
                 } else {
                     selectedFiles = selectedFiles.concat(files);
                 }
-                
+
                 updatePreview();
             });
         }
-        
+
         // 示例图类别（image_material/recent）
         let sampleCategory = 'image_material';
         let samplePage = 1;
         let sampleTotal = 0;
         const samplePageSize = 20;
 
-        
+
 
         function switchSampleCategory(cat) {
             sampleCategory = cat;
@@ -3211,23 +3211,23 @@
             // 清除所有按钮的 btn-primary 类，然后只给当前选中的按钮添加
             const btnImage = document.getElementById('sampleImageMaterialBtn');
             const btnR = document.getElementById('sampleRecentBtn');
-            
+
             btnImage.classList.remove('btn-primary');
             btnR.classList.remove('btn-primary');
-            
+
             if (cat === 'image_material') {
                 btnImage.classList.add('btn-primary');
             } else if (cat === 'recent') {
                 btnR.classList.add('btn-primary');
             }
-            
+
             if (cat === 'recent') {
                 loadRecentImages();
             } else {
                 loadSampleImages(cat);
             }
         }
-        
+
         // 加载最近生成的图片
         async function loadRecentImages() {
             const grid = document.getElementById('sampleImagesGrid');
@@ -3265,7 +3265,7 @@
                     updateSampleImagesUI();
                     renderSamplePagination();
                     console.log('最近生成图片加载完成，共', sampleImages.length, '张');
-                    
+
                     // 如果有待选择的重新生成参考图，自动选择（延迟稍长以确保UI已更新）
                     if (window.pendingRegenerateSampleUrls) {
                         console.log('检测到待选择的参考图，准备自动选择...');
@@ -3293,23 +3293,23 @@
                 console.error('sampleImagesGrid 元素不存在');
                 return;
             }
-            
+
             console.log('开始加载示例图，类别:', category);
             grid.innerHTML = '<div class="sample-images-loading">加载中...</div>';
             grid.scrollTop = 0;
-            
+
             try {
                 const apiUrl = category === 'image_material'
                     ? `/api/content-library?type=image_material&page=${samplePage}&page_size=${samplePageSize}`
                     : `/api/sample-images?category=${encodeURIComponent(category || 'image_material')}&page=${samplePage}&page_size=${samplePageSize}`;
                 console.log('请求URL:', apiUrl);
-                
+
                 // 添加超时处理（30秒超时）
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => {
                     controller.abort();
                 }, 30000);
-                
+
                 let response;
                 try {
                     response = await fetch(apiUrl, { signal: controller.signal });
@@ -3321,13 +3321,13 @@
                     }
                     throw fetchError;
                 }
-                
+
                 console.log('响应状态:', response.status, response.statusText);
-                
+
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
-                
+
                 const data = await response.json();
                 console.log('响应数据:', data);
 
@@ -3365,7 +3365,7 @@
                     updateSampleImagesUI();
                     renderSamplePagination();
                     console.log('示例图加载完成，共', sampleImages.length, '张');
-                    
+
                     // 如果有待选择的重新生成参考图，自动选择（延迟稍长以确保UI已更新）
                     if (window.pendingRegenerateSampleUrls) {
                         console.log('检测到待选择的参考图，准备自动选择...');
@@ -3448,12 +3448,12 @@
                 alert('添加失败: ' + e.message);
             }
         }
-        
+
         // 切换示例图选择状态
         function toggleSampleImage(index) {
             const img = sampleImages[index];
             const existingIndex = selectedSampleImages.findIndex(s => s.url === img.url);
-            
+
             if (existingIndex >= 0) {
                 // 取消选中
                 selectedSampleImages.splice(existingIndex, 1);
@@ -3466,24 +3466,24 @@
                 }
                 selectedSampleImages.push(img);
             }
-            
+
             updateSampleImagesUI();
         }
-        
+
         // 更新示例图 UI
         function updateSampleImagesUI() {
             const grid = document.getElementById('sampleImagesGrid');
             if (!grid) return;
-            
+
             const items = grid.querySelectorAll('.sample-image-item');
             if (!sampleImages || sampleImages.length === 0) return;
-            
+
             items.forEach((item, index) => {
                 const img = sampleImages[index];
                 if (!img) return;
-                
+
                 const selectedIndex = selectedSampleImages.findIndex(s => s.url === img.url);
-                
+
                 if (selectedIndex >= 0) {
                     item.classList.add('selected');
                     const countDiv = item.querySelector('.sample-image-count');
@@ -3498,16 +3498,16 @@
                     }
                 }
             });
-            
+
             renderReferenceImages();
         }
-        
+
         // 当前模态框中显示的图片URL和索引
         let currentModalImageUrl = null;
         let currentModalImageFilename = null;
         let currentModalImageIndex = -1;
         let currentModalImageSource = null; // 'sample' 或 'result'
-        
+
         // 图片放大功能
         function openImageModal(imageUrl, filename, imageIndex, source) {
             const modal = document.getElementById('imageModal');
@@ -3515,9 +3515,9 @@
             const selectBtn = document.getElementById('selectAsReferenceBtn');
             const prevBtn = document.getElementById('prevImageBtn');
             const nextBtn = document.getElementById('nextImageBtn');
-            
+
             currentModalImageSource = source || 'sample'; // 默认为示例图
-            
+
             // 如果传入了索引，使用它；否则在对应数组中查找
             if (imageIndex !== undefined && imageIndex >= 0) {
                 currentModalImageIndex = imageIndex;
@@ -3528,16 +3528,16 @@
                     currentModalImageIndex = sampleImages.findIndex(img => img.url === imageUrl);
                 }
             }
-            
+
             currentModalImageUrl = imageUrl;
             currentModalImageFilename = filename || 'generated_reference.jpg';
-            
+
             modalImg.src = imageUrl;
             modal.classList.add('active');
-            
+
             // 更新导航按钮状态
             updateModalNavButtons();
-            
+
             // 检查是否已选择（仅对示例图有效）
             if (source === 'result') {
                 // 生成的图片，隐藏选择按钮
@@ -3555,18 +3555,18 @@
                 }
             }
         }
-        
+
         // 更新模态框导航按钮状态
         function updateModalNavButtons() {
             const prevBtn = document.getElementById('prevImageBtn');
             const nextBtn = document.getElementById('nextImageBtn');
-            
+
             if (!prevBtn || !nextBtn) {
                 if (prevBtn) prevBtn.style.display = 'none';
                 if (nextBtn) nextBtn.style.display = 'none';
                 return;
             }
-            
+
             // 根据来源确定图片数组
             let imageArray = [];
             if (currentModalImageSource === 'result') {
@@ -3574,22 +3574,22 @@
             } else {
                 imageArray = sampleImages;
             }
-            
+
             if (!imageArray || imageArray.length === 0) {
                 if (prevBtn) prevBtn.style.display = 'none';
                 if (nextBtn) nextBtn.style.display = 'none';
                 return;
             }
-            
+
             // 显示按钮
             prevBtn.style.display = 'flex';
             nextBtn.style.display = 'flex';
-            
+
             // 更新按钮状态
             prevBtn.disabled = currentModalImageIndex <= 0;
             nextBtn.disabled = currentModalImageIndex >= imageArray.length - 1;
         }
-        
+
         // 切换图片（上一张/下一张）
         function navigateImage(direction) {
             let imageArray = [];
@@ -3598,12 +3598,12 @@
             } else {
                 imageArray = sampleImages;
             }
-            
+
             if (!imageArray || imageArray.length === 0) return;
-            
+
             const newIndex = currentModalImageIndex + direction;
             if (newIndex < 0 || newIndex >= imageArray.length) return;
-            
+
             const img = imageArray[newIndex];
             if (img) {
                 if (currentModalImageSource === 'result') {
@@ -3613,14 +3613,14 @@
                 }
             }
         }
-        
+
         // 切换模态框图片的选择状态
         function toggleModalImageSelection() {
             if (!currentModalImageUrl) return;
-            
+
             const selectBtn = document.getElementById('selectAsReferenceBtn');
             const existingIndex = selectedSampleImages.findIndex(img => img.url === currentModalImageUrl);
-            
+
             if (existingIndex >= 0) {
                 // 取消选择
                 selectedSampleImages.splice(existingIndex, 1);
@@ -3632,7 +3632,7 @@
                     alert('最多只能选择 4 张参考图');
                     return;
                 }
-                
+
                 // 选择
                 selectedSampleImages.push({
                     url: currentModalImageUrl,
@@ -3641,25 +3641,25 @@
                 selectBtn.textContent = '✗ 取消选择';
                 selectBtn.classList.add('selected');
             }
-            
+
             // 更新示例图UI
             updateSampleImagesUI();
         }
-        
+
         function closeImageModal() {
             const modal = document.getElementById('imageModal');
             modal.classList.remove('active');
         }
-        
+
         // 点击模态框背景或关闭按钮关闭
         document.addEventListener('DOMContentLoaded', function() {
             const modal = document.getElementById('imageModal');
             const closeBtn = document.querySelector('.image-modal-close');
-            
+
             if (closeBtn) {
                 closeBtn.addEventListener('click', closeImageModal);
             }
-            
+
             if (modal) {
                 modal.addEventListener('click', function(e) {
                     if (e.target === modal) {
@@ -3667,7 +3667,7 @@
                     }
                 });
             }
-            
+
             // ESC 键关闭，左右箭头键切换图片
             document.addEventListener('keydown', function(e) {
                 const modal = document.getElementById('imageModal');
@@ -3682,7 +3682,7 @@
                 }
             });
         });
-        
+
         // 构建最后生成参数
         function buildLastGeneratePayload() {
             return {
@@ -3694,7 +3694,7 @@
                 sample_image_urls: selectedSampleImages.map(img => img.url)
             };
         }
-        
+
         // 加载风格列表
         async function loadImageStyles() {
             try {
@@ -3713,17 +3713,17 @@
                 console.error('加载风格列表失败:', error);
             }
         }
-        
+
         // 页面加载时获取示例图（不恢复表单数据，让表单回到默认状态）
         document.addEventListener('DOMContentLoaded', async function() {
             console.log('DOMContentLoaded 事件触发');
-            
+
             // 检查是否需要自动清除缓存
             const autoClear = document.getElementById('autoClearOnReload');
             if (autoClear && autoClear.checked) {
                 clearIndexCache();
             }
-            
+
             // 初始化类别按钮
             const btnImage = document.getElementById('sampleImageMaterialBtn');
             const btnR = document.getElementById('sampleRecentBtn');
@@ -3733,17 +3733,17 @@
             } else {
                 console.warn('示例图按钮元素未找到');
             }
-            
+
             // 检查 sampleImagesGrid 是否存在
             const grid = document.getElementById('sampleImagesGrid');
             if (!grid) {
                 console.error('sampleImagesGrid 元素不存在，无法加载示例图');
                 return;
             }
-            
+
             // 加载风格列表
             loadImageStyles();
-            
+
             // 检查是否有重新生成数据
             const regenerateData = sessionStorage.getItem('regenerateData') || localStorage.getItem('regenerateData');
             let hasRegenerateData = false;
@@ -3758,7 +3758,7 @@
                     console.error('解析重新生成数据失败:', e);
                 }
             }
-            
+
             // 默认加载（使用 await 确保异步操作完成）
             try {
                 // 如果有重新生成数据，优先加载 'recent' 类别（因为参考图很可能是最近生成的）
@@ -3788,12 +3788,12 @@
             } catch (error) {
                 console.error('初始化加载示例图失败:', error);
             }
-            
+
             // 恢复表单缓存并启用自动保存，便于页面切换后保留内容
             loadFormData();
             setupAutoSave();
         });
-        
+
         // 侧边栏收缩功能
         function toggleSidebar() {
             const sidebar = document.getElementById('sidebarNav');
@@ -3803,7 +3803,7 @@
             // 保存状态到localStorage
             localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
         }
-        
+
         // 页面加载时恢复侧边栏状态
         document.addEventListener('DOMContentLoaded', function() {
             const sidebar = document.getElementById('sidebarNav');
@@ -3813,7 +3813,7 @@
                 sidebar.classList.add('collapsed');
                 toggleIcon.textContent = '›';
             }
-            
+
             // 更新当前页面的导航项active状态
             const currentPath = window.location.pathname;
             document.querySelectorAll('.sidebar-nav-item').forEach(item => {

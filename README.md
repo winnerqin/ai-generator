@@ -67,6 +67,9 @@ Copy-Item .env.example .env
 - `MYSQL_USER`、`MYSQL_PASSWORD`、`MYSQL_DATABASE`：MySQL 连接账号、密码和库名
 - `MYSQL_CHARSET`：MySQL 字符集，推荐 `utf8mb4`
 - `ARK_API_KEY`：Seedance / 方舟接口密钥
+- `SEEDANCE_OMNI_MODEL_INTERNAL`：内部用户可用全能视频模型列表（逗号分隔，按顺序展示）
+- `SEEDANCE_OMNI_MODEL_EXTERNAL`：外部用户可用全能视频模型列表（逗号分隔，按顺序展示）
+- `SEEDANCE_OMNI_MODEL_ALIASES`：模型别名映射（逗号分隔，格式 `模型编码:显示别名`）
 - `OSS_ENABLED`：是否启用 OSS
 - `OSS_ENDPOINT`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET`
 

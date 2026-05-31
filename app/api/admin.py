@@ -17,20 +17,20 @@ def calculate_date_range(period, start_date=None, end_date=None):
     """计算日期范围"""
     today = datetime.now().date()
 
-    if period == 'day':
+    if period == "day":
         start = today  # 今日：当天数据
         end = today
-    elif period == 'last7days':
+    elif period == "last7days":
         start = today - timedelta(days=6)  # 近7天：包含今天
         end = today
-    elif period == 'month':
+    elif period == "month":
         start = today - timedelta(days=29)  # 近30天：包含今天
         end = today
     else:  # custom
         # start_date 和 end_date 已经是字符串格式
-        return start_date or today.strftime('%Y-%m-%d'), end_date or today.strftime('%Y-%m-%d')
+        return start_date or today.strftime("%Y-%m-%d"), end_date or today.strftime("%Y-%m-%d")
 
-    return start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
 
 @admin_bp.route("/admin")
@@ -40,7 +40,11 @@ def admin_page():
     """管理员页面"""
     from flask import render_template
 
-    user = {"username": session.get("username", ""), "id": session.get("user_id")}
+    user = {
+        "username": session.get("username", ""),
+        "id": session.get("user_id"),
+        "role_code": session.get("role_code"),
+    }
     return render_template("admin.html", user=user)
 
 
@@ -51,7 +55,11 @@ def stats_page():
     """统计页面"""
     from flask import render_template
 
-    user = {"username": session.get("username", ""), "id": session.get("user_id")}
+    user = {
+        "username": session.get("username", ""),
+        "id": session.get("user_id"),
+        "role_code": session.get("role_code"),
+    }
     return render_template("stats.html", user=user)
 
 
@@ -73,6 +81,7 @@ def create_user():
     """创建用户"""
     username = request.json.get("username", "").strip()
     password = request.json.get("password", "")
+    role_code = request.json.get("role_code", database.ROLE_EXTERNAL_USER)
 
     if not username or not password:
         return jsonify({"success": False, "error": "用户名和密码不能为空"}), 400
@@ -83,10 +92,19 @@ def create_user():
     if len(password) < 6:
         return jsonify({"success": False, "error": "密码至少6个字符"}), 400
 
-    user_id = database.create_user(username, password)
+    if role_code not in set(database.get_available_role_codes()):
+        return jsonify({"success": False, "error": "不支持的角色"}), 400
+
+    user_id = database.create_user(username, password, role_code=role_code)
 
     return jsonify(
-        {"success": True, "id": user_id, "username": username, "message": "用户创建成功"}
+        {
+            "success": True,
+            "id": user_id,
+            "username": username,
+            "role_code": role_code,
+            "message": "用户创建成功",
+        }
     )
 
 
@@ -121,6 +139,343 @@ def reset_password(user_id: int):
     database.update_user_password(user_id, password)
 
     return jsonify({"success": True, "message": "密码修改成功"})
+
+
+@admin_bp.route("/api/admin/users/<int:user_id>/pricing-multiplier", methods=["POST"])
+@login_required
+@admin_required
+@handle_api_error
+def update_pricing_multiplier(user_id: int):
+    multiplier = request.json.get("pricing_multiplier")
+    if multiplier in (None, ""):
+        return jsonify({"success": False, "error": "倍率不能为空"}), 400
+    try:
+        multiplier = float(multiplier)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "倍率格式错误"}), 400
+    if multiplier <= 0:
+        return jsonify({"success": False, "error": "倍率必须大于0"}), 400
+    affected = database.update_user_pricing_multiplier(user_id, multiplier)
+    if not affected:
+        return jsonify({"success": False, "error": "用户不存在"}), 404
+    return jsonify({"success": True, "message": "倍率更新成功"})
+
+
+@admin_bp.route("/api/admin/users/<int:user_id>/role", methods=["POST"])
+@login_required
+@admin_required
+@handle_api_error
+def update_user_role(user_id: int):
+    role_code = request.json.get("role_code")
+    if role_code not in set(database.get_available_role_codes()):
+        return jsonify({"success": False, "error": "不支持的角色"}), 400
+    if session.get("user_id") == user_id and role_code != database.ROLE_SYSTEM_ADMIN:
+        return jsonify({"success": False, "error": "不能将自己降级为非管理员"}), 400
+    affected = database.update_user_role(user_id, role_code)
+    if not affected:
+        return jsonify({"success": False, "error": "用户不存在或当前数据库未启用角色字段"}), 404
+    return jsonify({"success": True, "message": "角色更新成功"})
+
+
+@admin_bp.route("/api/admin/users/<int:user_id>/recharge", methods=["POST"])
+@login_required
+@admin_required
+@handle_api_error
+def recharge_user(user_id: int):
+    amount_cent = request.json.get("amount_cent")
+    if amount_cent in (None, ""):
+        return jsonify({"success": False, "error": "调整金额不能为空"}), 400
+    try:
+        amount_cent = int(amount_cent)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "调整金额格式错误"}), 400
+    if amount_cent == 0:
+        return jsonify({"success": False, "error": "调整金额不能为0"}), 400
+
+    user = database.get_user_by_id(user_id)
+    if not user:
+        return jsonify({"success": False, "error": "用户不存在"}), 404
+    if user.get("role_code") != database.ROLE_EXTERNAL_USER:
+        return jsonify({"success": False, "error": "仅支持为外部用户调整余额"}), 400
+
+    is_credit = amount_cent > 0
+
+    result = database.create_account_ledger_entry(
+        user_id=user_id,
+        entry_type="credit" if is_credit else "debit",
+        amount_cent=abs(amount_cent),
+        biz_type="manual_recharge" if is_credit else "manual_adjust",
+        biz_id=f"manual-balance-adjust-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+        operator_user_id=session.get("user_id"),
+        snapshot_json={"source": "admin_api"},
+    )
+    return jsonify(
+        {
+            "success": True,
+            "message": "余额调整成功",
+            "balance_cent": result["after"],
+        }
+    )
+
+
+@admin_bp.route("/api/admin/model-pricing", methods=["GET"])
+@login_required
+@admin_required
+@handle_api_error
+def get_model_pricing():
+    items = database.get_model_pricing_list()
+    return jsonify({"success": True, "items": items})
+
+
+@admin_bp.route("/api/admin/model-pricing", methods=["POST"])
+@login_required
+@admin_required
+@handle_api_error
+def create_or_update_model_pricing():
+    model_code = (request.json.get("model_code") or "").strip()
+    model_name = (request.json.get("model_name") or "").strip()
+    currency_code = (
+        (request.json.get("currency_code") or database.MODEL_CURRENCY_CNY).strip().upper()
+    )
+    resolution_code = (request.json.get("resolution_code") or "").strip().lower()
+    reference_video_mode = (
+        (request.json.get("reference_video_mode") or database.REFERENCE_VIDEO_MODE_ANY)
+        .strip()
+        .lower()
+    )
+    price_per_million_token_cent = request.json.get("price_per_million_token_cent")
+    enabled = bool(request.json.get("enabled", True))
+    if not model_code or not model_name:
+        return jsonify({"success": False, "error": "模型编码和名称不能为空"}), 400
+    if currency_code not in {database.MODEL_CURRENCY_CNY, database.MODEL_CURRENCY_USD}:
+        return jsonify({"success": False, "error": "币种仅支持 CNY 或 USD"}), 400
+    if reference_video_mode not in {
+        database.REFERENCE_VIDEO_MODE_ANY,
+        database.REFERENCE_VIDEO_MODE_WITH,
+        database.REFERENCE_VIDEO_MODE_WITHOUT,
+    }:
+        return jsonify({"success": False, "error": "参考素材类型不合法"}), 400
+    if price_per_million_token_cent in (None, ""):
+        return jsonify({"success": False, "error": "价格不能为空"}), 400
+    try:
+        price_per_million_token_cent = int(price_per_million_token_cent)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "价格格式错误"}), 400
+    if price_per_million_token_cent <= 0:
+        return jsonify({"success": False, "error": "价格必须大于0"}), 400
+    pricing_id = database.upsert_model_pricing(
+        model_code=model_code,
+        model_name=model_name,
+        currency_code=currency_code,
+        resolution_code=resolution_code,
+        reference_video_mode=reference_video_mode,
+        price_per_million_token_cent=price_per_million_token_cent,
+        enabled=enabled,
+    )
+    return jsonify({"success": True, "id": pricing_id, "message": "模型价格已保存"})
+
+
+@admin_bp.route("/api/admin/model-pricing/<int:pricing_id>", methods=["PUT"])
+@login_required
+@admin_required
+@handle_api_error
+def update_model_pricing(pricing_id: int):
+    model_name = (request.json.get("model_name") or "").strip()
+    currency_code = (
+        (request.json.get("currency_code") or database.MODEL_CURRENCY_CNY).strip().upper()
+    )
+    resolution_code = (request.json.get("resolution_code") or "").strip().lower()
+    reference_video_mode = (
+        (request.json.get("reference_video_mode") or database.REFERENCE_VIDEO_MODE_ANY)
+        .strip()
+        .lower()
+    )
+    price_per_million_token_cent = request.json.get("price_per_million_token_cent")
+    enabled = bool(request.json.get("enabled", True))
+    if not model_name:
+        return jsonify({"success": False, "error": "模型名称不能为空"}), 400
+    if currency_code not in {database.MODEL_CURRENCY_CNY, database.MODEL_CURRENCY_USD}:
+        return jsonify({"success": False, "error": "币种仅支持 CNY 或 USD"}), 400
+    if reference_video_mode not in {
+        database.REFERENCE_VIDEO_MODE_ANY,
+        database.REFERENCE_VIDEO_MODE_WITH,
+        database.REFERENCE_VIDEO_MODE_WITHOUT,
+    }:
+        return jsonify({"success": False, "error": "参考素材类型不合法"}), 400
+    if price_per_million_token_cent in (None, ""):
+        return jsonify({"success": False, "error": "价格不能为空"}), 400
+    try:
+        price_per_million_token_cent = int(price_per_million_token_cent)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "价格格式错误"}), 400
+    if price_per_million_token_cent <= 0:
+        return jsonify({"success": False, "error": "价格必须大于0"}), 400
+    affected = database.update_model_pricing_by_id(
+        pricing_id=pricing_id,
+        model_name=model_name,
+        currency_code=currency_code,
+        resolution_code=resolution_code,
+        reference_video_mode=reference_video_mode,
+        price_per_million_token_cent=price_per_million_token_cent,
+        enabled=enabled,
+    )
+    if not affected:
+        return jsonify({"success": False, "error": "模型价格记录不存在"}), 404
+    return jsonify({"success": True, "message": "模型价格更新成功"})
+
+
+@admin_bp.route("/api/admin/billing-ledger", methods=["GET"])
+@login_required
+@admin_required
+@handle_api_error
+def get_billing_ledger():
+    user_id = request.args.get("user_id", type=int)
+    page = max(request.args.get("page", 1, type=int), 1)
+    page_size = min(max(request.args.get("page_size", 20, type=int), 1), 200)
+    offset = (page - 1) * page_size
+    items = database.get_account_ledger(user_id=user_id, limit=page_size, offset=offset)
+    total = database.count_account_ledger(user_id=user_id)
+    return jsonify(
+        {
+            "success": True,
+            "data": {
+                "items": items,
+                "pagination": {
+                    "total": total,
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": (total + page_size - 1) // page_size,
+                },
+            },
+        }
+    )
+
+
+@admin_bp.route("/api/admin/role-menu-permissions", methods=["GET"])
+@login_required
+@admin_required
+@handle_api_error
+def get_role_menu_permissions():
+    roles = database.get_role_definitions()
+    permissions = {r["code"]: r.get("menu_keys", []) for r in roles}
+    return jsonify(
+        {
+            "success": True,
+            "data": {
+                "menus": database.MENU_DEFINITIONS,
+                "roles": [r["code"] for r in roles],
+                "role_defs": roles,
+                "permissions": permissions,
+            },
+        }
+    )
+
+
+@admin_bp.route("/api/admin/role-menu-permissions", methods=["POST"])
+@login_required
+@admin_required
+@handle_api_error
+def update_role_menu_permissions():
+    permissions = request.json.get("permissions") if request.is_json else None
+    if not isinstance(permissions, dict):
+        return jsonify({"success": False, "error": "permissions 参数格式错误"}), 400
+    role_defs = database.get_role_definitions()
+    for role in role_defs:
+        role["menu_keys"] = permissions.get(role["code"], role.get("menu_keys", []))
+    saved = database.save_role_definitions(role_defs)
+    return jsonify({"success": True, "message": "菜单权限已保存", "role_defs": saved})
+
+
+@admin_bp.route("/api/admin/roles", methods=["GET"])
+@login_required
+@admin_required
+@handle_api_error
+def get_roles():
+    return jsonify({"success": True, "roles": database.get_role_definitions()})
+
+
+@admin_bp.route("/api/admin/roles", methods=["POST"])
+@login_required
+@admin_required
+@handle_api_error
+def create_role():
+    data = request.get_json(silent=True) or {}
+    role_code = (data.get("code") or "").strip()
+    role_name = (data.get("name") or "").strip()
+    menu_keys = data.get("menu_keys") or []
+    pricing_multiplier = data.get("pricing_multiplier", 1.0)
+    if not role_code or not role_name:
+        return jsonify({"success": False, "error": "角色编码和名称不能为空"}), 400
+    try:
+        pricing_multiplier = float(pricing_multiplier)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "角色倍率格式错误"}), 400
+    if pricing_multiplier <= 0:
+        return jsonify({"success": False, "error": "角色倍率必须大于0"}), 400
+    pricing_multiplier = round(pricing_multiplier, 1)
+    roles = database.get_role_definitions()
+    if any(r["code"] == role_code for r in roles):
+        return jsonify({"success": False, "error": "角色编码已存在"}), 409
+    roles.append(
+        {
+            "code": role_code,
+            "name": role_name,
+            "menu_keys": menu_keys if isinstance(menu_keys, list) else [],
+            "pricing_multiplier": pricing_multiplier,
+            "built_in": False,
+        }
+    )
+    saved = database.save_role_definitions(roles)
+    return jsonify({"success": True, "roles": saved, "message": "角色创建成功"})
+
+
+@admin_bp.route("/api/admin/roles/<role_code>", methods=["PUT"])
+@login_required
+@admin_required
+@handle_api_error
+def update_role(role_code: str):
+    data = request.get_json(silent=True) or {}
+    role_name = (data.get("name") or "").strip()
+    menu_keys = data.get("menu_keys")
+    pricing_multiplier = data.get("pricing_multiplier")
+    roles = database.get_role_definitions()
+    target = next((r for r in roles if r["code"] == role_code), None)
+    if not target:
+        return jsonify({"success": False, "error": "角色不存在"}), 404
+    if role_name:
+        target["name"] = role_name
+    if isinstance(menu_keys, list):
+        target["menu_keys"] = menu_keys
+    if pricing_multiplier is not None:
+        try:
+            parsed = float(pricing_multiplier)
+            if parsed <= 0:
+                return jsonify({"success": False, "error": "角色倍率必须大于0"}), 400
+            target["pricing_multiplier"] = round(parsed, 1)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "角色倍率格式错误"}), 400
+    saved = database.save_role_definitions(roles)
+    return jsonify({"success": True, "roles": saved, "message": "角色更新成功"})
+
+
+@admin_bp.route("/api/admin/roles/<role_code>", methods=["DELETE"])
+@login_required
+@admin_required
+@handle_api_error
+def delete_role(role_code: str):
+    roles = database.get_role_definitions()
+    target = next((r for r in roles if r["code"] == role_code), None)
+    if not target:
+        return jsonify({"success": False, "error": "角色不存在"}), 404
+    if target.get("built_in"):
+        return jsonify({"success": False, "error": "内置角色不可删除"}), 400
+    # ensure no users are using this role
+    users = database.get_all_users()
+    if any((u.get("role_code") or "") == role_code for u in users):
+        return jsonify({"success": False, "error": "该角色仍有用户绑定，无法删除"}), 400
+    roles = [r for r in roles if r["code"] != role_code]
+    saved = database.save_role_definitions(roles)
+    return jsonify({"success": True, "roles": saved, "message": "角色删除成功"})
 
 
 @admin_bp.route("/api/admin/projects", methods=["GET"])
@@ -213,17 +568,19 @@ def get_stats():
     # 获取Token消耗统计
     token_report = database.get_token_usage_report(start_date, end_date)
 
-    return jsonify({
-        "success": True,
-        "data": {
-            "period": {"start": start_date, "end": end_date},
-            "overview": overview,
-            "user_stats": user_stats,
-            "daily_stats": daily_stats,
-            "status_report": status_report,
-            "token_report": token_report,
+    return jsonify(
+        {
+            "success": True,
+            "data": {
+                "period": {"start": start_date, "end": end_date},
+                "overview": overview,
+                "user_stats": user_stats,
+                "daily_stats": daily_stats,
+                "status_report": status_report,
+                "token_report": token_report,
+            },
         }
-    })
+    )
 
 
 @admin_bp.route("/api/admin/operation-logs", methods=["GET"])
@@ -252,13 +609,15 @@ def get_operation_logs():
         path_prefix=path_prefix,
     )
 
-    return jsonify({
-        "success": True,
-        "logs": logs,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    })
+    return jsonify(
+        {
+            "success": True,
+            "logs": logs,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
 @admin_bp.route("/api/admin/operation-logs/cleanup", methods=["POST"])
@@ -274,8 +633,10 @@ def cleanup_operation_logs():
 
     deleted = database.delete_old_operation_logs(days)
 
-    return jsonify({
-        "success": True,
-        "deleted": deleted,
-        "message": f"已删除 {deleted} 条超过 {days} 天的日志",
-    })
+    return jsonify(
+        {
+            "success": True,
+            "deleted": deleted,
+            "message": f"已删除 {deleted} 条超过 {days} 天的日志",
+        }
+    )

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户中心 - AI创作工具</title>
+    <link rel="stylesheet" href="/static/sidebar-nav.css">
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .app-shell { display: flex; min-height: 100vh; }
+        .main-content { flex: 1; min-width: 0; padding: 20px 24px 36px; }
+        .panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .panel { border-radius: 12px; padding: 16px; background: rgba(11,15,26,0.78); border: 1px solid rgba(86,111,255,0.22); }
+        .panel h3 { margin: 0 0 12px; font-size: 18px; color: #e6ebff; }
+        .meta-row { display: flex; justify-content: space-between; border-bottom: 1px solid rgba(86,111,255,0.16); padding: 10px 0; }
+        .meta-row:last-child { border-bottom: 0; }
+        .meta-label { color: #a9b3d3; }
+        .meta-value { font-weight: 600; color: #e6ebff; }
+        .form-row { display: grid; gap: 10px; margin-bottom: 10px; }
+        .form-row input { height: 38px; padding: 0 10px; border: 1px solid rgba(86,111,255,0.3); border-radius: 8px; background: rgba(11,15,26,0.6); color: #e6ebff; }
+        .btn { height: 38px; padding: 0 14px; border-radius: 8px; border: 1px solid rgba(86,111,255,0.45); background: rgba(86,111,255,0.22); color: #dfe5ff; cursor: pointer; }
+        .btn:disabled { opacity: .65; cursor: not-allowed; }
+        .btn-secondary { border-color: rgba(86,111,255,0.24); background: rgba(11,15,26,0.5); color: #9aa8d9; }
+        .toolbar { margin-top: 10px; display: flex; gap: 8px; align-items: center; }
+        .hint { color: #9aa8d9; font-size: 13px; }
+        .records { margin-top: 16px; border-radius: 12px; overflow: hidden; background: rgba(11,15,26,0.78); border: 1px solid rgba(86,111,255,0.22); }
+        .records table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .records th, .records td { padding: 10px 12px; border-bottom: 1px solid rgba(86,111,255,0.14); text-align: left; }
+        .records th { background: rgba(86,111,255,0.15); color: #d7defe; font-weight: 600; }
+        .records td { color: #dce4ff; }
+        .records-empty { padding: 24px; text-align: center; color: #9aa8d9; }
+        .page-header { margin-bottom: 14px; }
+        .page-title { font-size: 22px; margin: 0; color: #e6ebff; }
+        .page-subtitle { color: #a9b3d3; margin-top: 4px; }
+        @media (max-width: 960px) { .panel-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="app-shell">
+        {% set active_page = 'user_center' %}
+        {% include "_shared_sidebar.html" %}
+        <main class="main-content">
+            <div class="page-header">
+                <h1 class="page-title">用户中心</h1>
+                <div class="page-subtitle">查看账户信息、修改密码与消费记录</div>
+            </div>
+
+            <section class="panel-grid">
+                <div class="panel">
+                    <h3>账户信息</h3>
+                    <div class="meta-row"><span class="meta-label">用户名</span><span class="meta-value" id="profileUsername">-</span></div>
+                    <div class="meta-row"><span class="meta-label">角色</span><span class="meta-value" id="profileRole">-</span></div>
+                    <div class="meta-row"><span class="meta-label">当前余额</span><span class="meta-value" id="profileBalance">-</span></div>
+                    <div class="toolbar">
+                        <button class="btn btn-secondary" disabled>充值（暂不可用）</button>
+                        <span class="hint">暂不可用，后续开放</span>
+                    </div>
+                </div>
+                <div class="panel">
+                    <h3>修改密码</h3>
+                    <div class="form-row"><input id="oldPassword" type="password" placeholder="旧密码"></div>
+                    <div class="form-row"><input id="newPassword" type="password" placeholder="新密码（至少6位）"></div>
+                    <div class="form-row"><input id="confirmPassword" type="password" placeholder="确认新密码"></div>
+                    <button class="btn" id="changePasswordBtn">保存新密码</button>
+                    <div class="hint" id="passwordHint"></div>
+                </div>
+            </section>
+
+            <section class="records">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>模型</th>
+                            <th>任务ID</th>
+                            <th>Token(千)</th>
+                            <th>金额(元)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recordsBody"></tbody>
+                </table>
+                <div class="records-empty" id="recordsEmpty" style="display:none;">暂无消费记录</div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/sidebar-nav.js"></script>
+    <script src="/static/sidebar-shared.js"></script>
+    <script>
+        document.body.classList.add('react-theme', 'sidebar-compact');
+
+        function roleText(roleCode) {
+            if (roleCode === 'system_admin') return '系统管理员';
+            if (roleCode === 'internal_user') return '内部用户';
+            return '外部用户';
+        }
+
+        function centToYuan(cent) {
+            return (Number(cent || 0) / 100).toFixed(2);
+        }
+
+        async function loadProfile() {
+            const resp = await fetch('/api/user/profile');
+            const data = await resp.json();
+            if (!data.success) throw new Error(data.error || '加载账户信息失败');
+            const profile = data.data || {};
+            document.getElementById('profileUsername').textContent = profile.username || '-';
+            document.getElementById('profileRole').textContent = roleText(profile.role_code);
+            document.getElementById('profileBalance').textContent = `${centToYuan(profile.balance_cent)} 元`;
+        }
+
+        async function loadRecords() {
+            const resp = await fetch('/api/user/consumption-records?page=1&page_size=50');
+            const data = await resp.json();
+            const body = document.getElementById('recordsBody');
+            const empty = document.getElementById('recordsEmpty');
+            body.innerHTML = '';
+            if (!data.success || !data.data || !data.data.items || data.data.items.length === 0) {
+                empty.style.display = '';
+                return;
+            }
+            empty.style.display = 'none';
+            data.data.items.forEach((item) => {
+                const tokenK = (Number(item.tokens_billed || item.tokens_raw || 0) / 1000).toFixed(1);
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${item.created_at || '-'}</td>
+                    <td>${item.model_code || '-'}</td>
+                    <td>${item.biz_id || '-'}</td>
+                    <td>${tokenK}</td>
+                    <td>${centToYuan(item.amount_cent)}</td>
+                `;
+                body.appendChild(tr);
+            });
+        }
+
+        async function changePassword() {
+            const hint = document.getElementById('passwordHint');
+            hint.textContent = '';
+            const payload = {
+                old_password: document.getElementById('oldPassword').value,
+                new_password: document.getElementById('newPassword').value,
+                confirm_password: document.getElementById('confirmPassword').value,
+            };
+            const resp = await fetch('/api/user/change-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const data = await resp.json();
+            if (!data.success) {
+                hint.textContent = data.error || '修改失败';
+                hint.style.color = '#d14343';
+                return;
+            }
+            hint.textContent = '密码修改成功';
+            hint.style.color = '#2f9e44';
+            document.getElementById('oldPassword').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('confirmPassword').value = '';
+        }
+
+        document.getElementById('changePasswordBtn').addEventListener('click', changePassword);
+        Promise.all([loadProfile(), loadRecords()]).catch((err) => {
+            alert(err.message || '加载失败');
+        });
+    </script>
+</body>
+</html>

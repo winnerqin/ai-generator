@@ -59,6 +59,9 @@ class Config:
     ARK_API_KEY: str = ""
     ARK_BASE_URL: str = "https://ark.cn-beijing.volces.com/api/v3"
     SEEDANCE_OMNI_MODEL: str = "doubao-seedance-2-0-260128"
+    SEEDANCE_OMNI_MODEL_INTERNAL: str = "doubao-seedance-2-0-260128"
+    SEEDANCE_OMNI_MODEL_EXTERNAL: str = "doubao-seedance-2-0-fast-260128"
+    SEEDANCE_OMNI_MODEL_ALIASES: str = ""
     SEEDANCE_OMNI_CREATE_PATH: str = "/contents/generations/tasks"
     SEEDANCE_OMNI_QUERY_PATH: str = "/contents/generations/tasks/{task_id}"
     SEEDANCE_OMNI_LIST_PATH: str = "/contents/generations/tasks"
@@ -147,6 +150,15 @@ class Config:
         self.ARK_API_KEY = os.environ.get("ARK_API_KEY", self.ARK_API_KEY)
         self.ARK_BASE_URL = os.environ.get("ARK_BASE_URL", self.ARK_BASE_URL)
         self.SEEDANCE_OMNI_MODEL = os.environ.get("SEEDANCE_OMNI_MODEL", self.SEEDANCE_OMNI_MODEL)
+        self.SEEDANCE_OMNI_MODEL_INTERNAL = os.environ.get(
+            "SEEDANCE_OMNI_MODEL_INTERNAL", self.SEEDANCE_OMNI_MODEL_INTERNAL
+        )
+        self.SEEDANCE_OMNI_MODEL_EXTERNAL = os.environ.get(
+            "SEEDANCE_OMNI_MODEL_EXTERNAL", self.SEEDANCE_OMNI_MODEL_EXTERNAL
+        )
+        self.SEEDANCE_OMNI_MODEL_ALIASES = os.environ.get(
+            "SEEDANCE_OMNI_MODEL_ALIASES", self.SEEDANCE_OMNI_MODEL_ALIASES
+        )
         self.SEEDANCE_OMNI_CREATE_PATH = os.environ.get(
             "SEEDANCE_OMNI_CREATE_PATH", self.SEEDANCE_OMNI_CREATE_PATH
         )
@@ -216,6 +228,39 @@ class Config:
     def is_seedance_intl_configured(self) -> bool:
         """检查是否配置了 Seedance 2.0 国际版全能视频接口。"""
         return bool(self.ARK_INTL_API_KEY and self.ARK_INTL_BASE_URL and self.SEEDANCE_INTL_MODEL)
+
+    @staticmethod
+    def _parse_csv_models(value: str | None) -> list[str]:
+        if not value:
+            return []
+        items = [part.strip() for part in str(value).split(",")]
+        return [item for item in items if item]
+
+    def get_omni_model_list_internal(self) -> list[str]:
+        return self._parse_csv_models(self.SEEDANCE_OMNI_MODEL_INTERNAL) or self._parse_csv_models(
+            self.SEEDANCE_OMNI_MODEL
+        )
+
+    def get_omni_model_list_external(self) -> list[str]:
+        return self._parse_csv_models(self.SEEDANCE_OMNI_MODEL_EXTERNAL) or self._parse_csv_models(
+            self.SEEDANCE_OMNI_MODEL
+        )
+
+    def get_omni_model_alias_map(self) -> dict[str, str]:
+        pairs = self._parse_csv_models(self.SEEDANCE_OMNI_MODEL_ALIASES)
+        result: dict[str, str] = {}
+        for pair in pairs:
+            if ":" in pair:
+                key, value = pair.split(":", 1)
+            elif "=" in pair:
+                key, value = pair.split("=", 1)
+            else:
+                continue
+            model_code = key.strip()
+            alias = value.strip()
+            if model_code and alias:
+                result[model_code] = alias
+        return result
 
     def is_video_enhance_configured(self) -> bool:
         """检查是否配置了视频画质增强接口。"""

@@ -98,15 +98,7 @@
                     <div class="field-row">
                         <div class="field">
                             <label for="model">模型</label>
-                            <select id="model">
-                                <optgroup label="国内版">
-                                    <option value="doubao-seedance-2-0-260128">doubao-seedance-2-0-260128</option>
-                                    <option value="doubao-seedance-2-0-fast-260128">doubao-seedance-2-0-fast-260128</option>
-                                </optgroup>
-                                <optgroup label="国际版">
-                                    <option value="dreamina-seedance-2-0-260128">dreamina-seedance-2-0-260128</option>
-                                </optgroup>
-                            </select>
+                            <select id="model"></select>
                         </div>
                         <div class="field">
                             <label for="resolution">输出分辨率</label>
@@ -264,6 +256,7 @@
         let pickerAssets = [];
         let tempSelectedIds = new Set();
         let selectedAssets = [];
+        let omniConfig = { models: [], default_model: null, model_aliases: {}, configured: false };
 
         function debugLog(label, payload) {
             console.group(`[OmniVideo] ${label}`);
@@ -324,7 +317,47 @@
         }
 
         function supports1080p(model) {
-            return model === 'doubao-seedance-2-0-260128' || model === 'dreamina-seedance-2-0-260128';
+            const alias = (omniConfig.model_aliases && omniConfig.model_aliases[model]) || '';
+            return model === 'doubao-seedance-2-0-260128'
+                || model === 'dreamina-seedance-2-0-260128'
+                || alias === 'doubao-seedance-2-0-260128'
+                || alias === 'dreamina-seedance-2-0-260128';
+        }
+
+        function modelAlias(model) {
+            return (omniConfig.model_aliases && omniConfig.model_aliases[model]) || model || '-';
+        }
+
+        function renderModelOptions(models, preferredModel) {
+            const modelEl = document.getElementById('model');
+            const list = Array.isArray(models) ? models.filter(Boolean) : [];
+            if (!list.length) {
+                modelEl.innerHTML = '<option value="">未配置可用模型</option>';
+                modelEl.value = '';
+                return;
+            }
+            modelEl.innerHTML = list.map((model) => `<option value="${model}">${modelAlias(model)}</option>`).join('');
+            if (preferredModel && list.includes(preferredModel)) {
+                modelEl.value = preferredModel;
+            } else {
+                modelEl.value = list[0];
+            }
+        }
+
+        async function loadOmniConfig() {
+            try {
+                const resp = await fetch('/api/omni-video/config');
+                const data = await resp.json();
+                if (!resp.ok || !data.success) {
+                    throw new Error(data.error || '加载配置失败');
+                }
+                omniConfig = data;
+                renderModelOptions(data.models || [], data.default_model || '');
+            } catch (error) {
+                console.error('load omni config failed', error);
+                renderModelOptions([], '');
+            }
+            syncResolutionOptions();
         }
 
         function syncResolutionOptions() {
@@ -672,7 +705,7 @@
                 <div><strong>文件名：</strong>${task.filename || '-'}</div>
                 <div><strong>任务ID：</strong>${task.task_id || '-'}</div>
                 <div><strong>状态：</strong>${task.status || '-'}</div>
-                <div><strong>模型：</strong>${task.model || inputPayload.model || '-'}</div>
+                <div><strong>模型：</strong>${modelAlias(task.model || inputPayload.model || '-')}</div>
                 <div><strong>分辨率：</strong>${task.resolution || inputPayload.resolution || '-'}</div>
                 <div><strong>比例：</strong>${task.aspect_ratio || inputPayload.aspect_ratio || inputPayload.ratio || '-'}</div>
                 <div><strong>时长：</strong>${inputPayload.frame_count ? '-' : (inputPayload.duration ?? '-')}</div>
@@ -760,8 +793,10 @@
 
         renderSelectedAssets();
         syncDurationState();
-        applyRegeneratePrefill();
-        syncResolutionOptions();
+        loadOmniConfig().then(() => {
+            applyRegeneratePrefill();
+            syncResolutionOptions();
+        });
 
         // 账户余额查询逻辑
         const BALANCE_REFRESH_MS = 60 * 60 * 1000; // 1小时
