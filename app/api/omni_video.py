@@ -11,6 +11,7 @@ import volcenginesdkcore
 from flask import Blueprint, jsonify, render_template, request, send_file, session
 from volcenginesdkcore.rest import ApiException
 
+import database
 from app.config import config
 from app.decorators import handle_api_error, login_required
 from app.services.omni_video_service import get_models_for_role, omni_video_service
@@ -289,6 +290,19 @@ def get_volcengine_balance():
     start_time = time.time()
     user_id = session.get("user_id")
     username = session.get("username")
+    role_code = session.get("role_code")
+
+    if role_code == database.ROLE_EXTERNAL_USER:
+        user = database.get_user_by_id(user_id)
+        user_balance_cent = user.get("balance_cent", 0) if user else 0
+        return jsonify(
+            {
+                "success": True,
+                "role_code": role_code,
+                "balance_type": "user",
+                "available_balance": float(user_balance_cent or 0) / 100.0,
+            }
+        )
 
     if not config.is_volcengine_configured():
         log_balance_query(
@@ -334,7 +348,14 @@ def get_volcengine_balance():
             duration_ms=duration_ms,
         )
 
-        return jsonify({"success": True, "available_balance": balance})
+        return jsonify(
+            {
+                "success": True,
+                "role_code": role_code,
+                "balance_type": "system",
+                "available_balance": balance,
+            }
+        )
     except ApiException as e:
         duration_ms = int((time.time() - start_time) * 1000)
         error_str = str(e)
