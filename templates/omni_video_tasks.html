@@ -501,10 +501,19 @@
             };
         }
 
+        function hasPrefillData(task) {
+            if (!task || typeof task !== 'object') return false;
+            const payload = task.input_payload_json;
+            const refs = task.reference_urls_json;
+            const hasPayload = payload && typeof payload === 'object' && Object.keys(payload).length > 0;
+            const hasRefs = Array.isArray(refs) && refs.length > 0;
+            return hasPayload || hasRefs;
+        }
+
         async function regenerateTask(taskId) {
             const decodedTaskId = decodeURIComponent(taskId);
             let task = currentItems.find((item) => item.task_id === decodedTaskId);
-            if (!task || !(task.input_payload_json || task.reference_urls_json)) {
+            if (!hasPrefillData(task)) {
                 try {
                     task = await fetchTask(taskId);
                 } catch (error) {

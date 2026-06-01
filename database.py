@@ -1208,21 +1208,33 @@ def _ensure_omni_video_task_schema(cursor):
 
 def _decode_omni_video_task(row):
     task = dict(row)
-    for field in (
-        "input_payload_json",
-        "raw_response_json",
-        "result_json",
-        "reference_urls_json",
-        "usage_json",
-    ):
+    json_field_defaults = {
+        "input_payload_json": {},
+        "raw_response_json": {},
+        "result_json": {},
+        "reference_urls_json": [],
+        "usage_json": {},
+    }
+    for field, default_value in json_field_defaults.items():
         raw = task.get(field)
-        if not raw:
-            task[field] = [] if field == "reference_urls_json" else {}
+        if raw in (None, ""):
+            task[field] = default_value.copy() if isinstance(default_value, (dict, list)) else default_value
+            continue
+        # MySQL JSON columns may already be decoded into native Python objects.
+        if field == "reference_urls_json" and isinstance(raw, list):
+            task[field] = raw
+            continue
+        if field != "reference_urls_json" and isinstance(raw, dict):
+            task[field] = raw
             continue
         try:
-            task[field] = json.loads(raw)
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            if field == "reference_urls_json":
+                task[field] = parsed if isinstance(parsed, list) else []
+            else:
+                task[field] = parsed if isinstance(parsed, dict) else {}
         except Exception:
-            task[field] = [] if field == "reference_urls_json" else {}
+            task[field] = default_value.copy() if isinstance(default_value, (dict, list)) else default_value
     return task
 
 
