@@ -652,6 +652,10 @@
                     if (idx !== -1) {
                         currentItems[idx] = data.task;
                     }
+                    renderTaskRows();
+                    if (currentTaskId === decodedTaskId && detailExpanded) {
+                        document.getElementById('detailBox').innerHTML = renderDetails(data.task);
+                    }
                 }
                 showToast('任务已刷新');
             }).catch((error) => {
