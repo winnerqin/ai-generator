@@ -94,7 +94,12 @@ def _effective_multiplier(user: dict) -> Decimal:
     role_code = user.get("role_code") or database.ROLE_EXTERNAL_USER
     role_multiplier = Decimal(str(database.get_role_pricing_multiplier(role_code) or 1))
     user_multiplier = Decimal(str(user.get("pricing_multiplier") or 1))
-    return role_multiplier if role_multiplier > 0 else user_multiplier
+    return user_multiplier if user_multiplier > 0 else role_multiplier
+
+
+def _multiplied_tokens(tokens_raw: int, multiplier: Decimal) -> int:
+    value = Decimal(int(tokens_raw or 0)) * multiplier
+    return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def _normalize_filename(value: Any) -> str | None:
@@ -605,7 +610,9 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
 
     # 金额：优先展示已入账金额；未入账则按 token*模型价格*倍率 估算
     amount_cent = None
-    if task.get("task_id") and task.get("user_id"):
+    if "_ledger_amount_cent" in task:
+        amount_cent = task.get("_ledger_amount_cent")
+    elif task.get("task_id") and task.get("user_id"):
         amount_cent = database.get_ledger_debit_amount_cent(
             task.get("user_id"),
             "omni_video",
@@ -631,17 +638,15 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
                     break
             user = database.get_user_by_id(task.get("user_id"))
             if pricing and user:
-                tokens_billed = database.compute_tokens_billed(token_usage)
                 price_per_million_cny_cent = _pricing_to_cny_cent(
                     int(pricing.get("price_per_million_token_cent") or 0),
                     str(pricing.get("currency_code") or database.MODEL_CURRENCY_CNY),
                 )
                 unit_price_cent_per_ktoken = price_per_million_cny_cent / Decimal(1000)
                 multiplier = _effective_multiplier(user)
+                tokens_billed = _multiplied_tokens(int(token_usage), multiplier)
                 amount_cent = _to_cent(
-                    (Decimal(tokens_billed) / Decimal(1000))
-                    * unit_price_cent_per_ktoken
-                    * multiplier
+                    (Decimal(tokens_billed) / Decimal(1000)) * unit_price_cent_per_ktoken
                 )
         except Exception:
             amount_cent = None
@@ -1099,6 +1104,13 @@ class OmniVideoService:
             start_date=start_date,
             end_date=end_date,
         )
+        ledger_amounts = database.get_ledger_debit_amounts_cent(
+            user_id,
+            "omni_video",
+            [item.get("task_id") for item in items],
+        )
+        for item in items:
+            item["_ledger_amount_cent"] = ledger_amounts.get(str(item.get("task_id") or ""))
 
         # Keep list API fast: avoid remote polling and OSS backfill by default.
         # Detail/refresh endpoints remain the explicit sync path.

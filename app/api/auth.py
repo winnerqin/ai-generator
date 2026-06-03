@@ -2,6 +2,9 @@
 认证相关 API
 """
 
+import json
+from decimal import ROUND_HALF_UP, Decimal
+
 from flask import Blueprint, redirect, render_template, request, session, url_for
 from flask_jwt_extended import jwt_required
 
@@ -279,6 +282,55 @@ def change_password():
     return ApiResponse.success(message="密码修改成功")
 
 
+def _display_tokens_for_ledger_item(item):
+    tokens_raw = item.get("tokens_raw")
+    multiplier = item.get("multiplier")
+    if tokens_raw not in (None, "") and multiplier not in (None, ""):
+        value = Decimal(str(tokens_raw)) * Decimal(str(multiplier))
+        return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return item.get("tokens_billed") or tokens_raw
+
+
+def _pricing_by_model_code():
+    pricings = database.get_model_pricing_list(enabled=True)
+    result = {}
+    for pricing in pricings:
+        model_code = pricing.get("model_code")
+        if model_code and model_code not in result:
+            result[model_code] = pricing
+    return result
+
+
+def _attach_consumption_display_fields(items):
+    pricing_map = _pricing_by_model_code()
+    for item in items:
+        item["display_tokens"] = _display_tokens_for_ledger_item(item)
+        pricing = pricing_map.get(item.get("model_code"))
+        if not pricing and item.get("snapshot_json"):
+            try:
+                snapshot = json.loads(item.get("snapshot_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                snapshot = {}
+            if snapshot.get("price_per_million_token_cent"):
+                pricing = {
+                    "currency_code": snapshot.get("currency_code") or database.MODEL_CURRENCY_CNY,
+                    "price_per_million_token_cent": snapshot.get("price_per_million_token_cent"),
+                }
+        if pricing:
+            item["model_price"] = {
+                "currency_code": pricing.get("currency_code") or database.MODEL_CURRENCY_CNY,
+                "price_per_million_token_cent": pricing.get("price_per_million_token_cent"),
+            }
+    return items
+
+
+@auth_bp.route("/api/user/model-pricing", methods=["GET"])
+@login_required
+def get_user_model_pricing():
+    items = database.get_model_pricing_list(enabled=True)
+    return ApiResponse.success({"items": items})
+
+
 @auth_bp.route("/api/user/consumption-records", methods=["GET"])
 @login_required
 def get_user_consumption_records():
@@ -291,6 +343,7 @@ def get_user_consumption_records():
         offset=offset,
         biz_type="omni_video",
     )
+    items = _attach_consumption_display_fields(items)
     total = database.count_account_ledger(
         user_id=session.get("user_id"),
         entry_type="debit",

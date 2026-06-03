@@ -22,11 +22,16 @@
         .task-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; min-width: 1280px; }
         .task-table th, .task-table td { padding: 10px 12px; border-bottom: 1px solid rgba(86,111,255,0.18); text-align: left; vertical-align: top; }
         .task-table th { font-weight: 600; white-space: nowrap; }
+        .select-cell { width: 34px; text-align: center; }
+        .task-check { width: 16px; height: 16px; cursor: pointer; }
         .task-table td.filename-cell { min-width: 96px; max-width: 130px; word-break: break-all; }
         .status-pill { display: inline-block; padding: 4px 10px; border-radius: 999px; background: rgba(86,111,255,0.16); }
         .actions { display: grid; grid-template-columns: repeat(3, minmax(60px, 1fr)); gap: 6px; min-width: 210px; }
         .actions .btn { width: 100%; padding-left: 8px; padding-right: 8px; }
         .actions .btn[disabled] { opacity: 0.35; filter: grayscale(1); border-color: rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: #7d86a8; }
+        .btn.is-loading { opacity: 0.72; cursor: progress; position: relative; pointer-events: none; }
+        .btn.is-loading::after { content: ""; display: inline-block; width: 12px; height: 12px; margin-left: 6px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -2px; animation: spin 0.72s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
         .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .detail-card { border-radius: 14px; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(86,111,255,0.16); }
         .detail-card pre { white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; }
@@ -39,6 +44,13 @@
         .preview-inner { width: min(860px, 92vw); max-height: 88vh; padding: 18px; border-radius: 16px; background: rgba(8,13,24,0.96); }
         .preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
         .preview-video { width: 100%; max-height: 72vh; border-radius: 12px; background: rgba(0,0,0,0.24); }
+        .btn:not([disabled]) { transition: transform 0.12s ease, opacity 0.12s ease, filter 0.12s ease; }
+        .btn:not([disabled]):active { transform: translateY(1px) scale(0.98); }
+        .toast-area { position: fixed; right: 18px; bottom: 18px; z-index: 4000; display: grid; gap: 10px; max-width: min(360px, calc(100vw - 32px)); }
+        .toast { padding: 12px 14px; border-radius: 10px; background: rgba(14,20,36,0.96); border: 1px solid rgba(86,111,255,0.28); box-shadow: 0 14px 36px rgba(0,0,0,0.32); color: #e6ebff; font-size: 0.92rem; }
+        .toast-success { border-color: rgba(46,204,113,0.5); }
+        .toast-warning { border-color: rgba(245,166,35,0.55); }
+        .toast-error { border-color: rgba(235,87,87,0.6); }
         .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
         @media (max-width: 980px) {
             .page-wrap { padding: 16px; }
@@ -96,6 +108,7 @@
             </div>
             <div class="inline-options" style="margin-top: 12px;">
                 <button id="refreshPendingBtn" class="btn btn-secondary">刷新</button>
+                <button id="deleteSelectedBtn" class="btn btn-danger" disabled>删除所选</button>
                 <label style="display:flex; align-items:center; gap:8px;">
                     <input id="autoRefresh" type="checkbox" checked>
                     <span>自动刷新未完成任务</span>
@@ -108,6 +121,7 @@
             <table class="task-table">
                 <thead>
                     <tr>
+                        <th class="select-cell"><input id="selectAllTasks" class="task-check" type="checkbox" aria-label="全选任务"></th>
                         <th>任务 ID</th>
                         <th>状态</th>
                         <th>模型</th>
@@ -124,7 +138,7 @@
                     </tr>
                 </thead>
                 <tbody id="taskRows">
-                    <tr><td colspan="13">加载中...</td></tr>
+                    <tr><td colspan="14">加载中...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -156,6 +170,35 @@
             <video id="previewVideo" class="preview-video" controls></video>
         </div>
     </div>
+    <div id="enhanceModal" class="preview-modal" style="display:none;">
+        <div class="preview-inner" style="width:min(500px, 92vw);">
+            <div class="preview-header">
+                <div id="enhanceModalTitle" style="font-weight:600;">画质增强</div>
+                <button class="btn btn-secondary" id="enhanceModalClose">关闭</button>
+            </div>
+            <div style="padding:12px 0;">
+                <div class="small-hint" style="margin-bottom:12px;">原视频：<span id="enhanceSourceFilename"></span></div>
+                <div>
+                    <label for="enhanceToolVersion" style="display:block;margin-bottom:6px;">工具版本</label>
+                    <select id="enhanceToolVersion" style="width:100%;padding:8px;border-radius:8px;">
+                        <option value="standard" selected>standard（推荐）</option>
+                        <option value="professional">professional</option>
+                    </select>
+                </div>
+                <div style="margin-top:12px;">
+                    <label for="enhanceResolution" style="display:block;margin-bottom:6px;">目标分辨率</label>
+                    <select id="enhanceResolution" style="width:100%;padding:8px;border-radius:8px;">
+                        <option value="720p">720p</option>
+                        <option value="1080p" selected>1080p（推荐）</option>
+                        <option value="2k">2K</option>
+                        <option value="4k">4K</option>
+                    </select>
+                </div>
+                <button id="submitEnhanceBtn" class="btn btn-primary" style="width:100%;margin-top:16px;">开始增强</button>
+            </div>
+        </div>
+    </div>
+    <div id="toastArea" class="toast-area" aria-live="polite" aria-atomic="true"></div>
 
     <script src="/static/sidebar-nav.js"></script>
     <script src="/static/sidebar-shared.js"></script>
@@ -171,11 +214,51 @@
         let detailExpanded = false;
         let autoRefreshTimer = null;
         let modelAliases = {};
+        let taskListLoading = false;
+        let selectedTaskIds = new Set();
+        let currentEnhanceTask = null;
 
         function debugLog(label, payload) {
             console.group(`[OmniVideoTasks] ${label}`);
             console.log(payload);
             console.groupEnd();
+        }
+
+        function showToast(message, type = 'success') {
+            const area = document.getElementById('toastArea');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            area.appendChild(toast);
+            window.setTimeout(() => {
+                toast.remove();
+            }, 3200);
+        }
+
+        async function withButtonBusy(button, busyText, action, options = {}) {
+            if (!button) return action();
+            if (button.disabled || button.classList.contains('is-loading')) {
+                return;
+            }
+            const shouldRestoreText = options.restoreText !== false;
+            const oldText = button.textContent;
+            const oldWidth = button.offsetWidth;
+            button.disabled = true;
+            button.classList.add('is-loading');
+            button.setAttribute('aria-busy', 'true');
+            button.style.minWidth = `${oldWidth}px`;
+            button.textContent = busyText;
+            try {
+                return await action();
+            } finally {
+                button.disabled = false;
+                button.classList.remove('is-loading');
+                button.removeAttribute('aria-busy');
+                button.style.minWidth = '';
+                if (shouldRestoreText) {
+                    button.textContent = oldText;
+                }
+            }
         }
 
         function escapeHtml(value) {
@@ -211,6 +294,10 @@
             return Boolean(task && task.video_url);
         }
 
+        function canEnhanceTask(task) {
+            return Boolean(task && task.video_url);
+        }
+
         function downloadTask(taskId) {
             const decodedTaskId = decodeURIComponent(taskId);
             const task = currentItems.find((item) => item.task_id === decodedTaskId);
@@ -223,9 +310,11 @@
             link.remove();
         }
 
-        function canDelete(task) {
-            const status = String(task.status || '').toLowerCase();
-            return !['running', 'cancelled', 'canceled'].includes(status);
+        async function downloadTaskWithFeedback(taskId, button = null) {
+            return withButtonBusy(button, '下载中...', async () => {
+                downloadTask(taskId);
+                await new Promise((resolve) => window.setTimeout(resolve, 450));
+            });
         }
 
         function canRefreshTask(task) {
@@ -249,6 +338,45 @@
             currentTaskId = null;
             detailExpanded = false;
             document.getElementById('detailBox').innerHTML = `<div class="detail-card">${escapeHtml(message)}</div>`;
+            updateViewButtonLabels();
+        }
+
+        function updateViewButtonLabels(activeTaskId = null) {
+            document.querySelectorAll('.task-view-btn').forEach((button) => {
+                button.textContent = button.dataset.taskId === activeTaskId ? '收起' : '查看';
+            });
+        }
+
+        function updateSelectionControls() {
+            const deleteBtn = document.getElementById('deleteSelectedBtn');
+            const selectAll = document.getElementById('selectAllTasks');
+            const visibleIds = currentItems.map((item) => item.task_id).filter(Boolean);
+            const selectedVisibleCount = visibleIds.filter((taskId) => selectedTaskIds.has(taskId)).length;
+            deleteBtn.disabled = selectedTaskIds.size === 0;
+            deleteBtn.textContent = selectedTaskIds.size ? `删除所选(${selectedTaskIds.size})` : '删除所选';
+            if (selectAll) {
+                selectAll.checked = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+                selectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleIds.length;
+            }
+        }
+
+        function toggleTaskSelection(taskId, checked) {
+            if (!taskId) return;
+            if (checked) selectedTaskIds.add(taskId);
+            else selectedTaskIds.delete(taskId);
+            updateSelectionControls();
+        }
+
+        function toggleAllVisibleTasks(checked) {
+            currentItems.forEach((task) => {
+                if (!task.task_id) return;
+                if (checked) selectedTaskIds.add(task.task_id);
+                else selectedTaskIds.delete(task.task_id);
+            });
+            document.querySelectorAll('.task-row-check').forEach((checkbox) => {
+                checkbox.checked = checked;
+            });
+            updateSelectionControls();
         }
 
         function currentFilters() {
@@ -260,38 +388,11 @@
             };
         }
 
-        async function loadTasks(page = currentPage) {
-            currentPage = page;
-            const filters = currentFilters();
-            const params = new URLSearchParams({ page: String(currentPage), page_size: String(PAGE_SIZE) });
-            params.set('sync_running', 'false');
-            if (filters.search) params.set('search', filters.search);
-            if (filters.status) params.set('status', filters.status);
-            if (filters.start_date) params.set('start_date', filters.start_date);
-            if (filters.end_date) params.set('end_date', filters.end_date);
-
-            debugLog('list request', { ...filters, page: currentPage, page_size: PAGE_SIZE });
-            const resp = await fetch(`/api/omni-video/tasks?${params.toString()}`);
-            const data = await resp.json();
-            debugLog('list response', data);
+        function renderTaskRows() {
             const tbody = document.getElementById('taskRows');
-            if (!data.success) {
-                tbody.innerHTML = '<tr><td colspan="13">加载失败</td></tr>';
-                return;
-            }
-
-            currentItems = data.items || [];
-            currentTotal = data.total || 0;
-            updatePager();
-
-            if (!currentItems.length) {
-                tbody.innerHTML = '<tr><td colspan="13">暂无任务</td></tr>';
-                collapseDetails('当前没有可查看的任务。');
-                return;
-            }
-
             tbody.innerHTML = currentItems.map((task) => `
                 <tr>
+                    <td class="select-cell"><input class="task-check task-row-check" type="checkbox" data-task-id="${escapeHtml(task.task_id || '')}" ${selectedTaskIds.has(task.task_id) ? 'checked' : ''} onchange="toggleTaskSelection(this.dataset.taskId, this.checked)" aria-label="选择任务 ${escapeHtml(task.task_id || '')}"></td>
                     <td>${escapeHtml(task.task_id || '-')}</td>
                     <td><span class="status-pill">${escapeHtml(task.status || '-')}</span></td>
                     <td>${escapeHtml(modelAlias(task.model || '-'))}</td>
@@ -306,23 +407,76 @@
                     <td>${escapeHtml(task.updated_at || '-')}</td>
                     <td>
                         <div class="actions">
-                            <button class="btn btn-secondary" onclick="viewTask('${encodeURIComponent(task.task_id || '')}')">${currentTaskId === task.task_id && detailExpanded ? '收起' : '查看'}</button>
-                            <button class="btn btn-secondary" onclick="previewTask('${encodeURIComponent(task.task_id || '')}')">预览</button>
-                            <button class="btn btn-secondary" ${canDownload(task) ? '' : 'disabled title="视频生成成功后可下载"'} onclick="${canDownload(task) ? `downloadTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">下载</button>
-                            <button class="btn btn-secondary" ${canRefreshTask(task) ? '' : 'disabled title="仅 queued/running 状态可刷新"'} onclick="${canRefreshTask(task) ? `refreshTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">刷新</button>
-                            <button class="btn btn-secondary" onclick="regenerateTask('${encodeURIComponent(task.task_id || '')}')">重做</button>
-                            <button class="btn btn-danger" ${canDelete(task) ? '' : 'disabled'} onclick="${canDelete(task) ? `deleteTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">删除</button>
+                            <button class="btn btn-secondary task-view-btn" data-task-id="${escapeHtml(task.task_id || '')}" onclick="viewTask('${encodeURIComponent(task.task_id || '')}', this)">${currentTaskId === task.task_id && detailExpanded ? '收起' : '查看'}</button>
+                            <button class="btn btn-secondary" onclick="previewTask('${encodeURIComponent(task.task_id || '')}', this)">预览</button>
+                            <button class="btn btn-secondary" ${canDownload(task) ? '' : 'disabled title="视频生成成功后可下载"'} onclick="${canDownload(task) ? `downloadTaskWithFeedback('${encodeURIComponent(task.task_id || '')}', this)` : 'return false;'}">下载</button>
+                            <button class="btn btn-secondary" ${canRefreshTask(task) ? '' : 'disabled title="仅 queued/running 状态可刷新"'} onclick="${canRefreshTask(task) ? `refreshTask('${encodeURIComponent(task.task_id || '')}', this)` : 'return false;'}">刷新</button>
+                            <button class="btn btn-secondary" onclick="regenerateTask('${encodeURIComponent(task.task_id || '')}', this)">重做</button>
+                            <button class="btn btn-secondary" ${canEnhanceTask(task) ? '' : 'disabled title="视频生成成功后可增强"'} onclick="${canEnhanceTask(task) ? `openEnhanceModalForTask('${encodeURIComponent(task.task_id || '')}', this)` : 'return false;'}">增强</button>
                         </div>
                     </td>
                 </tr>
             `).join('');
+            updateSelectionControls();
+        }
+
+        async function loadTasks(page = currentPage) {
+            if (taskListLoading) {
+                showToast('任务列表正在加载，请稍候。', 'warning');
+                return;
+            }
+            taskListLoading = true;
+            currentPage = page;
+            updatePager();
+            const filters = currentFilters();
+            const params = new URLSearchParams({ page: String(currentPage), page_size: String(PAGE_SIZE) });
+            params.set('sync_running', 'false');
+            if (filters.search) params.set('search', filters.search);
+            if (filters.status) params.set('status', filters.status);
+            if (filters.start_date) params.set('start_date', filters.start_date);
+            if (filters.end_date) params.set('end_date', filters.end_date);
+
+            debugLog('list request', { ...filters, page: currentPage, page_size: PAGE_SIZE });
+            const tbody = document.getElementById('taskRows');
+            tbody.innerHTML = '<tr><td colspan="14">加载中...</td></tr>';
+            let data;
+            try {
+                const resp = await fetch(`/api/omni-video/tasks?${params.toString()}`);
+                data = await resp.json();
+                debugLog('list response', data);
+                if (!resp.ok || !data.success) {
+                    throw new Error(data.error || '加载失败');
+                }
+            } catch (error) {
+                tbody.innerHTML = `<tr><td colspan="14">${escapeHtml(error.message || '加载失败')}</td></tr>`;
+                showToast(error.message || '加载任务失败', 'error');
+                return;
+            } finally {
+                taskListLoading = false;
+                updatePager();
+            }
+
+            currentItems = data.items || [];
+            selectedTaskIds = new Set([...selectedTaskIds].filter((taskId) => currentItems.some((task) => task.task_id === taskId)));
+            currentTotal = data.total || 0;
+            updatePager();
+            updateSelectionControls();
+
+            if (!currentItems.length) {
+                tbody.innerHTML = '<tr><td colspan="14">暂无任务</td></tr>';
+                collapseDetails('当前没有可查看的任务。');
+                updateSelectionControls();
+                return;
+            }
+
+            renderTaskRows();
         }
 
         function updatePager() {
             const totalPages = Math.max(1, Math.ceil(currentTotal / PAGE_SIZE));
             document.getElementById('pagerInfo').textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页，合计 ${currentTotal} 条`;
-            document.getElementById('prevPageBtn').disabled = currentPage <= 1;
-            document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
+            document.getElementById('prevPageBtn').disabled = taskListLoading || currentPage <= 1;
+            document.getElementById('nextPageBtn').disabled = taskListLoading || currentPage >= totalPages;
         }
 
         function renderReferences(task) {
@@ -407,80 +561,102 @@
             modal.style.display = 'none';
         }
 
-        async function viewTask(taskId) {
+        async function viewTask(taskId, button = null) {
             const decodedTaskId = decodeURIComponent(taskId);
             if (currentTaskId === decodedTaskId && detailExpanded) {
                 collapseDetails();
-                await loadTasks(currentPage);
                 return;
             }
 
-            try {
+            return withButtonBusy(button, '查看中...', async () => {
                 const task = await fetchTask(taskId);
                 currentTaskId = decodedTaskId;
                 detailExpanded = true;
                 document.getElementById('detailBox').innerHTML = renderDetails(task);
-                await loadTasks(currentPage);
-            } catch (error) {
+                updateViewButtonLabels(decodedTaskId);
+            }, { restoreText: false }).catch((error) => {
                 collapseDetails(error.message || '任务不存在或加载失败。');
-            }
+                showToast(error.message || '任务不存在或加载失败', 'error');
+            });
         }
 
-        async function previewTask(taskId) {
+        async function previewTask(taskId, button = null) {
             const decodedTaskId = decodeURIComponent(taskId);
             let task = currentItems.find((item) => item.task_id === decodedTaskId);
-            if (!task || !task.video_url) {
-                try {
+            return withButtonBusy(button, '加载中...', async () => {
+                if (!task || !task.video_url) {
                     task = await fetchTask(taskId);
-                } catch (error) {
-                    alert(error.message || '预览失败');
+                }
+                openPreviewModal(task);
+            }).catch((error) => {
+                showToast(error.message || '预览失败', 'error');
+            });
+        }
+
+        async function deleteSelectedTasks(button = null) {
+            const taskIds = Array.from(selectedTaskIds);
+            if (!taskIds.length) {
+                showToast('请先选择要删除的任务。', 'warning');
+                return;
+            }
+            if (!confirm(`确认删除选中的 ${taskIds.length} 个任务吗？`)) return;
+
+            return withButtonBusy(button, '删除中...', async () => {
+                const resp = await fetch('/api/omni-video/tasks/batch-delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_ids: taskIds }),
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data.success) {
+                    throw new Error(data.error || '批量删除失败');
+                }
+                const deletedSet = new Set(taskIds.filter((taskId) => !(data.failed || []).includes(taskId)));
+                selectedTaskIds = new Set([...selectedTaskIds].filter((taskId) => !deletedSet.has(taskId)));
+                if (currentTaskId && deletedSet.has(currentTaskId)) {
+                    collapseDetails('任务已删除。');
+                }
+                await loadTasks(currentPage);
+                const failedCount = (data.failed || []).length;
+                showToast(failedCount ? `已删除 ${data.deleted || 0} 个任务，${failedCount} 个失败` : data.message || '任务已删除', failedCount ? 'warning' : 'success');
+                updateSelectionControls();
+            }, { restoreText: false }).catch((error) => {
+                showToast(error.message || '批量删除失败', 'error');
+                updateSelectionControls();
+            });
+        }
+
+        async function refreshTask(taskId, button = null) {
+            const decodedTaskId = decodeURIComponent(taskId);
+            return withButtonBusy(button, '刷新中...', async () => {
+                let task = currentItems.find((item) => item.task_id === decodedTaskId);
+                if (!task) {
+                    task = await fetchTask(taskId);
+                }
+                if (!canRefreshTask(task)) {
+                    showToast(`当前状态为 ${task.status || '-'}，不需要刷新。`, 'warning');
                     return;
                 }
-            }
-            openPreviewModal(task);
-        }
-
-        async function deleteTask(taskId) {
-            const decodedTaskId = decodeURIComponent(taskId);
-            const task = currentItems.find((item) => item.task_id === decodedTaskId);
-            if (task && !canDelete(task)) {
-                return;
-            }
-            if (!confirm('确认删除这个任务吗？')) return;
-            debugLog('delete request', { taskId: decodedTaskId });
-            const resp = await fetch(`/api/omni-video/tasks/${encodeURIComponent(decodedTaskId)}`, { method: 'DELETE' });
-            const data = await resp.json();
-            debugLog('delete response', data);
-            if (!resp.ok || !data.success) {
-                alert(data.error || '删除失败');
-                return;
-            }
-            if (currentTaskId === decodedTaskId) collapseDetails('任务已删除。');
-            await loadTasks(currentPage);
-        }
-
-        async function refreshTask(taskId) {
-            const decodedTaskId = decodeURIComponent(taskId);
-            const task = currentItems.find((item) => item.task_id === decodedTaskId);
-            if (!task || !canRefreshTask(task)) {
-                return;
-            }
-            try {
                 const resp = await fetch(`/api/omni-video/tasks/${encodeURIComponent(decodedTaskId)}/refresh`, {
                     method: 'POST',
                 });
                 const data = await resp.json();
                 if (!resp.ok || !data.success) {
-                    alert(data.error || '刷新任务失败');
-                    return;
+                    throw new Error(data.error || '刷新任务失败');
                 }
                 if (currentTaskId === decodedTaskId && detailExpanded) {
                     document.getElementById('detailBox').innerHTML = renderDetails(data.task || task);
                 }
-                await loadTasks(currentPage);
-            } catch (error) {
-                alert('刷新失败: ' + error.message);
-            }
+                if (data.task) {
+                    const idx = currentItems.findIndex((item) => item.task_id === decodedTaskId);
+                    if (idx !== -1) {
+                        currentItems[idx] = data.task;
+                    }
+                }
+                showToast('任务已刷新');
+            }).catch((error) => {
+                showToast(error.message || '刷新失败', 'error');
+            });
         }
 
         function taskToPrefill(task) {
@@ -501,26 +677,68 @@
             };
         }
 
-        async function regenerateTask(taskId) {
+        async function regenerateTask(taskId, button = null) {
             const decodedTaskId = decodeURIComponent(taskId);
             let task = currentItems.find((item) => item.task_id === decodedTaskId);
-            if (!task || !(task.input_payload_json || task.reference_urls_json)) {
-                try {
+            return withButtonBusy(button, '准备中...', async () => {
+                if (!task || !(task.input_payload_json || task.reference_urls_json)) {
                     task = await fetchTask(taskId);
-                } catch (error) {
-                    alert(error.message || '加载任务失败');
-                    return;
                 }
-            }
 
-            try {
                 localStorage.setItem('omniVideoRegenerateData', JSON.stringify(taskToPrefill(task)));
-            } catch (_error) {
-                alert('无法保存任务参数，请稍后重试');
+                window.location.href = '/omni-video';
+            }).catch((error) => {
+                showToast(error.message || '加载任务失败', 'error');
+            });
+        }
+
+        function openEnhanceModalForTask(taskId, button = null) {
+            const decodedTaskId = decodeURIComponent(taskId);
+            const task = currentItems.find((item) => item.task_id === decodedTaskId);
+            if (!task || !task.video_url) {
+                showToast('当前任务还没有可增强的视频。', 'warning');
                 return;
             }
+            currentEnhanceTask = task;
+            document.getElementById('enhanceSourceFilename').textContent = task.download_filename || task.filename || `${decodedTaskId}.mp4`;
+            document.getElementById('enhanceToolVersion').value = 'standard';
+            document.getElementById('enhanceResolution').value = '1080p';
+            document.getElementById('enhanceModal').style.display = 'flex';
+        }
 
-            window.location.href = '/omni-video';
+        function closeEnhanceModal() {
+            document.getElementById('enhanceModal').style.display = 'none';
+            currentEnhanceTask = null;
+        }
+
+        async function submitEnhanceTask(button = null) {
+            if (!currentEnhanceTask || !currentEnhanceTask.video_url) {
+                showToast('当前任务还没有可增强的视频。', 'warning');
+                return;
+            }
+            const toolVersion = document.getElementById('enhanceToolVersion').value;
+            const resolution = document.getElementById('enhanceResolution').value;
+            return withButtonBusy(button, '提交中...', async () => {
+                const resp = await fetch('/api/video-enhance/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        source_video_url: currentEnhanceTask.video_url,
+                        source_video_id: currentEnhanceTask.task_id,
+                        source_filename: currentEnhanceTask.download_filename || currentEnhanceTask.filename || `${currentEnhanceTask.task_id}.mp4`,
+                        tool_version: toolVersion,
+                        resolution: resolution,
+                    }),
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data.success) {
+                    throw new Error(data.error || '画质增强任务创建失败');
+                }
+                closeEnhanceModal();
+                showToast(`画质增强任务已创建：${data.task_id || '-'}`);
+            }).catch((error) => {
+                showToast(error.message || '提交失败', 'error');
+            });
         }
 
         function resetFilters() {
@@ -529,7 +747,7 @@
             document.getElementById('startDate').value = '';
             document.getElementById('endDate').value = '';
             currentPage = 1;
-            loadTasks(1);
+            return loadTasks(1);
         }
 
         async function refreshPendingTasksInPlace() {
@@ -556,33 +774,7 @@
             });
             await Promise.all(refreshPromises);
 
-            const tbody = document.getElementById('taskRows');
-            tbody.innerHTML = currentItems.map((task) => `
-                <tr>
-                    <td>${escapeHtml(task.task_id || '-')}</td>
-                    <td><span class="status-pill">${escapeHtml(task.status || '-')}</span></td>
-                    <td>${escapeHtml(modelAlias(task.model || '-'))}</td>
-                    <td>${escapeHtml(task.resolution || '-')}</td>
-                    <td class="filename-cell">${escapeHtml(renderFilename(task))}</td>
-                    <td>${escapeHtml(task.seed ?? '-')}</td>
-                    <td>${escapeHtml(renderDuration(task))}</td>
-                    <td>${escapeHtml(task.aspect_ratio || '-')}</td>
-                    <td>${escapeHtml(renderTokenUsage(task))}</td>
-                    <td>${task.amount_yuan != null ? Number(task.amount_yuan).toFixed(2) : '-'}</td>
-                    <td>${escapeHtml(task.created_at || '-')}</td>
-                    <td>${escapeHtml(task.updated_at || '-')}</td>
-                    <td>
-                        <div class="actions">
-                            <button class="btn btn-secondary" onclick="viewTask('${encodeURIComponent(task.task_id || '')}')">${currentTaskId === task.task_id && detailExpanded ? '收起' : '查看'}</button>
-                            <button class="btn btn-secondary" onclick="previewTask('${encodeURIComponent(task.task_id || '')}')">预览</button>
-                            <button class="btn btn-secondary" ${canDownload(task) ? '' : 'disabled title="视频生成成功后可下载"'} onclick="${canDownload(task) ? `downloadTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">下载</button>
-                            <button class="btn btn-secondary" ${canRefreshTask(task) ? '' : 'disabled title="仅 queued/running 状态可刷新"'} onclick="${canRefreshTask(task) ? `refreshTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">刷新</button>
-                            <button class="btn btn-secondary" onclick="regenerateTask('${encodeURIComponent(task.task_id || '')}')">重做</button>
-                            <button class="btn btn-danger" ${canDelete(task) ? '' : 'disabled'} onclick="${canDelete(task) ? `deleteTask('${encodeURIComponent(task.task_id || '')}')` : 'return false;'}">删除</button>
-                        </div>
-                    </td>
-                </tr>
-            `).join('');
+            renderTaskRows();
 
             if (currentTaskId && detailExpanded) {
                 const updatedTask = currentItems.find((item) => item.task_id === currentTaskId);
@@ -595,17 +787,13 @@
 
         async function manualRefreshPending() {
             const btn = document.getElementById('refreshPendingBtn');
-            const oldText = btn.textContent;
-            btn.disabled = true;
-            btn.textContent = '刷新中...';
-            try {
-                await loadTasks(currentPage);
+            return withButtonBusy(btn, '刷新中...', async () => {
                 const count = await refreshPendingTasksInPlace();
                 debugLog('manual refresh completed', { refreshedCount: count });
-            } finally {
-                btn.disabled = false;
-                btn.textContent = oldText;
-            }
+                showToast(count > 0 ? `已刷新 ${count} 个未完成任务` : '当前页没有未完成任务', count > 0 ? 'success' : 'warning');
+            }).catch((error) => {
+                showToast(error.message || '刷新失败', 'error');
+            });
         }
 
         function setupAutoRefresh() {
@@ -615,19 +803,30 @@
             }
             if (!document.getElementById('autoRefresh').checked) return;
             autoRefreshTimer = setInterval(async () => {
-                // 先获取最新列表
-                await loadTasks(currentPage);
-
-                const count = await refreshPendingTasksInPlace();
-                if (count > 0) {
-                    debugLog('auto refresh completed', { refreshedCount: count });
+                try {
+                    const count = await refreshPendingTasksInPlace();
+                    if (count > 0) {
+                        debugLog('auto refresh completed', { refreshedCount: count });
+                    }
+                } catch (error) {
+                    debugLog('auto refresh failed', { error: error.message });
                 }
             }, AUTO_REFRESH_MS);
         }
 
-        document.getElementById('reloadBtn').addEventListener('click', () => loadTasks(1));
+        document.getElementById('reloadBtn').addEventListener('click', (event) => {
+            withButtonBusy(event.currentTarget, '查询中...', () => loadTasks(1));
+        });
         document.getElementById('refreshPendingBtn').addEventListener('click', manualRefreshPending);
-        document.getElementById('resetBtn').addEventListener('click', resetFilters);
+        document.getElementById('deleteSelectedBtn').addEventListener('click', (event) => {
+            deleteSelectedTasks(event.currentTarget);
+        });
+        document.getElementById('selectAllTasks').addEventListener('change', (event) => {
+            toggleAllVisibleTasks(event.currentTarget.checked);
+        });
+        document.getElementById('resetBtn').addEventListener('click', (event) => {
+            withButtonBusy(event.currentTarget, '重置中...', resetFilters);
+        });
         document.getElementById('search').addEventListener('keydown', (event) => {
             if (event.key === 'Enter') loadTasks(1);
         });
@@ -636,17 +835,30 @@
         document.getElementById('endDate').addEventListener('change', () => loadTasks(1));
         document.getElementById('autoRefresh').addEventListener('change', setupAutoRefresh);
         document.getElementById('prevPageBtn').addEventListener('click', () => {
-            if (currentPage > 1) loadTasks(currentPage - 1);
+            if (currentPage > 1) {
+                withButtonBusy(document.getElementById('prevPageBtn'), '加载中...', () => loadTasks(currentPage - 1));
+            }
         });
         document.getElementById('nextPageBtn').addEventListener('click', () => {
             const totalPages = Math.max(1, Math.ceil(currentTotal / PAGE_SIZE));
-            if (currentPage < totalPages) loadTasks(currentPage + 1);
+            if (currentPage < totalPages) {
+                withButtonBusy(document.getElementById('nextPageBtn'), '加载中...', () => loadTasks(currentPage + 1));
+            }
         });
         document.getElementById('closePreviewBtn').addEventListener('click', closePreviewModal);
         document.getElementById('previewModal').addEventListener('click', (event) => {
             if (event.target === event.currentTarget) {
                 closePreviewModal();
             }
+        });
+        document.getElementById('enhanceModalClose').addEventListener('click', closeEnhanceModal);
+        document.getElementById('enhanceModal').addEventListener('click', (event) => {
+            if (event.target === event.currentTarget) {
+                closeEnhanceModal();
+            }
+        });
+        document.getElementById('submitEnhanceBtn').addEventListener('click', (event) => {
+            submitEnhanceTask(event.currentTarget);
         });
         loadOmniConfig().then(() => {
             loadTasks(1);
@@ -661,12 +873,10 @@
             return `¥${Number(amount || 0).toFixed(2)}`;
         }
 
-        async function loadBalance() {
+        async function loadBalance(button = null) {
             const valueEl = document.getElementById('balanceValue');
-            const btnEl = document.getElementById('refreshBalanceBtn');
-            try {
+            return withButtonBusy(button, '刷新中...', async () => {
                 valueEl.textContent = '查询中...';
-                btnEl.disabled = true;
                 const resp = await fetch('/api/omni-video/balance');
                 const data = await resp.json();
                 if (data.success) {
@@ -674,11 +884,9 @@
                 } else {
                     valueEl.textContent = '查询失败';
                 }
-            } catch (error) {
+            }).catch((error) => {
                 valueEl.textContent = '查询失败';
-            } finally {
-                btnEl.disabled = false;
-            }
+            });
         }
 
         function startBalanceTimer() {
@@ -688,7 +896,9 @@
             balanceTimer = setInterval(loadBalance, BALANCE_REFRESH_MS);
         }
 
-        document.getElementById('refreshBalanceBtn').addEventListener('click', loadBalance);
+        document.getElementById('refreshBalanceBtn').addEventListener('click', (event) => {
+            loadBalance(event.currentTarget);
+        });
         loadBalance();
         startBalanceTimer();
     </script>

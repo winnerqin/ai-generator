@@ -2391,6 +2391,31 @@ def get_ledger_debit_amount_cent(user_id, biz_type, biz_id):
     return int(row[0]) if row and row[0] is not None else None
 
 
+def get_ledger_debit_amounts_cent(user_id, biz_type, biz_ids):
+    cleaned_ids = [str(biz_id).strip() for biz_id in (biz_ids or []) if str(biz_id).strip()]
+    if not cleaned_ids:
+        return {}
+
+    conn = connect()
+    cursor = conn.cursor()
+    placeholders = ", ".join(["?"] * len(cleaned_ids))
+    cursor.execute(
+        f"""
+        SELECT biz_id, amount_cent
+        FROM account_ledger
+        WHERE user_id = ? AND entry_type = 'debit' AND biz_type = ? AND biz_id IN ({placeholders})
+        """,
+        (user_id, biz_type, *cleaned_ids),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return {
+        str(row["biz_id"]): int(row["amount_cent"])
+        for row in rows
+        if row["biz_id"] is not None and row["amount_cent"] is not None
+    }
+
+
 def create_account_ledger_entry(
     user_id,
     entry_type,
