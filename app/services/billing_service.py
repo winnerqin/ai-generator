@@ -17,7 +17,12 @@ def _effective_multiplier(user: dict) -> Decimal:
     role_code = user.get("role_code") or database.ROLE_EXTERNAL_USER
     role_multiplier = Decimal(str(database.get_role_pricing_multiplier(role_code) or 1))
     user_multiplier = Decimal(str(user.get("pricing_multiplier") or 1))
-    return role_multiplier if role_multiplier > 0 else user_multiplier
+    return user_multiplier if user_multiplier > 0 else role_multiplier
+
+
+def _multiplied_tokens(tokens_raw: int, multiplier: Decimal) -> int:
+    value = Decimal(int(tokens_raw or 0)) * multiplier
+    return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def _price_per_million_cny_cent(pricing: dict) -> Decimal:
@@ -126,13 +131,11 @@ def settle_omni_video_charge(task: dict) -> None:
         return
 
     tokens_raw = int(token_usage)
-    tokens_billed = database.compute_tokens_billed(tokens_raw)
     price_per_million_cent = _price_per_million_cny_cent(pricing)
     unit_price_cent_per_ktoken = price_per_million_cent / Decimal(1000)
     multiplier = _effective_multiplier(user)
-    fee_cent = _to_cent(
-        (Decimal(tokens_billed) / Decimal(1000)) * unit_price_cent_per_ktoken * multiplier
-    )
+    tokens_billed = _multiplied_tokens(tokens_raw, multiplier)
+    fee_cent = _to_cent((Decimal(tokens_billed) / Decimal(1000)) * unit_price_cent_per_ktoken)
 
     database.create_account_ledger_entry(
         user_id=user_id,

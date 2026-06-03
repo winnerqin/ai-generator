@@ -29,6 +29,12 @@
         .records th { background: rgba(86,111,255,0.15); color: #d7defe; font-weight: 600; }
         .records td { color: #dce4ff; }
         .records-empty { padding: 24px; text-align: center; color: #9aa8d9; }
+        .price-section { margin-top: 16px; border-radius: 12px; overflow: hidden; background: rgba(11,15,26,0.78); border: 1px solid rgba(86,111,255,0.22); }
+        .price-title { padding: 14px 16px; font-size: 16px; font-weight: 700; color: #e6ebff; border-bottom: 1px solid rgba(86,111,255,0.14); }
+        .price-section table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .price-section th, .price-section td { padding: 10px 12px; border-bottom: 1px solid rgba(86,111,255,0.14); text-align: left; }
+        .price-section th { background: rgba(86,111,255,0.15); color: #d7defe; font-weight: 600; }
+        .price-section td { color: #dce4ff; }
         .page-header { margin-bottom: 14px; }
         .page-title { font-size: 22px; margin: 0; color: #e6ebff; }
         .page-subtitle { color: #a9b3d3; margin-top: 4px; }
@@ -66,6 +72,22 @@
                 </div>
             </section>
 
+            <section class="price-section">
+                <div class="price-title">模型价格</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>模型</th>
+                            <th>分辨率</th>
+                            <th>是否包含参考视频</th>
+                            <th>价格</th>
+                        </tr>
+                    </thead>
+                    <tbody id="modelPricingBody"></tbody>
+                </table>
+                <div class="records-empty" id="modelPricingEmpty" style="display:none;">暂无模型价格配置</div>
+            </section>
+
             <section class="records">
                 <table>
                     <thead>
@@ -74,6 +96,7 @@
                             <th>模型</th>
                             <th>任务ID</th>
                             <th>Token(千)</th>
+                            <th>模型价格</th>
                             <th>金额(元)</th>
                         </tr>
                     </thead>
@@ -99,6 +122,25 @@
             return (Number(cent || 0) / 100).toFixed(2);
         }
 
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[char]));
+        }
+
+        function formatModelPrice(price) {
+            if (!price) return '-';
+            const currency = String(price.currency_code || 'CNY').toUpperCase();
+            const symbol = currency === 'USD' ? '$' : '¥';
+            return `${symbol}${centToYuan(price.price_per_million_token_cent)} / 百万Token`;
+        }
+
+        function referenceVideoModeText(mode) {
+            if (mode === 'with_video_ref') return '是';
+            if (mode === 'without_video_ref') return '否';
+            return '不限';
+        }
+
         async function loadProfile() {
             const resp = await fetch('/api/user/profile');
             const data = await resp.json();
@@ -107,6 +149,30 @@
             document.getElementById('profileUsername').textContent = profile.username || '-';
             document.getElementById('profileRole').textContent = roleText(profile.role_code);
             document.getElementById('profileBalance').textContent = `${centToYuan(profile.balance_cent)} 元`;
+        }
+
+        async function loadModelPricing() {
+            const resp = await fetch('/api/user/model-pricing');
+            const data = await resp.json();
+            const body = document.getElementById('modelPricingBody');
+            const empty = document.getElementById('modelPricingEmpty');
+            const items = data.success && data.data && data.data.items ? data.data.items : [];
+            body.innerHTML = '';
+            if (items.length === 0) {
+                empty.style.display = '';
+                return;
+            }
+            empty.style.display = 'none';
+            items.forEach((item) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${escapeHtml(item.model_name || item.model_code || '-')}</td>
+                    <td>${escapeHtml(item.resolution_code || '不限')}</td>
+                    <td>${escapeHtml(referenceVideoModeText(item.reference_video_mode))}</td>
+                    <td>${escapeHtml(formatModelPrice(item))}</td>
+                `;
+                body.appendChild(tr);
+            });
         }
 
         async function loadRecords() {
@@ -121,13 +187,14 @@
             }
             empty.style.display = 'none';
             data.data.items.forEach((item) => {
-                const tokenK = (Number(item.tokens_billed || item.tokens_raw || 0) / 1000).toFixed(1);
+                const tokenK = (Number(item.display_tokens || item.tokens_billed || item.tokens_raw || 0) / 1000).toFixed(1);
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
-                    <td>${item.created_at || '-'}</td>
-                    <td>${item.model_code || '-'}</td>
-                    <td>${item.biz_id || '-'}</td>
+                    <td>${escapeHtml(item.created_at || '-')}</td>
+                    <td>${escapeHtml(item.model_code || '-')}</td>
+                    <td>${escapeHtml(item.biz_id || '-')}</td>
                     <td>${tokenK}</td>
+                    <td>${escapeHtml(formatModelPrice(item.model_price))}</td>
                     <td>${centToYuan(item.amount_cent)}</td>
                 `;
                 body.appendChild(tr);
@@ -161,7 +228,7 @@
         }
 
         document.getElementById('changePasswordBtn').addEventListener('click', changePassword);
-        Promise.all([loadProfile(), loadRecords()]).catch((err) => {
+        Promise.all([loadProfile(), loadModelPricing(), loadRecords()]).catch((err) => {
             alert(err.message || '加载失败');
         });
     </script>

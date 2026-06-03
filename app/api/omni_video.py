@@ -242,6 +242,43 @@ def cancel_omni_video_task(task_id: str):
     return jsonify({"success": True, "task": task, "message": "任务已取消"})
 
 
+@omni_video_bp.route("/api/omni-video/tasks/batch-delete", methods=["POST"])
+@login_required
+@handle_api_error
+def batch_delete_omni_video_tasks():
+    user_id = session.get("user_id")
+    project_id = session.get("current_project_id")
+    data = request.get_json(silent=True) or {}
+    task_ids = data.get("task_ids") or []
+    if not isinstance(task_ids, list):
+        return jsonify({"success": False, "error": "task_ids 参数格式错误"}), 400
+
+    cleaned_task_ids = [str(task_id).strip() for task_id in task_ids if str(task_id).strip()]
+    if not cleaned_task_ids:
+        return jsonify({"success": False, "error": "请选择要删除的任务"}), 400
+
+    deleted = 0
+    failed: list[str] = []
+    for task_id in cleaned_task_ids:
+        try:
+            if omni_video_service.delete_task(user_id, project_id, task_id):
+                deleted += 1
+            else:
+                failed.append(task_id)
+        except Exception:
+            logger.exception("[omni-video][batch-delete][error] task_id=%s", task_id)
+            failed.append(task_id)
+
+    return jsonify(
+        {
+            "success": True,
+            "deleted": deleted,
+            "failed": failed,
+            "message": f"已删除 {deleted} 个任务",
+        }
+    )
+
+
 @omni_video_bp.route("/api/omni-video/tasks/<task_id>", methods=["DELETE"])
 @login_required
 def delete_omni_video_task(task_id: str):
