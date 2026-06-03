@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from io import BytesIO
 
 import requests
@@ -16,6 +17,7 @@ from app.config import config
 from app.decorators import handle_api_error, login_required
 from app.services.omni_video_service import get_models_for_role, omni_video_service
 from app.services.operation_log_service import log_balance_query
+from app.utils.jwt_auth import JWTAuth
 
 logger = logging.getLogger(__name__)
 omni_video_bp = Blueprint("omni_video", __name__)
@@ -31,6 +33,142 @@ def _current_user_context() -> dict[str, object]:
 
 def _safe_log_payload(payload):
     return payload if isinstance(payload, dict) else {"value": payload}
+
+
+def _first_project_id(user_id: int | None) -> int | None:
+    if not user_id:
+        return None
+    try:
+        projects = database.get_user_projects(user_id)
+    except Exception:
+        return None
+    return projects[0].get("id") if projects else None
+
+
+def _env_api_key_context(api_key: str) -> dict[str, object] | None:
+    raw = os.environ.get("EXTERNAL_OMNI_API_KEYS", "")
+    for item in [part.strip() for part in raw.split(",") if part.strip()]:
+        parts = item.split(":")
+        if len(parts) < 2 or parts[0] != api_key:
+            continue
+        try:
+            user_id = int(parts[1])
+        except (TypeError, ValueError):
+            return None
+        project_id = None
+        if len(parts) >= 3 and parts[2].strip():
+            try:
+                project_id = int(parts[2])
+            except (TypeError, ValueError):
+                project_id = None
+        user = database.get_user_by_id(user_id) or {}
+        return {
+            "auth_type": "api_key",
+            "user_id": user_id,
+            "username": user.get("username") or f"api_user_{user_id}",
+            "project_id": project_id,
+        }
+    return None
+
+
+def _external_auth_context() -> tuple[dict[str, object] | None, tuple[object, int] | None]:
+    user = JWTAuth.get_current_user()
+    if user:
+        try:
+            user_id = int(user.get("user_id"))
+        except (TypeError, ValueError):
+            return None, (jsonify({"success": False, "error": "无效的认证用户"}), 401)
+        db_user = database.get_user_by_id(user_id) or {}
+        return (
+            {
+                "auth_type": "jwt",
+                "user_id": user_id,
+                "username": db_user.get("username") or user.get("username"),
+                "project_id": None,
+            },
+            None,
+        )
+
+    api_key = request.headers.get("X-API-Key") or ""
+    auth_header = request.headers.get("Authorization") or ""
+    if not api_key and auth_header.lower().startswith("apikey "):
+        api_key = auth_header.split(" ", 1)[1].strip()
+    if not api_key and auth_header.lower().startswith("bearer "):
+        api_key = auth_header.split(" ", 1)[1].strip()
+    if not api_key:
+        return None, (jsonify({"success": False, "error": "缺少认证凭据"}), 401)
+
+    key_record = database.get_external_api_key(api_key)
+    if key_record:
+        return (
+            {
+                "auth_type": "api_key",
+                "user_id": int(key_record.get("user_id")),
+                "username": key_record.get("username"),
+                "project_id": key_record.get("project_id"),
+            },
+            None,
+        )
+
+    env_context = _env_api_key_context(api_key)
+    if env_context:
+        return env_context, None
+    return None, (jsonify({"success": False, "error": "无效的 API Key"}), 401)
+
+
+def _resolve_external_project_id(
+    auth_context: dict[str, object], payload: dict[str, object]
+) -> int | None:
+    user_id = int(auth_context["user_id"])
+    auth_project_id = auth_context.get("project_id")
+    requested_project_id = payload.get("project_id")
+    project_id = requested_project_id if requested_project_id not in (None, "") else auth_project_id
+    if project_id in (None, ""):
+        return _first_project_id(user_id)
+    try:
+        project_id = int(project_id)
+    except (TypeError, ValueError) as exc:
+        raise PermissionError("project_id 参数无效") from exc
+    if not database.has_project_access(user_id, project_id):
+        raise PermissionError("无权访问指定项目")
+    return project_id
+
+
+def _status_code_for_error(exc: Exception) -> int:
+    if isinstance(exc, PermissionError):
+        return 403
+    if "余额不足" in str(exc):
+        return 402
+    if isinstance(exc, ValueError):
+        return 400
+    return 500
+
+
+def _external_task_payload(task: dict[str, object] | None) -> dict[str, object] | None:
+    if not task:
+        return None
+    return {
+        "task_id": task.get("task_id"),
+        "status": task.get("status"),
+        "batch_id": task.get("batch_id"),
+        "client_request_id": task.get("client_request_id"),
+        "prompt": task.get("prompt"),
+        "model": task.get("model"),
+        "resolution": task.get("resolution"),
+        "aspect_ratio": task.get("aspect_ratio"),
+        "duration": task.get("duration"),
+        "frame_count": task.get("frame_count"),
+        "seed": task.get("seed"),
+        "video_url": task.get("video_url"),
+        "cover_url": task.get("cover_url"),
+        "first_frame_url": task.get("first_frame_url"),
+        "last_frame_url": task.get("last_frame_url"),
+        "fail_reason": task.get("fail_reason"),
+        "token_usage": task.get("token_usage"),
+        "amount_yuan": task.get("amount_yuan"),
+        "created_at": task.get("created_at"),
+        "updated_at": task.get("updated_at"),
+    }
 
 
 @omni_video_bp.route("/omni-video")
@@ -96,6 +234,7 @@ def list_omni_video_tasks():
     search = request.args.get("search") or None
     start_date = request.args.get("start_date") or None
     end_date = request.args.get("end_date") or None
+    batch_id = request.args.get("batch_id") or None
     sync_running = (request.args.get("sync_running", "false") or "false").lower() == "true"
     logger.info(
         "[omni-video][list][request] user_id=%s project_id=%s page=%s page_size=%s status=%s search=%s start_date=%s end_date=%s sync_running=%s",
@@ -117,6 +256,7 @@ def list_omni_video_tasks():
         search=search,
         start_date=start_date,
         end_date=end_date,
+        batch_id=batch_id,
         page=page,
         page_size=page_size,
         sync_running=sync_running,
@@ -128,6 +268,176 @@ def list_omni_video_tasks():
         {
             "success": True,
             "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+    )
+
+
+@omni_video_bp.route("/api/external/omni-video/tasks/batch", methods=["POST"])
+@handle_api_error
+def external_batch_create_omni_video_tasks():
+    auth_context, auth_error = _external_auth_context()
+    if auth_error:
+        return auth_error
+
+    payload = request.get_json(silent=True) or {}
+    tasks = payload.get("tasks") or []
+    if not isinstance(tasks, list) or not tasks:
+        return jsonify({"success": False, "error": "tasks 参数必须是非空数组"}), 400
+    if len(tasks) > 50:
+        return jsonify({"success": False, "error": "单次最多提交 50 个任务"}), 400
+
+    user_id = int(auth_context["user_id"])
+    username = auth_context.get("username")
+    project_id = _resolve_external_project_id(auth_context, payload)
+    batch_id = str(payload.get("batch_id") or "").strip() or None
+    callback_url = str(payload.get("callback_url") or "").strip() or None
+    public_origin = request.host_url.rstrip("/")
+
+    items = []
+    created = 0
+    reused = 0
+    failed = 0
+    for index, raw_task in enumerate(tasks):
+        client_request_id = ""
+        try:
+            if not isinstance(raw_task, dict):
+                raise ValueError("任务参数必须是对象")
+            task_data = dict(raw_task)
+            client_request_id = str(task_data.get("client_request_id") or "").strip()
+            if client_request_id:
+                existing = database.get_omni_video_task_by_client_request_id(
+                    user_id, client_request_id, source="external_api"
+                )
+                if existing:
+                    reused += 1
+                    items.append(
+                        {
+                            "index": index,
+                            "client_request_id": client_request_id,
+                            "task_id": existing.get("task_id"),
+                            "status": existing.get("status"),
+                            "status_code": 200,
+                            "idempotent": True,
+                            "message": "任务已存在",
+                        }
+                    )
+                    continue
+
+            task_data["batch_id"] = batch_id
+            task_data["client_request_id"] = client_request_id or None
+            task_data["source"] = "external_api"
+            task_data["callback_url"] = task_data.get("callback_url") or callback_url
+            task_data["_user_id"] = user_id
+            task_data["_project_id"] = project_id
+            task_data["_public_origin"] = public_origin
+            task_data["_username"] = username
+
+            task = omni_video_service.create_task(user_id, project_id, task_data)
+            created += 1
+            items.append(
+                {
+                    "index": index,
+                    "client_request_id": client_request_id or None,
+                    "task_id": task.get("task_id"),
+                    "status": task.get("status"),
+                    "status_code": 201,
+                    "idempotent": False,
+                    "message": "任务创建成功",
+                }
+            )
+        except Exception as exc:
+            failed += 1
+            status_code = _status_code_for_error(exc)
+            logger.exception(
+                "[omni-video][external-batch][item-error] user_id=%s batch_id=%s index=%s",
+                user_id,
+                batch_id,
+                index,
+            )
+            items.append(
+                {
+                    "index": index,
+                    "client_request_id": client_request_id or None,
+                    "task_id": None,
+                    "status": "failed",
+                    "status_code": status_code,
+                    "idempotent": False,
+                    "error": str(exc),
+                }
+            )
+
+    response_status = 201 if failed == 0 else 207
+    return (
+        jsonify(
+            {
+                "success": failed == 0,
+                "batch_id": batch_id,
+                "created": created,
+                "reused": reused,
+                "failed": failed,
+                "items": items,
+            }
+        ),
+        response_status,
+    )
+
+
+@omni_video_bp.route("/api/external/omni-video/tasks/<task_id>", methods=["GET"])
+@handle_api_error
+def external_get_omni_video_task(task_id: str):
+    auth_context, auth_error = _external_auth_context()
+    if auth_error:
+        return auth_error
+
+    user_id = int(auth_context["user_id"])
+    project_id = _resolve_external_project_id(auth_context, request.args)
+    sync = (request.args.get("sync", "true") or "true").lower() in {"1", "true", "yes", "on"}
+    task = (
+        omni_video_service.get_task(user_id, project_id, task_id)
+        if sync
+        else database.get_omni_video_task(task_id, user_id=user_id, project_id=project_id)
+    )
+    if not task:
+        return jsonify({"success": False, "error": "任务不存在"}), 404
+    return jsonify({"success": True, "task": _external_task_payload(task)})
+
+
+@omni_video_bp.route("/api/external/omni-video/batches/<batch_id>", methods=["GET"])
+@handle_api_error
+def external_list_omni_video_batch_tasks(batch_id: str):
+    auth_context, auth_error = _external_auth_context()
+    if auth_error:
+        return auth_error
+
+    user_id = int(auth_context["user_id"])
+    project_id = _resolve_external_project_id(auth_context, request.args)
+    page = request.args.get("page", 1, type=int)
+    page_size = min(request.args.get("page_size", 50, type=int), 100)
+    status = request.args.get("status") or None
+    sync_running = (request.args.get("sync_running", "true") or "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+    items, total = omni_video_service.list_tasks(
+        user_id,
+        project_id,
+        status=status,
+        batch_id=batch_id,
+        page=page,
+        page_size=page_size,
+        sync_running=sync_running,
+    )
+    return jsonify(
+        {
+            "success": True,
+            "batch_id": batch_id,
+            "items": [_external_task_payload(item) for item in items],
             "total": total,
             "page": page,
             "page_size": page_size,

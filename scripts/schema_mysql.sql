@@ -278,13 +278,32 @@ CREATE TABLE IF NOT EXISTS omni_video_tasks (
     seed INT,
     token_usage INT,
     usage_json LONGTEXT,
+    batch_id VARCHAR(255),
+    client_request_id VARCHAR(255),
+    source VARCHAR(64),
+    callback_url TEXT,
+    external_meta_json LONGTEXT,
     INDEX idx_omni_video_tasks_user_id (user_id),
     INDEX idx_omni_video_tasks_task_id (task_id),
     INDEX idx_omni_video_tasks_status (status),
+    INDEX idx_omni_video_tasks_batch_id (batch_id),
+    INDEX idx_omni_video_tasks_client_request (user_id, client_request_id),
     INDEX idx_omni_video_tasks_created_at (created_at),
     INDEX idx_omni_video_tasks_user_project_created (user_id, project_id, created_at DESC),
     INDEX idx_omni_video_tasks_user_status_created (user_id, status, created_at DESC),
     INDEX idx_omni_video_tasks_user_project_status_created (user_id, project_id, status, created_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS external_api_keys (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    project_id INT NULL,
+    name VARCHAR(255),
+    key_hash CHAR(64) NOT NULL UNIQUE,
+    status VARCHAR(32) NOT NULL DEFAULT 'active',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_used_at DATETIME NULL,
+    INDEX idx_external_api_keys_user_status (user_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS video_enhance_tasks (

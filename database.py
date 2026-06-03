@@ -1214,11 +1214,14 @@ def _decode_omni_video_task(row):
         "result_json": {},
         "reference_urls_json": [],
         "usage_json": {},
+        "external_meta_json": {},
     }
     for field, default_value in json_field_defaults.items():
         raw = task.get(field)
         if raw in (None, ""):
-            task[field] = default_value.copy() if isinstance(default_value, (dict, list)) else default_value
+            task[field] = (
+                default_value.copy() if isinstance(default_value, (dict, list)) else default_value
+            )
             continue
         # MySQL JSON columns may already be decoded into native Python objects.
         if field == "reference_urls_json" and isinstance(raw, list):
@@ -1234,7 +1237,9 @@ def _decode_omni_video_task(row):
             else:
                 task[field] = parsed if isinstance(parsed, dict) else {}
         except Exception:
-            task[field] = default_value.copy() if isinstance(default_value, (dict, list)) else default_value
+            task[field] = (
+                default_value.copy() if isinstance(default_value, (dict, list)) else default_value
+            )
     return task
 
 
@@ -1276,6 +1281,11 @@ def save_omni_video_task(data):
         data.get("seed"),
         data.get("token_usage"),
         json.dumps(data.get("usage_json", {})),
+        data.get("batch_id"),
+        data.get("client_request_id"),
+        data.get("source"),
+        data.get("callback_url"),
+        json.dumps(data.get("external_meta_json", {})),
     )
 
     if existing:
@@ -1286,7 +1296,8 @@ def save_omni_video_task(data):
                 prompt = ?, input_payload_json = ?, raw_response_json = ?, result_json = ?,
                 fail_reason = ?, video_url = ?, cover_url = ?, first_frame_url = ?,
                 last_frame_url = ?, reference_urls_json = ?, duration = ?, frame_count = ?,
-                resolution = ?, aspect_ratio = ?, filename = ?, seed = ?, token_usage = ?, usage_json = ?
+                resolution = ?, aspect_ratio = ?, filename = ?, seed = ?, token_usage = ?, usage_json = ?,
+                batch_id = ?, client_request_id = ?, source = ?, callback_url = ?, external_meta_json = ?
             WHERE task_id = ?
         """,
             (
@@ -1314,6 +1325,11 @@ def save_omni_video_task(data):
                 data.get("seed"),
                 data.get("token_usage"),
                 json.dumps(data.get("usage_json", {})),
+                data.get("batch_id"),
+                data.get("client_request_id"),
+                data.get("source"),
+                data.get("callback_url"),
+                json.dumps(data.get("external_meta_json", {})),
                 data.get("task_id"),
             ),
         )
@@ -1325,8 +1341,9 @@ def save_omni_video_task(data):
                 user_id, task_id, project_id, created_at, updated_at, status, model, mode,
                 prompt, input_payload_json, raw_response_json, result_json, fail_reason,
                 video_url, cover_url, first_frame_url, last_frame_url, reference_urls_json,
-                duration, frame_count, resolution, aspect_ratio, filename, seed, token_usage, usage_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                duration, frame_count, resolution, aspect_ratio, filename, seed, token_usage, usage_json,
+                batch_id, client_request_id, source, callback_url, external_meta_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             params,
         )
@@ -1357,6 +1374,24 @@ def get_omni_video_task(task_id, user_id=None, project_id=None):
     return _decode_omni_video_task(row) if row else None
 
 
+def get_omni_video_task_by_client_request_id(user_id, client_request_id, source=None):
+    conn = connect()
+    cursor = conn.cursor()
+    _ensure_omni_video_task_schema(cursor)
+
+    query = "SELECT * FROM omni_video_tasks WHERE user_id = ? AND client_request_id = ?"
+    params = [user_id, client_request_id]
+    if source:
+        query += " AND source = ?"
+        params.append(source)
+    query += " ORDER BY id DESC LIMIT 1"
+
+    cursor.execute(query, params)
+    row = cursor.fetchone()
+    conn.close()
+    return _decode_omni_video_task(row) if row else None
+
+
 def get_omni_video_tasks(
     user_id,
     project_id=None,
@@ -1364,6 +1399,7 @@ def get_omni_video_tasks(
     search=None,
     start_date=None,
     end_date=None,
+    batch_id=None,
     limit=20,
     offset=0,
     include_heavy_fields=True,
@@ -1378,7 +1414,8 @@ def get_omni_video_tasks(
         select_fields = (
             "id, user_id, task_id, project_id, created_at, updated_at, status, model, mode, prompt, "
             "fail_reason, video_url, cover_url, first_frame_url, last_frame_url, "
-            "duration, frame_count, resolution, aspect_ratio, filename, seed, token_usage"
+            "duration, frame_count, resolution, aspect_ratio, filename, seed, token_usage, "
+            "batch_id, client_request_id, source, callback_url"
         )
 
     query = f"SELECT {select_fields} FROM omni_video_tasks WHERE user_id = ?"
@@ -1399,6 +1436,9 @@ def get_omni_video_tasks(
     if end_date:
         query += " AND created_at < DATE_ADD(?, INTERVAL 1 DAY)"
         params.append(end_date)
+    if batch_id:
+        query += " AND batch_id = ?"
+        params.append(batch_id)
 
     query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
@@ -1409,7 +1449,13 @@ def get_omni_video_tasks(
 
 
 def count_omni_video_tasks(
-    user_id, project_id=None, status=None, search=None, start_date=None, end_date=None
+    user_id,
+    project_id=None,
+    status=None,
+    search=None,
+    start_date=None,
+    end_date=None,
+    batch_id=None,
 ):
     conn = connect()
     cursor = conn.cursor()
@@ -1433,6 +1479,9 @@ def count_omni_video_tasks(
     if end_date:
         query += " AND created_at < DATE_ADD(?, INTERVAL 1 DAY)"
         params.append(end_date)
+    if batch_id:
+        query += " AND batch_id = ?"
+        params.append(batch_id)
 
     cursor.execute(query, params)
     total = cursor.fetchone()[0]
@@ -1995,6 +2044,46 @@ def verify_user(username, password):
 
     conn.close()
     return None
+
+
+def has_project_access(user_id, project_id):
+    if project_id in (None, ""):
+        return True
+    conn = connect()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT 1 FROM user_projects WHERE user_id = ? AND project_id = ? LIMIT 1",
+        (user_id, project_id),
+    )
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
+
+
+def get_external_api_key(api_key):
+    value = str(api_key or "").strip()
+    if not value:
+        return None
+
+    key_hash = hashlib.sha256(value.encode()).hexdigest()
+    conn = connect()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT k.*, u.username, u.role_code, u.status AS user_status
+            FROM external_api_keys k
+            JOIN users u ON u.id = k.user_id
+            WHERE k.key_hash = ? AND k.status = ? AND u.status = ?
+            LIMIT 1
+            """,
+            (key_hash, STATUS_ACTIVE, STATUS_ACTIVE),
+        )
+        row = cursor.fetchone()
+    except Exception:
+        row = None
+    conn.close()
+    return dict(row) if row else None
 
 
 def get_user_by_id(user_id):
