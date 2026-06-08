@@ -95,7 +95,23 @@
             const [modalRecord, setModalRecord] = useState(null);
             const [viewMode, setViewMode] = useState('table'); // 'thumb' | 'table'
             const [previewRefUrl, setPreviewRefUrl] = useState(null);
+            const [actionLoading, setActionLoading] = useState({});
             const touchStartX = useRef(0);
+
+            const isBusy = (key) => Boolean(actionLoading[key]);
+            const runWithBusy = async (key, action) => {
+                if (isBusy(key)) return;
+                setActionLoading(prev => ({ ...prev, [key]: true }));
+                try {
+                    return await action();
+                } finally {
+                    setActionLoading(prev => {
+                        const next = { ...prev };
+                        delete next[key];
+                        return next;
+                    });
+                }
+            };
 
             const currentIndex = modalRecord == null ? -1 : records.findIndex(r => r.id === modalRecord.id);
             const canPrev = currentIndex > 0;
@@ -142,15 +158,18 @@
 
             const loadRecords = async (reset = false) => {
                 setLoading(true);
-                const newOffset = reset ? 0 : offset;
-                const resp = await fetch(`/api/records?limit=24&offset=${newOffset}&search=${encodeURIComponent(search)}`);
-                const data = await resp.json();
-                if (data.success) {
-                    setTotal(data.total || 0);
-                    setRecords(reset ? data.records : records.concat(data.records || []));
-                    setOffset(newOffset + (data.records || []).length);
+                try {
+                    const newOffset = reset ? 0 : offset;
+                    const resp = await fetch(`/api/records?limit=24&offset=${newOffset}&search=${encodeURIComponent(search)}`);
+                    const data = await resp.json();
+                    if (data.success) {
+                        setTotal(data.total || 0);
+                        setRecords(reset ? data.records : records.concat(data.records || []));
+                        setOffset(newOffset + (data.records || []).length);
+                    }
+                } finally {
+                    setLoading(false);
                 }
-                setLoading(false);
             };
 
             useEffect(() => {
@@ -165,31 +184,35 @@
             const batchDelete = async () => {
                 if (!selected.length) return;
                 if (!confirm(`确定删除 ${selected.length} 条记录吗？`)) return;
-                const resp = await fetch('/api/batch-delete', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ids: selected })
+                await runWithBusy('batchDelete', async () => {
+                    const resp = await fetch('/api/batch-delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ids: selected })
+                    });
+                    const data = await resp.json();
+                    if (data.success) {
+                        setSelected([]);
+                        setRecords([]);
+                        setOffset(0);
+                        loadRecords(true);
+                    } else {
+                        alert(data.error || '删除失败');
+                    }
                 });
-                const data = await resp.json();
-                if (data.success) {
-                    setSelected([]);
-                    setRecords([]);
-                    setOffset(0);
-                    loadRecords(true);
-                } else {
-                    alert(data.error || '删除失败');
-                }
             };
 
             const deleteOne = async (id) => {
                 if (!confirm('确定删除该记录吗？')) return;
-                const resp = await fetch(`/api/records/${id}`, { method: 'DELETE' });
-                const data = await resp.json();
-                if (data.success) {
-                    setRecords(prev => prev.filter(r => r.id !== id));
-                } else {
-                    alert(data.error || '删除失败');
-                }
+                await runWithBusy(`delete-${id}`, async () => {
+                    const resp = await fetch(`/api/records/${id}`, { method: 'DELETE' });
+                    const data = await resp.json();
+                    if (data.success) {
+                        setRecords(prev => prev.filter(r => r.id !== id));
+                    } else {
+                        alert(data.error || '删除失败');
+                    }
+                });
             };
 
             // 使用与单图生成相同的参数跳转到单图生成页重新生成
@@ -232,7 +255,7 @@
                 const url = record.image_path;
                 const filename = record.filename || 'image';
                 const meta = { width: record.width, height: record.height, resolution: record.resolution };
-                try {
+                await runWithBusy(`material-${record.id}`, async () => {
                     const resp = await fetch('/api/add-to-image-material', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -244,9 +267,9 @@
                     } else {
                         alert(data.error || '添加失败');
                     }
-                } catch (e) {
+                }).catch((e) => {
                     alert('添加失败: ' + e.message);
-                }
+                });
             };
 
             return (
@@ -276,16 +299,18 @@
                                             value={search}
                                             onChange={(e) => setSearch(e.target.value)}
                                         />
-                                        <button className="btn btn-secondary" onClick={() => { setRecords([]); setOffset(0); loadRecords(true); }}>搜索</button>
+                                        <button className="btn btn-secondary" disabled={loading || isBusy('search')} onClick={() => runWithBusy('search', async () => { setRecords([]); setOffset(0); await loadRecords(true); })}>{isBusy('search') ? '搜索中...' : '搜索'}</button>
                                         <div className="view-toggle" style={{ marginLeft: '12px' }}>
                                             <button
                                                 className={viewMode === 'table' ? 'active' : ''}
-                                                onClick={() => setViewMode('table')}
+                                                disabled={isBusy('view-table')}
+                                                onClick={() => runWithBusy('view-table', async () => setViewMode('table'))}
                                                 title="表格模式"
                                             >📋 表格</button>
                                             <button
                                                 className={viewMode === 'thumb' ? 'active' : ''}
-                                                onClick={() => setViewMode('thumb')}
+                                                disabled={isBusy('view-thumb')}
+                                                onClick={() => runWithBusy('view-thumb', async () => setViewMode('thumb'))}
                                                 title="缩略图模式"
                                             >🖼 缩略图</button>
                                         </div>
@@ -293,7 +318,7 @@
                                     <div className="row">
                                         <span className="pill">总数 {total}</span>
                                         <span className="pill">已选 {selectedCount}</span>
-                                        <button className="btn btn-danger" onClick={batchDelete}>批量删除</button>
+                                        <button className="btn btn-danger" disabled={!selectedCount || isBusy('batchDelete')} onClick={batchDelete}>{isBusy('batchDelete') ? '删除中...' : '批量删除'}</button>
                                     </div>
                                 </div>
                             </div>
@@ -350,9 +375,9 @@
                                                     </td>
                                                     <td>{record.created_at || '-'}</td>
                                                     <td>
-                                                        <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '0.8rem' }} onClick={() => setModalRecord(record)}>详情</button>
+                                                        <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '0.8rem' }} disabled={isBusy(`detail-${record.id}`)} onClick={() => runWithBusy(`detail-${record.id}`, async () => setModalRecord(record))}>{isBusy(`detail-${record.id}`) ? '打开中...' : '详情'}</button>
                                                         <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: '0.8rem', marginLeft: '4px' }} onClick={() => regenerateImage(record)}>重新生成</button>
-                                                        <button className="btn btn-danger" style={{ padding: '4px 8px', fontSize: '0.8rem', marginLeft: '4px' }} onClick={() => deleteOne(record.id)}>删除</button>
+                                                        <button className="btn btn-danger" style={{ padding: '4px 8px', fontSize: '0.8rem', marginLeft: '4px' }} disabled={isBusy(`delete-${record.id}`)} onClick={() => deleteOne(record.id)}>{isBusy(`delete-${record.id}`) ? '删除中...' : '删除'}</button>
                                                     </td>
                                                 </tr>
                                             ))}
@@ -378,7 +403,7 @@
                                 )}
                                 {records.length === 0 && !loading && <div className="small-hint">暂无记录</div>}
                                 <div className="row" style={{ marginTop: '12px' }}>
-                                    <button className="btn btn-secondary" onClick={() => loadRecords(false)} disabled={loading}>加载更多</button>
+                                    <button className="btn btn-secondary" onClick={() => runWithBusy('loadMore', async () => loadRecords(false))} disabled={loading || isBusy('loadMore')}>{loading || isBusy('loadMore') ? '加载中...' : '加载更多'}</button>
                                 </div>
                             </div>
                         </div>
@@ -412,9 +437,9 @@
                                 {currentIndex + 1} / {records.length}
                             </div>
                             <div style={{ position: 'absolute', bottom: 'calc(32vh + 12px)', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }} onClick={(e) => e.stopPropagation()}>
-                                <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); addToMaterial(modalRecord); }}>加入素材库</button>
+                                <button className="btn btn-primary" disabled={isBusy(`material-${modalRecord.id}`)} onClick={(e) => { e.stopPropagation(); addToMaterial(modalRecord); }}>{isBusy(`material-${modalRecord.id}`) ? '加入中...' : '加入素材库'}</button>
                                 <button className="btn btn-primary" onClick={() => { regenerateImage(modalRecord); setModalRecord(null); }}>重新生成</button>
-                                <button className="btn btn-danger" onClick={() => { deleteOne(modalRecord.id); setModalRecord(null); }}>删除</button>
+                                <button className="btn btn-danger" disabled={isBusy(`delete-${modalRecord.id}`)} onClick={() => { deleteOne(modalRecord.id); setModalRecord(null); }}>{isBusy(`delete-${modalRecord.id}`) ? '删除中...' : '删除'}</button>
                             </div>
                             <div className="preview-params" onClick={(e) => e.stopPropagation()}>
                                 <div className="preview-params-grid" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 16px' }}>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import database
 from app.config import config
 
 BIZ_OMNI_VIDEO = "omni_video"
+logger = logging.getLogger(__name__)
 
 
 def _to_cent(value: Decimal) -> int:
@@ -116,6 +118,13 @@ def settle_omni_video_charge(task: dict) -> None:
 
     user = database.get_user_by_id(user_id)
     if not user:
+        return
+    if user.get("role_code") == database.ROLE_INTERNAL_USER:
+        logger.info(
+            "[omni-video][billing] skip charge for internal user: user_id=%s task_id=%s",
+            user_id,
+            task_id,
+        )
         return
 
     pricing = None

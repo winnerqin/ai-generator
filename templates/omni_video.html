@@ -18,6 +18,8 @@
         .field { display: grid; gap: 8px; margin-bottom: 14px; }
         .field input, .field select, .field textarea { width: 100%; box-sizing: border-box; }
         .field textarea { min-height: 110px; resize: vertical; }
+        .filename-field { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 12px; }
+        .filename-field label { white-space: nowrap; }
         .filename-input-wrap { position: relative; }
         .filename-input-wrap input { padding-right: 56px; }
         .filename-suffix { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #9ca8cf; font-size: 0.9rem; pointer-events: none; }
@@ -28,8 +30,25 @@
         .asset-preview { height: 120px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.15); }
         .asset-preview img, .asset-preview video { width: 100%; height: 100%; object-fit: contain; display: block; }
         .asset-info { padding: 8px; display: grid; gap: 4px; font-size: 0.82rem; }
+        .library-tabs { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+        .library-tab { border: 1px solid rgba(86,111,255,0.28); background: rgba(255,255,255,0.03); color: inherit; border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+        .library-tab.active { border-color: rgba(86,111,255,0.8); background: rgba(86,111,255,0.16); color: #fff; }
+        .library-search { position: relative; flex: 0 0 126px; }
+        .library-search input { width: 100%; box-sizing: border-box; height: 34px; padding: 7px 34px 7px 12px; }
+        .library-clear-search { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 22px; height: 22px; border: none; border-radius: 50%; background: rgba(255,255,255,0.12); color: #dce6ff; cursor: pointer; display: none; line-height: 20px; padding: 0; }
+        .library-clear-search.visible { display: inline-flex; align-items: center; justify-content: center; }
+        .library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+        .library-card { border-radius: 8px; overflow: hidden; border: 1px solid rgba(86,111,255,0.18); background: rgba(255,255,255,0.02); cursor: pointer; }
+        .library-card.selected { border-color: rgba(86,111,255,0.9); box-shadow: 0 0 0 2px rgba(86,111,255,0.18) inset; }
+        .library-preview { height: 92px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.15); }
+        .library-preview img, .library-preview video { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .library-info { padding: 6px 8px; font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .library-pager { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
         .selected-list { display: grid; gap: 10px; }
         .selected-item { display: grid; grid-template-columns: 56px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; background: rgba(86,111,255,0.08); }
+        .selected-item[draggable="true"] { cursor: grab; }
+        .selected-item.dragging { opacity: 0.5; }
+        .selected-item.drag-over { outline: 1px dashed rgba(158,208,255,0.8); outline-offset: 2px; }
         .selected-thumb { width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.16); border-radius: 10px; overflow: hidden; }
         .selected-thumb img, .selected-thumb video { width: 100%; height: 100%; object-fit: contain; }
         .selected-thumb { cursor: pointer; }
@@ -40,6 +59,9 @@
         .video-preview { width: 100%; margin-top: 14px; border-radius: 12px; background: rgba(0,0,0,0.2); }
         .small-hint { color: #9ca8cf; font-size: 0.85rem; }
         .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+        .filename-audio-toggle { margin-top: 0; white-space: nowrap; }
+        .task-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+        .primary-submit { padding: 7px 14px; font-size: 1rem; font-weight: 700; }
         .picker-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
         .picker-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.84); z-index: 2200; }
         .picker-inner { width: min(980px, 94vw); max-height: 88vh; overflow: auto; padding: 18px; border-radius: 16px; background: rgba(8,13,24,0.97); }
@@ -53,9 +75,12 @@
         .preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
         .preview-body img, .preview-body video { width: 100%; max-height: 72vh; object-fit: contain; display: block; }
         .preview-body audio { width: 100%; margin-top: 18px; }
+        .is-busy { opacity: 0.7; cursor: wait; }
         @media (max-width: 960px) {
             .grid { grid-template-columns: 1fr; }
             .field-row { grid-template-columns: 1fr; }
+            .filename-field { grid-template-columns: auto minmax(0, 1fr); }
+            .filename-audio-toggle { grid-column: 2; }
             .asset-upload-row { grid-template-columns: 1fr; }
             .asset-upload-row > div:last-child { padding-left: 0; border-left: none; margin-top: 16px; }
         }
@@ -76,7 +101,6 @@
                 <button id="refreshBalanceBtn" class="btn btn-secondary" style="padding: 2px 8px; font-size: 0.8rem;">刷新</button>
             </div>
         </div>
-        <div class="page-subtitle">支持模型、分辨率、比例、时长、帧数、声音开关与内容库选材。填写帧数时优先于时长。</div>
 
         <div class="grid">
             <div>
@@ -86,13 +110,16 @@
                         <textarea id="prompt" placeholder="描述视频内容、镜头运动、风格、节奏和重点主体"></textarea>
                     </div>
 
-                    <div class="field">
+                    <div class="field filename-field">
                         <label for="filename">文件名</label>
                         <div class="filename-input-wrap">
                             <input id="filename" type="text" maxlength="120" placeholder="不填则默认使用任务ID">
                             <span class="filename-suffix">.mp4</span>
                         </div>
-                        <div class="small-hint">输入后会自动补全为 .mp4；未填写时下载文件名默认使用任务ID。</div>
+                        <div class="checkbox-row filename-audio-toggle">
+                            <input id="generateAudio" type="checkbox" checked>
+                            <label for="generateAudio">生成声音</label>
+                        </div>
                     </div>
 
                     <div class="field-row">
@@ -138,7 +165,6 @@
                                 <option value="14">14</option>
                                 <option value="15">15</option>
                             </select>
-                            <div class="small-hint">当填写帧数时，时长会自动禁用。</div>
                         </div>
                         <div class="field">
                             <label for="frameCount">帧数</label>
@@ -150,11 +176,6 @@
                         </div>
                     </div>
 
-                    <div class="checkbox-row">
-                        <input id="generateAudio" type="checkbox" checked>
-                        <label for="generateAudio">生成声音</label>
-                        <span class="small-hint">默认开启</span>
-                    </div>
                 </div>
 
                 <div class="panel">
@@ -162,20 +183,18 @@
                         <div>
                             <div style="font-weight: 600; margin-bottom: 10px;">素材上传与选择</div>
                             <div class="upload-box" id="uploadBox">
-                                点击上传图片、音频或视频素材。上传后会自动同步到 OSS，并按类型进入对应素材库。
+                                点击上传图片、音频或视频素材
                                 <input id="uploadInput" type="file" accept="image/*,audio/*,video/*" multiple style="display:none;">
                             </div>
-                            <div class="picker-actions">
-                                <button id="openImagePickerBtn" class="btn btn-secondary">选择图片素材</button>
-                                <button id="openMediaPickerBtn" class="btn btn-secondary">选择音/视频素材</button>
+                            <div class="picker-actions" style="display:none;">
+                                <button id="openImagePickerBtn" class="btn btn-secondary" type="button">选择图片素材</button>
+                                <button id="openMediaPickerBtn" class="btn btn-secondary" type="button">选择音/视频素材</button>
                             </div>
-                            <div class="small-hint" style="margin-top: 10px;">默认不展开素材列表。点击按钮后会弹出素材选择框，支持多选。</div>
                         </div>
                         <div style="padding-left: 16px; border-left: 1px solid rgba(86,111,255,0.2);">
                             <div style="font-weight: 600; margin-bottom: 10px;">虚拟人像</div>
-                            <div class="small-hint" style="margin-bottom: 8px;">输入虚拟人像ID，点击添加后会作为图片显示在参考素材中。</div>
                             <div style="display: flex; gap: 10px;">
-                                <input id="virtualAvatarInput" type="text" placeholder="asset-20260310030618-88hlb" style="flex: 1;">
+                                <input id="virtualAvatarInput" type="text" placeholder="输入虚拟人像ID" style="flex: 1;">
                                 <button id="addVirtualAvatarBtn" class="btn btn-secondary">添加</button>
                             </div>
                             <div class="small-hint" style="margin-top: 8px;">ID格式：asset-20260310030618-88hlb</div>
@@ -186,7 +205,10 @@
 
             <div>
                 <div class="panel">
-                    <div style="font-weight: 600; margin-bottom: 10px;">已选全能参考素材</div>
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px;">
+                        <div style="font-weight: 600;">已选全能参考素材</div>
+                        <button id="clearSelectedAssetsBtn" class="btn btn-secondary" type="button" style="padding:4px 10px; font-size:0.86rem;">清除素材</button>
+                    </div>
                     <div class="small-hint" style="margin-bottom: 10px;">图片素材最多 9 个，音/视频素材最多 3 个。</div>
                     <div id="selectedList" class="selected-list">
                         <div class="small-hint">还没有选择参考素材。</div>
@@ -194,8 +216,8 @@
                 </div>
 
                 <div class="panel">
-                    <div class="row" style="margin-bottom: 12px;">
-                        <button id="submitBtn" class="btn btn-primary">创建全能视频任务</button>
+                    <div class="task-actions" style="margin-bottom: 12px;">
+                        <button id="submitBtn" class="btn btn-primary primary-submit">创建全能视频任务</button>
                         <a class="btn btn-secondary" href="/omni-video-tasks">查看任务管理</a>
                     </div>
                     <div class="status-box">
@@ -204,6 +226,29 @@
                         </div>
                         <video id="videoPreview" class="video-preview" controls style="display:none;"></video>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div style="font-weight: 600; margin-bottom: 10px;">素材库</div>
+            <div class="library-tabs" id="libraryTabs">
+                <button class="library-tab" type="button" data-library-tab="image_material">图片素材</button>
+                <button class="library-tab" type="button" data-library-tab="media">音/视频素材</button>
+                <button class="library-tab" type="button" data-library-tab="recent_generated">最近生成</button>
+                <div class="library-search">
+                    <input id="librarySearchInput" type="text" placeholder="按文件名搜索">
+                    <button id="libraryClearSearchBtn" class="library-clear-search" type="button" aria-label="清除搜索">×</button>
+                </div>
+            </div>
+            <div id="libraryContent" class="library-grid">
+                <div class="small-hint">点击上方标签后加载素材。</div>
+            </div>
+            <div class="library-pager">
+                <div id="libraryPagerInfo" class="small-hint">未加载</div>
+                <div class="row">
+                    <button id="libraryPrevBtn" class="btn btn-secondary" type="button">上一页</button>
+                    <button id="libraryNextBtn" class="btn btn-secondary" type="button">下一页</button>
                 </div>
             </div>
         </div>
@@ -257,6 +302,43 @@
         let tempSelectedIds = new Set();
         let selectedAssets = [];
         let omniConfig = { models: [], default_model: null, model_aliases: {}, configured: false };
+        let pickerLoading = false;
+        const selectedAssetsStorageKey = 'omniVideoSelectedAssets';
+        const libraryPageSize = 20;
+        let libraryState = { activeType: null, page: 1, total: 0, items: [], loading: false, search: '' };
+        let librarySearchTimer = null;
+
+        function setButtonBusy(button, busy, busyText = null) {
+            if (!button) return;
+            if (busy) {
+                if (button.dataset.busy === 'true') return;
+                button.dataset.busy = 'true';
+                if (busyText != null) {
+                    button.dataset.originalText = button.textContent;
+                    button.textContent = busyText;
+                }
+                button.disabled = true;
+                button.classList.add('is-busy');
+                return;
+            }
+            button.disabled = false;
+            button.classList.remove('is-busy');
+            if (button.dataset.originalText != null) {
+                button.textContent = button.dataset.originalText;
+                delete button.dataset.originalText;
+            }
+            delete button.dataset.busy;
+        }
+
+        async function withButtonBusy(button, busyText, action) {
+            if (button?.dataset.busy === 'true') return;
+            setButtonBusy(button, true, busyText);
+            try {
+                return await action();
+            } finally {
+                setButtonBusy(button, false);
+            }
+        }
 
         function debugLog(label, payload) {
             console.group(`[OmniVideo] ${label}`);
@@ -274,6 +356,18 @@
 
         function isVirtualAvatarAsset(asset) {
             return asset.type === 'virtual_avatar' || (asset.url && asset.url.startsWith('asset://'));
+        }
+
+        function isAssetSelected(asset) {
+            return selectedAssets.some((item) => item.url === asset.url);
+        }
+
+        function updateLibrarySelectionState() {
+            document.querySelectorAll('[data-library-url]').forEach((card) => {
+                const url = card.getAttribute('data-library-url');
+                const selected = selectedAssets.some((asset) => asset.url === url);
+                card.classList.toggle('selected', selected);
+            });
         }
 
         function renderPickerGrid() {
@@ -402,6 +496,8 @@
 
         function renderSelectedAssets() {
             const container = document.getElementById('selectedList');
+            persistSelectedAssets();
+            updateLibrarySelectionState();
             if (!selectedAssets.length) {
                 container.innerHTML = '<div class="small-hint">还没有选择参考素材。</div>';
                 return;
@@ -414,7 +510,7 @@
                 else if (isAudioAsset(asset)) preview = '<div style="font-size:28px;">♪</div>';
                 const hintText = isVirtualAvatarAsset(asset) ? `ID: ${asset.filename}` : '双击缩略图可放大预览';
                 return `
-                    <div class="selected-item">
+                    <div class="selected-item" draggable="true" data-selected-index="${index}">
                         <div class="selected-thumb" data-preview-selected="${index}" title="${isVirtualAvatarAsset(asset) ? '虚拟人像' : '双击放大预览'}">${preview}</div>
                         <div>
                             <div class="selected-label">${getAssetLabel(asset)}</div>
@@ -433,6 +529,35 @@
                     renderSelectedAssets();
                 });
             });
+            container.querySelectorAll('[data-selected-index]').forEach((item) => {
+                item.addEventListener('dragstart', (event) => {
+                    item.classList.add('dragging');
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', item.getAttribute('data-selected-index'));
+                });
+                item.addEventListener('dragend', () => {
+                    item.classList.remove('dragging');
+                    container.querySelectorAll('.drag-over').forEach((target) => target.classList.remove('drag-over'));
+                });
+                item.addEventListener('dragover', (event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                    item.classList.add('drag-over');
+                });
+                item.addEventListener('dragleave', () => {
+                    item.classList.remove('drag-over');
+                });
+                item.addEventListener('drop', (event) => {
+                    event.preventDefault();
+                    item.classList.remove('drag-over');
+                    const fromIndex = Number(event.dataTransfer.getData('text/plain'));
+                    const toIndex = Number(item.getAttribute('data-selected-index'));
+                    if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex) || fromIndex === toIndex) return;
+                    const [moved] = selectedAssets.splice(fromIndex, 1);
+                    selectedAssets.splice(toIndex, 0, moved);
+                    renderSelectedAssets();
+                });
+            });
             container.querySelectorAll('[data-preview-selected]').forEach((thumb) => {
                 thumb.addEventListener('dblclick', () => {
                     const asset = selectedAssets[Number(thumb.getAttribute('data-preview-selected'))];
@@ -441,7 +566,170 @@
             });
         }
 
+        function persistSelectedAssets() {
+            try {
+                localStorage.setItem(selectedAssetsStorageKey, JSON.stringify(selectedAssets));
+            } catch (_error) {
+                // Ignore storage failures; the current page state still works.
+            }
+        }
+
+        function restoreSelectedAssets() {
+            try {
+                const raw = localStorage.getItem(selectedAssetsStorageKey);
+                if (!raw) return;
+                const assets = JSON.parse(raw);
+                if (!Array.isArray(assets)) return;
+                selectedAssets = assets.filter((asset) => asset && asset.url);
+                renderSelectedAssets();
+            } catch (_error) {
+                selectedAssets = [];
+                renderSelectedAssets();
+            }
+        }
+
+        function clearSelectedAssets() {
+            selectedAssets = [];
+            try {
+                localStorage.removeItem(selectedAssetsStorageKey);
+            } catch (_error) {
+                // Ignore storage cleanup failures.
+            }
+            renderSelectedAssets();
+        }
+
+        function addOrRemoveReferenceAsset(asset) {
+            if (!asset || !asset.url) return;
+            const existingIndex = selectedAssets.findIndex((item) => item.url === asset.url);
+            if (existingIndex >= 0) {
+                selectedAssets.splice(existingIndex, 1);
+                renderSelectedAssets();
+                return;
+            }
+
+            const kind = getSelectionKind(asset);
+            const max = pickerConfigs[kind]?.max || 9;
+            const currentCount = selectedAssets.filter((item) => getSelectionKind(item) === kind).length;
+            if (currentCount >= max) {
+                alert(`最多只能选择 ${max} 个${pickerConfigs[kind]?.label || '素材'}`);
+                return;
+            }
+            selectedAssets.push(asset);
+            renderSelectedAssets();
+        }
+
+        function normalizeLibraryAsset(asset, type) {
+            return {
+                id: asset.id || asset.task_id || asset.url,
+                url: asset.url,
+                filename: asset.filename || asset.task_id || '',
+                type: type === 'image_material' ? 'image' : (asset.type || 'video'),
+                meta: asset.meta || {},
+                created_at: asset.created_at || asset.updated_at || '',
+            };
+        }
+
+        function taskToLibraryAsset(task) {
+            const url = task.video_url || task.result_url || task.output_url || '';
+            if (!url) return null;
+            return {
+                id: `omni-task-${task.task_id || url}`,
+                url,
+                filename: task.filename || task.task_id || 'generated-video',
+                type: 'video',
+                meta: { task_id: task.task_id, source: 'omni_video', model: task.model },
+                created_at: task.created_at || task.updated_at || '',
+            };
+        }
+
+        function renderLibraryGrid() {
+            const content = document.getElementById('libraryContent');
+            const pagerInfo = document.getElementById('libraryPagerInfo');
+            const searchInput = document.getElementById('librarySearchInput');
+            const clearSearchBtn = document.getElementById('libraryClearSearchBtn');
+            const totalPages = Math.max(1, Math.ceil((libraryState.total || 0) / libraryPageSize));
+            if (searchInput.value !== libraryState.search) searchInput.value = libraryState.search || '';
+            clearSearchBtn.classList.toggle('visible', !!searchInput.value.trim());
+            document.querySelectorAll('[data-library-tab]').forEach((tab) => {
+                tab.classList.toggle('active', tab.getAttribute('data-library-tab') === libraryState.activeType);
+            });
+
+            if (!libraryState.activeType) {
+                content.innerHTML = '<div class="small-hint">点击上方标签后加载素材。</div>';
+                pagerInfo.textContent = '未加载';
+                document.getElementById('libraryPrevBtn').disabled = true;
+                document.getElementById('libraryNextBtn').disabled = true;
+                return;
+            }
+            const disablePrev = libraryState.loading || libraryState.page <= 1;
+            const disableNext = libraryState.loading || libraryState.page >= totalPages;
+            document.getElementById('libraryPrevBtn').disabled = disablePrev;
+            document.getElementById('libraryNextBtn').disabled = disableNext;
+            if (libraryState.loading) {
+                content.innerHTML = '<div class="small-hint">加载中...</div>';
+                pagerInfo.textContent = `第 ${libraryState.page} 页`;
+                return;
+            }
+            if (!libraryState.items.length) {
+                content.innerHTML = '<div class="small-hint">当前暂无素材。</div>';
+                pagerInfo.textContent = `第 ${libraryState.page} 页 / 共 ${totalPages} 页，合计 ${libraryState.total || 0} 条`;
+                return;
+            }
+
+            content.innerHTML = libraryState.items.map((asset, index) => {
+                let preview = `<img src="${asset.url}" alt="${asset.filename || 'asset'}">`;
+                if (isVideoAsset(asset)) preview = `<video src="${asset.url}" preload="metadata"></video>`;
+                if (isAudioAsset(asset)) preview = '<div style="font-size:42px;">♪</div>';
+                return `
+                    <div class="library-card ${isAssetSelected(asset) ? 'selected' : ''}" data-library-index="${index}" data-library-url="${asset.url}">
+                        <div class="library-preview">${preview}</div>
+                        <div class="library-info" title="${asset.filename || '-'}">${asset.filename || '-'}</div>
+                    </div>
+                `;
+            }).join('');
+            pagerInfo.textContent = `第 ${libraryState.page} 页 / 共 ${totalPages} 页，合计 ${libraryState.total || 0} 条`;
+            content.querySelectorAll('[data-library-index]').forEach((card) => {
+                card.addEventListener('click', () => {
+                    const asset = libraryState.items[Number(card.getAttribute('data-library-index'))];
+                    addOrRemoveReferenceAsset(asset);
+                });
+            });
+        }
+
+        async function loadLibrary(type, page = 1, search = libraryState.search || '') {
+            libraryState = { activeType: type, page, total: libraryState.total, items: [], loading: true, search };
+            renderLibraryGrid();
+            try {
+                let items = [];
+                let total = 0;
+                if (type === 'recent_generated') {
+                    const params = new URLSearchParams({ page: String(page), page_size: String(libraryPageSize), status: 'succeeded' });
+                    if (search.trim()) params.set('search', search.trim());
+                    const resp = await fetch(`/api/omni-video/tasks?${params.toString()}`);
+                    const data = await resp.json();
+                    if (!resp.ok || !data.success) throw new Error(data.error || '加载最近生成失败');
+                    items = (data.items || []).map(taskToLibraryAsset).filter(Boolean);
+                    total = data.total || items.length;
+                } else {
+                    const params = new URLSearchParams({ type, page: String(page), page_size: String(libraryPageSize) });
+                    if (search.trim()) params.set('search', search.trim());
+                    const resp = await fetch(`/api/content-library?${params.toString()}`);
+                    const data = await resp.json();
+                    if (!resp.ok || !data.success) throw new Error(data.error || '加载素材失败');
+                    items = (data.assets || data.items || []).map((asset) => normalizeLibraryAsset(asset, type)).filter((asset) => asset.url);
+                    total = data.total || items.length;
+                }
+                libraryState = { activeType: type, page, total, items, loading: false, search };
+            } catch (error) {
+                libraryState = { activeType: type, page, total: 0, items: [], loading: false, search };
+                alert(error.message || '加载素材失败');
+            }
+            renderLibraryGrid();
+        }
+
         async function openPicker(type) {
+            if (pickerLoading) return;
+            pickerLoading = true;
             currentPickerType = type;
             const config = pickerConfigs[type];
             document.getElementById('pickerTitle').textContent = `选择${config.label}`;
@@ -453,13 +741,17 @@
                     .map((asset) => String(asset.id))
             );
             debugLog('content-library request', { type });
-            const resp = await fetch(`/api/content-library?type=${encodeURIComponent(type)}`);
-            const data = await resp.json();
-            debugLog('content-library response', data);
-            pickerAssets = data.success ? (data.assets || []) : [];
-            updatePickerSelectionInfo();
-            renderPickerGrid();
-            document.getElementById('assetPickerModal').style.display = 'flex';
+            try {
+                const resp = await fetch(`/api/content-library?type=${encodeURIComponent(type)}`);
+                const data = await resp.json();
+                debugLog('content-library response', data);
+                pickerAssets = data.success ? (data.assets || []) : [];
+                updatePickerSelectionInfo();
+                renderPickerGrid();
+                document.getElementById('assetPickerModal').style.display = 'flex';
+            } finally {
+                pickerLoading = false;
+            }
         }
 
         function closePicker() {
@@ -730,9 +1022,7 @@
                 return;
             }
             const button = document.getElementById('submitBtn');
-            button.disabled = true;
-            button.textContent = '创建中...';
-            try {
+            await withButtonBusy(button, '创建中...', async () => {
                 const resp = await fetch('/api/omni-video/tasks', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -744,23 +1034,59 @@
                     throw new Error(data.error || '创建任务失败');
                 }
                 renderTask(data.task || {}, data.message);
-            } catch (error) {
+            }).catch((error) => {
                 alert(error.message || '创建任务失败');
-            } finally {
-                button.disabled = false;
-                button.textContent = '创建全能视频任务';
-            }
+            });
         }
 
         document.getElementById('submitBtn').addEventListener('click', createTask);
-        document.getElementById('uploadBox').addEventListener('click', () => document.getElementById('uploadInput').click());
-        document.getElementById('uploadInput').addEventListener('change', (event) => uploadMedia(event.target.files));
+        document.getElementById('clearSelectedAssetsBtn').addEventListener('click', clearSelectedAssets);
+        document.getElementById('uploadBox').addEventListener('click', () => {
+            document.getElementById('uploadInput').click();
+        });
+        document.getElementById('uploadInput').addEventListener('change', async (event) => {
+            const trigger = document.getElementById('uploadBox');
+            try {
+                await withButtonBusy(trigger, '上传中...', () => uploadMedia(event.target.files));
+            } finally {
+                event.target.value = '';
+            }
+        });
         document.getElementById('frameCount').addEventListener('input', syncDurationState);
-        document.getElementById('openImagePickerBtn').addEventListener('click', () => openPicker('image_material'));
-        document.getElementById('openMediaPickerBtn').addEventListener('click', () => openPicker('media'));
+        document.getElementById('openImagePickerBtn').addEventListener('click', (event) => withButtonBusy(event.currentTarget, '打开中...', () => openPicker('image_material')));
+        document.getElementById('openMediaPickerBtn').addEventListener('click', (event) => withButtonBusy(event.currentTarget, '打开中...', () => openPicker('media')));
+        document.querySelectorAll('[data-library-tab]').forEach((tab) => {
+            tab.addEventListener('click', () => {
+                loadLibrary(tab.getAttribute('data-library-tab'), 1, document.getElementById('librarySearchInput').value.trim());
+            });
+        });
+        document.getElementById('librarySearchInput').addEventListener('input', (event) => {
+            const value = event.target.value.trim();
+            document.getElementById('libraryClearSearchBtn').classList.toggle('visible', !!value);
+            if (!libraryState.activeType) return;
+            clearTimeout(librarySearchTimer);
+            librarySearchTimer = setTimeout(() => loadLibrary(libraryState.activeType, 1, value), 300);
+        });
+        document.getElementById('libraryClearSearchBtn').addEventListener('click', () => {
+            document.getElementById('librarySearchInput').value = '';
+            document.getElementById('libraryClearSearchBtn').classList.remove('visible');
+            if (libraryState.activeType) loadLibrary(libraryState.activeType, 1, '');
+        });
+        document.getElementById('libraryPrevBtn').addEventListener('click', () => {
+            if (!libraryState.activeType || libraryState.page <= 1) return;
+            loadLibrary(libraryState.activeType, libraryState.page - 1, libraryState.search);
+        });
+        document.getElementById('libraryNextBtn').addEventListener('click', () => {
+            if (!libraryState.activeType) return;
+            const totalPages = Math.max(1, Math.ceil((libraryState.total || 0) / libraryPageSize));
+            if (libraryState.page >= totalPages) return;
+            loadLibrary(libraryState.activeType, libraryState.page + 1, libraryState.search);
+        });
         document.getElementById('pickerSearch').addEventListener('input', renderPickerGrid);
         document.getElementById('closePickerBtn').addEventListener('click', closePicker);
-        document.getElementById('applyPickerBtn').addEventListener('click', applyPickerSelection);
+        document.getElementById('applyPickerBtn').addEventListener('click', (event) => withButtonBusy(event.currentTarget, '加入中...', async () => {
+            applyPickerSelection();
+        }));
         document.getElementById('assetPickerModal').addEventListener('click', (event) => {
             if (event.target === event.currentTarget) {
                 closePicker();
@@ -774,10 +1100,10 @@
         });
 
         // 虚拟人像相关事件
-        document.getElementById('addVirtualAvatarBtn').addEventListener('click', () => {
+        document.getElementById('addVirtualAvatarBtn').addEventListener('click', (event) => withButtonBusy(event.currentTarget, '添加中...', async () => {
             const input = document.getElementById('virtualAvatarInput');
             addVirtualAvatar(input.value);
-        });
+        }));
         document.getElementById('virtualAvatarInput').addEventListener('keydown', (event) => {
             if (event.key === 'Enter') {
                 event.preventDefault();
@@ -791,9 +1117,10 @@
             renderSelectedAssets();
         });
 
-        renderSelectedAssets();
         syncDurationState();
+        renderLibraryGrid();
         loadOmniConfig().then(() => {
+            restoreSelectedAssets();
             applyRegeneratePrefill();
             syncResolutionOptions();
         });
@@ -812,7 +1139,7 @@
             const btnEl = document.getElementById('refreshBalanceBtn');
             try {
                 valueEl.textContent = '查询中...';
-                btnEl.disabled = true;
+                setButtonBusy(btnEl, true, '刷新中...');
                 const resp = await fetch('/api/omni-video/balance');
                 const data = await resp.json();
                 if (data.success) {
@@ -824,7 +1151,7 @@
             } catch (error) {
                 valueEl.textContent = '查询失败';
             } finally {
-                btnEl.disabled = false;
+                setButtonBusy(btnEl, false);
             }
         }
 

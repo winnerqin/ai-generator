@@ -17,7 +17,7 @@ import requests
 import database
 from app.config import config
 from app.services.billing_service import ensure_min_balance_for_omni_video, settle_omni_video_charge
-from app.services.omni_video_client import is_intl_model, omni_video_client
+from app.services.omni_video_client import omni_video_client
 from app.services.operation_log_service import (
     log_external_api_call,
     log_task_operation,
@@ -1046,6 +1046,13 @@ class OmniVideoService:
             local_payload=payload,
             remote=remote,
         )
+        record["batch_id"] = data.get("batch_id")
+        record["client_request_id"] = data.get("client_request_id")
+        record["source"] = data.get("source")
+        record["callback_url"] = data.get("callback_url")
+        record["external_meta_json"] = (
+            data.get("external_meta") or data.get("external_meta_json") or {}
+        )
         # 传递 username 以便后续操作记录
         record["username"] = username
         result = self._persist_and_load(record)
@@ -1080,6 +1087,7 @@ class OmniVideoService:
         search: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        batch_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
         sync_running: bool = False,
@@ -1092,6 +1100,7 @@ class OmniVideoService:
             search=search,
             start_date=start_date,
             end_date=end_date,
+            batch_id=batch_id,
             limit=page_size,
             offset=offset,
             include_heavy_fields=False,
@@ -1103,6 +1112,7 @@ class OmniVideoService:
             search=search,
             start_date=start_date,
             end_date=end_date,
+            batch_id=batch_id,
         )
         ledger_amounts = database.get_ledger_debit_amounts_cent(
             user_id,

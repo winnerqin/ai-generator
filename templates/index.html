@@ -380,7 +380,23 @@
             const [error, setError] = useState('');
             const [modalImage, setModalImage] = useState(null);
             const [modalResultIndex, setModalResultIndex] = useState(null);
+            const [actionLoading, setActionLoading] = useState({});
             const sampleScrollRef = useRef(null);
+
+            const isBusy = (key) => Boolean(actionLoading[key]);
+            const runWithBusy = async (key, action) => {
+                if (isBusy(key)) return;
+                setActionLoading(prev => ({ ...prev, [key]: true }));
+                try {
+                    return await action();
+                } finally {
+                    setActionLoading(prev => {
+                        const next = { ...prev };
+                        delete next[key];
+                        return next;
+                    });
+                }
+            };
 
             useEffect(() => {
                 document.body.classList.add('react-theme');
@@ -640,60 +656,62 @@
                     setError('请输入提示词');
                     return;
                 }
-                setError('');
-                setResults([]);
-                setSelectedResults([]);
-                setLoading(true);
-                setProgressText('初始化中...');
-                const resp = await fetch('/generate', { method: 'POST', body: buildFormData() });
-                if (!resp.ok || !resp.body) {
-                    setError('生成失败，请重试');
-                    setLoading(false);
-                    return;
-                }
-                const reader = resp.body.getReader();
-                const decoder = new TextDecoder('utf-8');
-                let buffer = '';
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
-                    const parts = buffer.split('\n\n');
-                    buffer = parts.pop() || '';
-                    parts.forEach(part => parseSseChunk(part, (payload) => {
-                        if (payload.type === 'start') {
-                            setProgressText(`开始生成，共 ${payload.total || 0} 张`);
-                        } else if (payload.type === 'generating') {
-                            setProgressText(`生成中 ${payload.index || 0}/${payload.total || 0}`);
-                        } else if (payload.type === 'image') {
-                            setResults(prev => prev.concat({
-                                url: payload.url,
-                                filename: payload.filename,
-                                record_id: payload.record_id
-                            }));
-                        } else if (payload.type === 'error') {
-                            setError(payload.error || '生成失败');
-                        } else if (payload.type === 'complete') {
-                            setProgressText(`完成，共 ${payload.total || 0} 张`);
-                            setLoading(false);
-                            // 保存本次生成参数到 localStorage
-                            try {
-                                const lastParams = {
-                                    prompt,
-                                    aspect_ratio: aspectRatio,
-                                    resolution,
-                                    generate_mode: generateMode,
-                                    num_images: numImages,
-                                    image_style: imageStyle,
-                                    output_filename: outputFilename,
-                                    seed,
-                                };
-                                localStorage.setItem('lastGenerateParams', JSON.stringify(lastParams));
-                            } catch (e) { console.error('保存上次参数失败', e); }
+                await runWithBusy('generate', async () => {
+                    setError('');
+                    setResults([]);
+                    setSelectedResults([]);
+                    setLoading(true);
+                    setProgressText('初始化中...');
+                    try {
+                        const resp = await fetch('/generate', { method: 'POST', body: buildFormData() });
+                        if (!resp.ok || !resp.body) {
+                            setError('生成失败，请重试');
+                            return;
                         }
-                    }));
-                }
-                setLoading(false);
+                        const reader = resp.body.getReader();
+                        const decoder = new TextDecoder('utf-8');
+                        let buffer = '';
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            buffer += decoder.decode(value, { stream: true });
+                            const parts = buffer.split('\n\n');
+                            buffer = parts.pop() || '';
+                            parts.forEach(part => parseSseChunk(part, (payload) => {
+                                if (payload.type === 'start') {
+                                    setProgressText(`开始生成，共 ${payload.total || 0} 张`);
+                                } else if (payload.type === 'generating') {
+                                    setProgressText(`生成中 ${payload.index || 0}/${payload.total || 0}`);
+                                } else if (payload.type === 'image') {
+                                    setResults(prev => prev.concat({
+                                        url: payload.url,
+                                        filename: payload.filename,
+                                        record_id: payload.record_id
+                                    }));
+                                } else if (payload.type === 'error') {
+                                    setError(payload.error || '生成失败');
+                                } else if (payload.type === 'complete') {
+                                    setProgressText(`完成，共 ${payload.total || 0} 张`);
+                                    try {
+                                        const lastParams = {
+                                            prompt,
+                                            aspect_ratio: aspectRatio,
+                                            resolution,
+                                            generate_mode: generateMode,
+                                            num_images: numImages,
+                                            image_style: imageStyle,
+                                            output_filename: outputFilename,
+                                            seed,
+                                        };
+                                        localStorage.setItem('lastGenerateParams', JSON.stringify(lastParams));
+                                    } catch (e) { console.error('保存上次参数失败', e); }
+                                }
+                            }));
+                        }
+                    } finally {
+                        setLoading(false);
+                    }
+                });
             };
 
             const toggleResult = (idx) => {
@@ -703,14 +721,16 @@
             const batchAddToMaterial = async () => {
                 const targets = selectedResults.map(i => results[i]).filter(Boolean);
                 if (targets.length === 0) return;
-                for (const item of targets) {
-                    await fetch('/api/add-to-image-material', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url: item.url, filename: item.filename, meta: item.meta || {} })
-                    });
-                }
-                setSelectedResults([]);
+                await runWithBusy('batchAddMaterial', async () => {
+                    for (const item of targets) {
+                        await fetch('/api/add-to-image-material', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url: item.url, filename: item.filename, meta: item.meta || {} })
+                        });
+                    }
+                    setSelectedResults([]);
+                });
             };
 
             return (
@@ -741,7 +761,7 @@
                                     <div className="panel-body">
                                         <div className="prompt-row">
                                             <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="输入提示词..." />
-                                            <button className="btn btn-generate" onClick={handleGenerate} disabled={loading}>
+                                            <button className="btn btn-generate" onClick={handleGenerate} disabled={loading || isBusy('generate')}>
                                                 {loading ? '生成中...' : '开始生成'}
                                             </button>
                                         </div>
@@ -839,8 +859,8 @@
                                 <div className="panel">
                                     <div className="panel-title">示例图库</div>
                                     <div className="form-row three">
-                                        <button className={`btn ${sampleCategory === 'image_material' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => switchSampleCategory('image_material')}>图片素材</button>
-                                        <button className={`btn ${sampleCategory === 'recent' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => switchSampleCategory('recent')}>最近</button>
+                                        <button className={`btn ${sampleCategory === 'image_material' ? 'btn-primary' : 'btn-secondary'}`} disabled={sampleLoading || isBusy('sample-image-material')} onClick={() => runWithBusy('sample-image-material', async () => switchSampleCategory('image_material'))}>{isBusy('sample-image-material') ? '切换中...' : '图片素材'}</button>
+                                        <button className={`btn ${sampleCategory === 'recent' ? 'btn-primary' : 'btn-secondary'}`} disabled={sampleLoading || isBusy('sample-recent')} onClick={() => runWithBusy('sample-recent', async () => switchSampleCategory('recent'))}>{isBusy('sample-recent') ? '切换中...' : '最近'}</button>
                                     </div>
                                     <div className="sample-scroll" ref={sampleScrollRef}>
                                         <div className="sample-grid">
@@ -864,14 +884,14 @@
                                                 type="button"
                                                 className="btn btn-secondary"
                                                 disabled={samplePage <= 1 || sampleLoading}
-                                                onClick={() => setSamplePage(page => Math.max(1, page - 1))}
+                                                onClick={() => runWithBusy('sample-prev', async () => setSamplePage(page => Math.max(1, page - 1)))}
                                             >上一页</button>
                                             <div className="sample-page-status">{samplePage} / {sampleTotalPages}</div>
                                             <button
                                                 type="button"
                                                 className="btn btn-secondary"
                                                 disabled={samplePage >= sampleTotalPages || sampleLoading}
-                                                onClick={() => setSamplePage(page => Math.min(sampleTotalPages, page + 1))}
+                                                onClick={() => runWithBusy('sample-next', async () => setSamplePage(page => Math.min(sampleTotalPages, page + 1)))}
                                             >下一页</button>
                                         </div>
                                     </div>
@@ -881,7 +901,7 @@
                             <div className="panel" style={{ marginTop: '18px' }}>
                                 <div className="panel-title">生成结果</div>
                                 <div className="form-row" style={{ marginBottom: '10px' }}>
-                                    <button className="btn btn-primary" onClick={() => batchAddToMaterial()}>加入素材库</button>
+                                    <button className="btn btn-primary" disabled={!selectedResults.length || isBusy('batchAddMaterial')} onClick={() => batchAddToMaterial()}>{isBusy('batchAddMaterial') ? '加入中...' : '加入素材库'}</button>
                                     <div className="small-hint">已选 {selectedResults.length} 张</div>
                                 </div>
                                 <div className="result-grid">
@@ -935,17 +955,19 @@
                                 )}
                                 <img src={modalImage} alt="preview" />
                                 <div style={{ textAlign: 'center', marginTop: '12px' }}>
-                                    <button className="btn btn-primary" onClick={async () => {
+                                    <button className="btn btn-primary" disabled={modalResultIndex == null || isBusy(`modal-add-${modalResultIndex}`)} onClick={async () => {
                                         if (modalResultIndex != null && results[modalResultIndex]) {
                                             const item = results[modalResultIndex];
-                                            await fetch('/api/add-to-image-material', {
-                                                method: 'POST',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ url: item.url, filename: item.filename, meta: item.meta || {} })
+                                            await runWithBusy(`modal-add-${modalResultIndex}`, async () => {
+                                                await fetch('/api/add-to-image-material', {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ url: item.url, filename: item.filename, meta: item.meta || {} })
+                                                });
+                                                alert('已添加到素材库');
                                             });
-                                            alert('已添加到素材库');
                                         }
-                                    }}>加入素材库</button>
+                                    }}>{modalResultIndex != null && isBusy(`modal-add-${modalResultIndex}`) ? '加入中...' : '加入素材库'}</button>
                                 </div>
                                 {modalResultIndex != null && results.length > 1 && (
                                     <div className="modal-counter">{modalResultIndex + 1} / {results.length}</div>

@@ -119,11 +119,13 @@ def register_blueprints(app: Flask):
         batch_bp,
         content_bp,
         image_bp,
+        omni_video_bp,
         projects_bp,
         script_bp,
         storyboard_bp,
         tools_bp,
         video_bp,
+        video_enhance_bp,
     )
 
     # 认证相关
@@ -143,6 +145,12 @@ def register_blueprints(app: Flask):
 
     # 视频生成
     app.register_blueprint(video_bp)
+
+    # 全能视频
+    app.register_blueprint(omni_video_bp)
+
+    # 视频画质增强
+    app.register_blueprint(video_enhance_bp)
 
     # 剧本相关
     app.register_blueprint(script_bp)

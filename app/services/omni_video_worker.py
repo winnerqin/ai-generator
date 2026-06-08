@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 _worker_thread: threading.Thread | None = None
 _worker_lock = threading.Lock()
+DEFAULT_INTERVAL_SECONDS = 60
+DEFAULT_BATCH_LIMIT = 200
 
 
 def _is_enabled() -> bool:
@@ -22,6 +24,11 @@ def _is_enabled() -> bool:
     )
 
 
+def refresh_pending_omni_video_tasks_once(batch_limit: int | None = None) -> dict[str, int]:
+    limit = batch_limit if batch_limit is not None else DEFAULT_BATCH_LIMIT
+    return omni_video_service.refresh_pending_tasks(limit=limit)
+
+
 def _run_loop(interval_seconds: int, batch_limit: int) -> None:
     logger.info(
         "[omni-video][worker] started interval_seconds=%s batch_limit=%s",
@@ -31,7 +38,7 @@ def _run_loop(interval_seconds: int, batch_limit: int) -> None:
     while True:
         started_at = time.time()
         try:
-            result = omni_video_service.refresh_pending_tasks(limit=batch_limit)
+            result = refresh_pending_omni_video_tasks_once(batch_limit=batch_limit)
             logger.info("[omni-video][worker] tick result=%s", result)
         except Exception:
             logger.exception("[omni-video][worker] tick failed")
@@ -47,8 +54,14 @@ def start_omni_video_worker() -> bool:
         logger.info("[omni-video][worker] disabled by OMNI_VIDEO_WORKER_ENABLED")
         return False
 
-    interval_seconds = int(os.environ.get("OMNI_VIDEO_WORKER_INTERVAL_SECONDS", "3600") or "3600")
-    batch_limit = int(os.environ.get("OMNI_VIDEO_WORKER_BATCH_LIMIT", "200") or "200")
+    interval_seconds = int(
+        os.environ.get("OMNI_VIDEO_WORKER_INTERVAL_SECONDS", str(DEFAULT_INTERVAL_SECONDS))
+        or str(DEFAULT_INTERVAL_SECONDS)
+    )
+    batch_limit = int(
+        os.environ.get("OMNI_VIDEO_WORKER_BATCH_LIMIT", str(DEFAULT_BATCH_LIMIT))
+        or str(DEFAULT_BATCH_LIMIT)
+    )
 
     with _worker_lock:
         if _worker_thread and _worker_thread.is_alive():
