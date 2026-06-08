@@ -53,6 +53,7 @@
         .preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
         .preview-body img, .preview-body video { width: 100%; max-height: 72vh; object-fit: contain; display: block; }
         .preview-body audio { width: 100%; margin-top: 18px; }
+        .is-busy { opacity: 0.7; cursor: wait; }
         @media (max-width: 960px) {
             .grid { grid-template-columns: 1fr; }
             .field-row { grid-template-columns: 1fr; }
@@ -257,6 +258,39 @@
         let tempSelectedIds = new Set();
         let selectedAssets = [];
         let omniConfig = { models: [], default_model: null, model_aliases: {}, configured: false };
+        let pickerLoading = false;
+
+        function setButtonBusy(button, busy, busyText = null) {
+            if (!button) return;
+            if (busy) {
+                if (button.dataset.busy === 'true') return;
+                button.dataset.busy = 'true';
+                if (busyText != null) {
+                    button.dataset.originalText = button.textContent;
+                    button.textContent = busyText;
+                }
+                button.disabled = true;
+                button.classList.add('is-busy');
+                return;
+            }
+            button.disabled = false;
+            button.classList.remove('is-busy');
+            if (button.dataset.originalText != null) {
+                button.textContent = button.dataset.originalText;
+                delete button.dataset.originalText;
+            }
+            delete button.dataset.busy;
+        }
+
+        async function withButtonBusy(button, busyText, action) {
+            if (button?.dataset.busy === 'true') return;
+            setButtonBusy(button, true, busyText);
+            try {
+                return await action();
+            } finally {
+                setButtonBusy(button, false);
+            }
+        }
 
         function debugLog(label, payload) {
             console.group(`[OmniVideo] ${label}`);
@@ -442,6 +476,8 @@
         }
 
         async function openPicker(type) {
+            if (pickerLoading) return;
+            pickerLoading = true;
             currentPickerType = type;
             const config = pickerConfigs[type];
             document.getElementById('pickerTitle').textContent = `选择${config.label}`;
@@ -453,13 +489,17 @@
                     .map((asset) => String(asset.id))
             );
             debugLog('content-library request', { type });
-            const resp = await fetch(`/api/content-library?type=${encodeURIComponent(type)}`);
-            const data = await resp.json();
-            debugLog('content-library response', data);
-            pickerAssets = data.success ? (data.assets || []) : [];
-            updatePickerSelectionInfo();
-            renderPickerGrid();
-            document.getElementById('assetPickerModal').style.display = 'flex';
+            try {
+                const resp = await fetch(`/api/content-library?type=${encodeURIComponent(type)}`);
+                const data = await resp.json();
+                debugLog('content-library response', data);
+                pickerAssets = data.success ? (data.assets || []) : [];
+                updatePickerSelectionInfo();
+                renderPickerGrid();
+                document.getElementById('assetPickerModal').style.display = 'flex';
+            } finally {
+                pickerLoading = false;
+            }
         }
 
         function closePicker() {
@@ -730,9 +770,7 @@
                 return;
             }
             const button = document.getElementById('submitBtn');
-            button.disabled = true;
-            button.textContent = '创建中...';
-            try {
+            await withButtonBusy(button, '创建中...', async () => {
                 const resp = await fetch('/api/omni-video/tasks', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -744,23 +782,31 @@
                     throw new Error(data.error || '创建任务失败');
                 }
                 renderTask(data.task || {}, data.message);
-            } catch (error) {
+            }).catch((error) => {
                 alert(error.message || '创建任务失败');
-            } finally {
-                button.disabled = false;
-                button.textContent = '创建全能视频任务';
-            }
+            });
         }
 
         document.getElementById('submitBtn').addEventListener('click', createTask);
-        document.getElementById('uploadBox').addEventListener('click', () => document.getElementById('uploadInput').click());
-        document.getElementById('uploadInput').addEventListener('change', (event) => uploadMedia(event.target.files));
+        document.getElementById('uploadBox').addEventListener('click', (event) => withButtonBusy(event.currentTarget, '选择中...', async () => {
+            document.getElementById('uploadInput').click();
+        }));
+        document.getElementById('uploadInput').addEventListener('change', async (event) => {
+            const trigger = document.getElementById('uploadBox');
+            try {
+                await withButtonBusy(trigger, '上传中...', () => uploadMedia(event.target.files));
+            } finally {
+                event.target.value = '';
+            }
+        });
         document.getElementById('frameCount').addEventListener('input', syncDurationState);
-        document.getElementById('openImagePickerBtn').addEventListener('click', () => openPicker('image_material'));
-        document.getElementById('openMediaPickerBtn').addEventListener('click', () => openPicker('media'));
+        document.getElementById('openImagePickerBtn').addEventListener('click', (event) => withButtonBusy(event.currentTarget, '打开中...', () => openPicker('image_material')));
+        document.getElementById('openMediaPickerBtn').addEventListener('click', (event) => withButtonBusy(event.currentTarget, '打开中...', () => openPicker('media')));
         document.getElementById('pickerSearch').addEventListener('input', renderPickerGrid);
         document.getElementById('closePickerBtn').addEventListener('click', closePicker);
-        document.getElementById('applyPickerBtn').addEventListener('click', applyPickerSelection);
+        document.getElementById('applyPickerBtn').addEventListener('click', (event) => withButtonBusy(event.currentTarget, '加入中...', async () => {
+            applyPickerSelection();
+        }));
         document.getElementById('assetPickerModal').addEventListener('click', (event) => {
             if (event.target === event.currentTarget) {
                 closePicker();
@@ -774,10 +820,10 @@
         });
 
         // 虚拟人像相关事件
-        document.getElementById('addVirtualAvatarBtn').addEventListener('click', () => {
+        document.getElementById('addVirtualAvatarBtn').addEventListener('click', (event) => withButtonBusy(event.currentTarget, '添加中...', async () => {
             const input = document.getElementById('virtualAvatarInput');
             addVirtualAvatar(input.value);
-        });
+        }));
         document.getElementById('virtualAvatarInput').addEventListener('keydown', (event) => {
             if (event.key === 'Enter') {
                 event.preventDefault();
@@ -812,7 +858,7 @@
             const btnEl = document.getElementById('refreshBalanceBtn');
             try {
                 valueEl.textContent = '查询中...';
-                btnEl.disabled = true;
+                setButtonBusy(btnEl, true, '刷新中...');
                 const resp = await fetch('/api/omni-video/balance');
                 const data = await resp.json();
                 if (data.success) {
@@ -824,7 +870,7 @@
             } catch (error) {
                 valueEl.textContent = '查询失败';
             } finally {
-                btnEl.disabled = false;
+                setButtonBusy(btnEl, false);
             }
         }
 

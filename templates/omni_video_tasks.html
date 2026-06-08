@@ -652,6 +652,7 @@
                     if (idx !== -1) {
                         currentItems[idx] = data.task;
                     }
+                    renderTaskRows();
                 }
                 showToast('任务已刷新');
             }).catch((error) => {
