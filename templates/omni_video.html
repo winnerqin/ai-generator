@@ -18,9 +18,9 @@
         .field { display: grid; gap: 8px; margin-bottom: 14px; }
         .field input, .field select, .field textarea { width: 100%; box-sizing: border-box; }
         .field textarea { min-height: 110px; resize: vertical; }
-        .filename-field { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 12px; }
+        .filename-field { grid-template-columns: auto minmax(280px, 420px) auto; align-items: center; column-gap: 12px; row-gap: 10px; }
         .filename-field label { white-space: nowrap; }
-        .filename-input-wrap { position: relative; }
+        .filename-input-wrap { position: relative; min-width: 0; }
         .filename-input-wrap input { padding-right: 56px; }
         .filename-suffix { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #9ca8cf; font-size: 0.9rem; pointer-events: none; }
         .field-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
@@ -59,7 +59,7 @@
         .video-preview { width: 100%; margin-top: 14px; border-radius: 12px; background: rgba(0,0,0,0.2); }
         .small-hint { color: #9ca8cf; font-size: 0.85rem; }
         .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-        .filename-audio-toggle { margin-top: 0; white-space: nowrap; }
+        .filename-audio-toggle { margin-top: 0; white-space: nowrap; justify-self: start; }
         .task-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
         .primary-submit { padding: 7px 14px; font-size: 1rem; font-weight: 700; }
         .picker-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
@@ -80,7 +80,7 @@
             .grid { grid-template-columns: 1fr; }
             .field-row { grid-template-columns: 1fr; }
             .filename-field { grid-template-columns: auto minmax(0, 1fr); }
-            .filename-audio-toggle { grid-column: 2; }
+            .filename-audio-toggle { grid-column: 2; justify-self: start; }
             .asset-upload-row { grid-template-columns: 1fr; }
             .asset-upload-row > div:last-child { padding-left: 0; border-left: none; margin-top: 16px; }
         }
@@ -183,7 +183,7 @@
                         <div>
                             <div style="font-weight: 600; margin-bottom: 10px;">素材上传与选择</div>
                             <div class="upload-box" id="uploadBox">
-                                点击上传图片、音频或视频素材
+                                <span id="uploadBoxLabel">点击上传图片、音频或视频素材</span>
                                 <input id="uploadInput" type="file" accept="image/*,audio/*,video/*" multiple style="display:none;">
                             </div>
                             <div class="picker-actions" style="display:none;">
@@ -310,12 +310,14 @@
 
         function setButtonBusy(button, busy, busyText = null) {
             if (!button) return;
+            const busyTargetSelector = button.dataset.busyTextTarget;
+            const busyTarget = busyTargetSelector ? document.querySelector(busyTargetSelector) : button;
             if (busy) {
                 if (button.dataset.busy === 'true') return;
                 button.dataset.busy = 'true';
                 if (busyText != null) {
-                    button.dataset.originalText = button.textContent;
-                    button.textContent = busyText;
+                    button.dataset.originalText = busyTarget.textContent;
+                    busyTarget.textContent = busyText;
                 }
                 button.disabled = true;
                 button.classList.add('is-busy');
@@ -324,7 +326,7 @@
             button.disabled = false;
             button.classList.remove('is-busy');
             if (button.dataset.originalText != null) {
-                button.textContent = button.dataset.originalText;
+                busyTarget.textContent = button.dataset.originalText;
                 delete button.dataset.originalText;
             }
             delete button.dataset.busy;
@@ -1041,8 +1043,11 @@
 
         document.getElementById('submitBtn').addEventListener('click', createTask);
         document.getElementById('clearSelectedAssetsBtn').addEventListener('click', clearSelectedAssets);
+        document.getElementById('uploadBox').dataset.busyTextTarget = '#uploadBoxLabel';
         document.getElementById('uploadBox').addEventListener('click', () => {
-            document.getElementById('uploadInput').click();
+            const uploadInput = document.getElementById('uploadInput');
+            uploadInput.value = '';
+            uploadInput.click();
         });
         document.getElementById('uploadInput').addEventListener('change', async (event) => {
             const trigger = document.getElementById('uploadBox');
