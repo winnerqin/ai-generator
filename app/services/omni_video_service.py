@@ -804,15 +804,47 @@ class OmniVideoService:
     def __init__(self) -> None:
         self.client = omni_video_client
 
+    @staticmethod
+    def _build_upstream_route_key(
+        user_id: int,
+        project_id: int | None,
+        data: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> str:
+        reference_urls = payload.get("reference_urls") or []
+        first_reference = reference_urls[0] if reference_urls else ""
+        candidates = [
+            data.get("batch_id"),
+            data.get("client_request_id"),
+            payload.get("filename"),
+            payload.get("prompt"),
+            first_reference,
+        ]
+        for candidate in candidates:
+            if candidate not in (None, ""):
+                return f"{user_id}:{project_id or 0}:{candidate}"
+        return f"{user_id}:{project_id or 0}:{payload.get('model') or ''}"
+
+    @staticmethod
+    def _get_upstream_slot(task: dict[str, Any]) -> int | None:
+        payload = task.get("input_payload_json") or {}
+        value = payload.get("_upstream_api_slot")
+        try:
+            return int(value) if value not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
     def _is_configured(self, model: str | None = None) -> bool:
         try:
             return self.client.is_configured(model=model)
         except TypeError:
             return self.client.is_configured()
 
-    def _get_remote_task(self, task_id: str, model: str | None = None) -> dict[str, Any]:
+    def _get_remote_task(
+        self, task_id: str, model: str | None = None, upstream_slot: int | None = None
+    ) -> dict[str, Any]:
         try:
-            return self.client.get_task(task_id, model=model)
+            return self.client.get_task(task_id, model=model, slot=upstream_slot)
         except TypeError:
             return self.client.get_task(task_id)
 
@@ -954,6 +986,7 @@ class OmniVideoService:
     def _sync_task_from_remote(self, task: dict[str, Any]) -> dict[str, Any]:
         local_payload = task.get("input_payload_json", {})
         model = local_payload.get("model") or task.get("model")
+        upstream_slot = self._get_upstream_slot(task)
 
         if not self._is_configured(model=model):
             task = _decorate_task(task)
@@ -966,7 +999,7 @@ class OmniVideoService:
             self._ensure_video_library_entry(task)
             return task
 
-        remote = self._get_remote_task(task_id, model=model)
+        remote = self._get_remote_task(task_id, model=model, upstream_slot=upstream_slot)
         record = _task_record_from_remote(
             user_id=task["user_id"],
             project_id=task.get("project_id"),
@@ -1002,12 +1035,18 @@ class OmniVideoService:
 
         model = payload.get("model")
         is_configured = self._is_configured(model=model)
+        route_key = self._build_upstream_route_key(user_id, project_id, data, payload)
+        upstream_slot = self.client.select_upstream_slot(model=model, route_key=route_key) if is_configured else None
+        if upstream_slot is not None:
+            payload["_upstream_api_slot"] = upstream_slot
         api_endpoint = (
-            self.client._url(self.client.create_path, model=model) if is_configured else "local"
+            self.client._url(self.client.create_path, model=model, slot=upstream_slot)
+            if is_configured
+            else "local"
         )
 
         if is_configured:
-            remote = self.client.create_task(payload)
+            remote = self.client.create_task(payload, route_key=route_key, slot=upstream_slot)
             log_external_api_call(
                 user_id=user_id,
                 username=username,
@@ -1183,9 +1222,10 @@ class OmniVideoService:
 
         local_payload = existing.get("input_payload_json", {})
         model = local_payload.get("model") or existing.get("model")
+        upstream_slot = self._get_upstream_slot(existing)
 
         if self._is_configured(model=model):
-            remote = self.client.cancel_task(task_id, model=model)
+            remote = self.client.cancel_task(task_id, model=model, slot=upstream_slot)
             status = _extract_status(remote, "cancelled")
         else:
             remote = {"task_id": task_id, "status": "cancelled", "message": "本地占位任务已取消。"}

@@ -44,6 +44,8 @@
         .library-preview img, .library-preview video { width: 100%; height: 100%; object-fit: contain; display: block; }
         .library-info { padding: 6px 8px; font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .library-pager { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+        .pager-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .pager-input { width: 78px; height: 36px; box-sizing: border-box; }
         .selected-list { display: grid; gap: 10px; }
         .selected-item { display: grid; grid-template-columns: 56px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; background: rgba(86,111,255,0.08); }
         .selected-item[draggable="true"] { cursor: grab; }
@@ -246,9 +248,12 @@
             </div>
             <div class="library-pager">
                 <div id="libraryPagerInfo" class="small-hint">未加载</div>
-                <div class="row">
+                <div class="pager-tools">
                     <button id="libraryPrevBtn" class="btn btn-secondary" type="button">上一页</button>
                     <button id="libraryNextBtn" class="btn btn-secondary" type="button">下一页</button>
+                    <span class="small-hint">跳到</span>
+                    <input id="libraryJumpPageInput" class="pager-input" type="number" min="1" placeholder="页码">
+                    <button id="libraryJumpPageBtn" class="btn btn-secondary" type="button">确定</button>
                 </div>
             </div>
         </div>
@@ -698,6 +703,18 @@
             });
         }
 
+        function jumpLibraryPage() {
+            if (!libraryState.activeType) return;
+            const totalPages = Math.max(1, Math.ceil((libraryState.total || 0) / libraryPageSize));
+            const input = document.getElementById('libraryJumpPageInput');
+            const targetPage = Number(input.value || 0);
+            if (!Number.isInteger(targetPage) || targetPage < 1 || targetPage > totalPages) {
+                alert(`请输入 1 到 ${totalPages} 之间的页码`);
+                return;
+            }
+            loadLibrary(libraryState.activeType, targetPage, libraryState.search);
+        }
+
         async function loadLibrary(type, page = 1, search = libraryState.search || '') {
             libraryState = { activeType: type, page, total: libraryState.total, items: [], loading: true, search };
             renderLibraryGrid();
@@ -1086,6 +1103,13 @@
             const totalPages = Math.max(1, Math.ceil((libraryState.total || 0) / libraryPageSize));
             if (libraryState.page >= totalPages) return;
             loadLibrary(libraryState.activeType, libraryState.page + 1, libraryState.search);
+        });
+        document.getElementById('libraryJumpPageBtn').addEventListener('click', jumpLibraryPage);
+        document.getElementById('libraryJumpPageInput').addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                jumpLibraryPage();
+            }
         });
         document.getElementById('pickerSearch').addEventListener('input', renderPickerGrid);
         document.getElementById('closePickerBtn').addEventListener('click', closePicker);

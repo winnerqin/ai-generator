@@ -23,6 +23,20 @@
         .btn-secondary { border-color: rgba(86,111,255,0.24); background: rgba(11,15,26,0.5); color: #9aa8d9; }
         .toolbar { margin-top: 10px; display: flex; gap: 8px; align-items: center; }
         .hint { color: #9aa8d9; font-size: 13px; }
+        .recharge-options { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+        .recharge-option { min-width: 84px; height: 38px; padding: 0 12px; border-radius: 999px; border: 1px solid rgba(86,111,255,0.28); background: rgba(11,15,26,0.5); color: #dce4ff; cursor: pointer; }
+        .recharge-option.active { background: rgba(86,111,255,0.28); border-color: rgba(86,111,255,0.58); }
+        .recharge-custom { display: none; align-items: center; gap: 8px; }
+        .recharge-custom.visible { display: inline-flex; }
+        .recharge-custom input { width: 180px; height: 38px; padding: 0 12px; border: 1px solid rgba(86,111,255,0.32); border-radius: 999px; background: rgba(11,15,26,0.65); color: #e6ebff; }
+        .recharge-custom-label { color: #9aa8d9; font-size: 13px; white-space: nowrap; }
+        .recharge-status { margin-top: 12px; min-height: 20px; }
+        .recharge-qr { margin-top: 14px; padding: 14px; border-radius: 12px; border: 1px solid rgba(86,111,255,0.18); background: rgba(11,15,26,0.52); display: none; }
+        .recharge-qr.visible { display: block; }
+        .recharge-qr img { width: 220px; height: 220px; object-fit: contain; display: block; border-radius: 12px; background: #fff; padding: 8px; }
+        .recharge-qr-link { margin-top: 10px; word-break: break-all; font-size: 12px; color: #9ed0ff; }
+        .btn-recharge { min-width: 140px; height: 48px; padding: 0 22px; border-radius: 12px; border: 1px solid rgba(126,184,255,0.55); background: linear-gradient(135deg, rgba(126,184,255,0.95) 0%, rgba(90,156,245,0.92) 100%); color: #08111f; font-size: 16px; font-weight: 800; box-shadow: 0 8px 24px rgba(90,156,245,0.28); }
+        .btn-recharge:disabled { color: #08111f; }
         .records { margin-top: 16px; border-radius: 12px; overflow: hidden; background: rgba(11,15,26,0.78); border: 1px solid rgba(86,111,255,0.22); }
         .records table { width: 100%; border-collapse: collapse; font-size: 13px; }
         .records th, .records td { padding: 10px 12px; border-bottom: 1px solid rgba(86,111,255,0.14); text-align: left; }
@@ -57,9 +71,19 @@
                     <div class="meta-row"><span class="meta-label">用户名</span><span class="meta-value" id="profileUsername">-</span></div>
                     <div class="meta-row"><span class="meta-label">角色</span><span class="meta-value" id="profileRole">-</span></div>
                     <div class="meta-row"><span class="meta-label">当前余额</span><span class="meta-value" id="profileBalance">-</span></div>
-                    <div class="toolbar">
-                        <button class="btn btn-secondary" disabled>充值（暂不可用）</button>
-                        <span class="hint">暂不可用，后续开放</span>
+                    <div class="toolbar" style="display:block;">
+                        <div class="hint">账户充值</div>
+                        <div class="recharge-options" id="rechargeOptions"></div>
+                        <div class="toolbar">
+                            <button class="btn btn-recharge" id="createRechargeBtn">立即充值</button>
+                            <span class="hint" id="rechargeHint">选择金额后生成支付二维码</span>
+                        </div>
+                        <div class="recharge-status hint" id="rechargeStatus"></div>
+                        <div class="recharge-qr" id="rechargeQrBox">
+                            <div class="hint" style="margin-bottom:10px;">请使用微信扫码支付</div>
+                            <img id="rechargeQrImg" alt="微信支付二维码" style="display:none;">
+                            <div class="recharge-qr-link" id="rechargeQrLink"></div>
+                        </div>
                     </div>
                 </div>
                 <div class="panel">
@@ -89,6 +113,25 @@
             </section>
 
             <section class="records">
+                <div class="price-title">订单列表</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>订单号</th>
+                            <th>金额</th>
+                            <th>状态</th>
+                            <th>创建时间</th>
+                            <th>支付时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rechargeOrdersBody"></tbody>
+                </table>
+                <div class="records-empty" id="rechargeOrdersEmpty" style="display:none;">暂无充值订单</div>
+            </section>
+
+            <section class="records">
+                <div class="price-title">消耗列表</div>
                 <table>
                     <thead>
                         <tr>
@@ -141,6 +184,24 @@
             return '不限';
         }
 
+        let rechargeConfig = null;
+        let selectedRechargeMode = null;
+        let selectedRechargeAmountCent = null;
+        let currentRechargeOrderNo = '';
+        let rechargePollTimer = null;
+        let rechargeOrdersCache = [];
+
+        function rechargeStatusText(status) {
+            return {
+                pending: '待支付',
+                paying: '支付中',
+                paid: '已支付',
+                failed: '支付失败',
+                closed: '已关闭',
+                refunded: '已退款',
+            }[status] || status || '-';
+        }
+
         async function loadProfile() {
             const resp = await fetch('/api/user/profile');
             const data = await resp.json();
@@ -149,6 +210,262 @@
             document.getElementById('profileUsername').textContent = profile.username || '-';
             document.getElementById('profileRole').textContent = roleText(profile.role_code);
             document.getElementById('profileBalance').textContent = `${centToYuan(profile.balance_cent)} 元`;
+        }
+
+        function setRechargeStatus(message, color = '#9aa8d9') {
+            const statusEl = document.getElementById('rechargeStatus');
+            statusEl.textContent = message || '';
+            statusEl.style.color = color;
+        }
+
+        function toggleRechargeQr(order) {
+            const box = document.getElementById('rechargeQrBox');
+            const img = document.getElementById('rechargeQrImg');
+            const link = document.getElementById('rechargeQrLink');
+            if (!order || (!order.qr_code_img_url && !order.qr_code_url)) {
+                box.classList.remove('visible');
+                img.style.display = 'none';
+                img.removeAttribute('src');
+                link.textContent = '';
+                return;
+            }
+            box.classList.add('visible');
+            if (order.qr_code_img_url) {
+                img.style.display = 'block';
+                img.src = order.qr_code_img_url;
+            } else {
+                img.style.display = 'none';
+                img.removeAttribute('src');
+            }
+            link.textContent = order.qr_code_url ? `二维码链接：${order.qr_code_url}` : '';
+        }
+
+        function renderRechargeOptions() {
+            const container = document.getElementById('rechargeOptions');
+            if (!rechargeConfig || !rechargeConfig.enabled) {
+                container.innerHTML = '<span class="hint">充值功能暂未开放</span>';
+                document.getElementById('createRechargeBtn').disabled = true;
+                document.getElementById('rechargeHint').textContent = '请先配置支付中心';
+                return;
+            }
+            const buttons = (rechargeConfig.preset_amounts_cent || []).map((amountCent) => {
+                const active = selectedRechargeMode === `preset-${amountCent}`;
+                return `<button type="button" class="recharge-option ${active ? 'active' : ''}" data-amount-cent="${amountCent}">¥${amountCent / 100}</button>`;
+            }).join('');
+            const customVisible = selectedRechargeMode === 'custom' ? 'visible' : '';
+            container.innerHTML = `
+                ${buttons}
+                <button type="button" class="recharge-option ${selectedRechargeMode === 'custom' ? 'active' : ''}" data-custom="true">自定义</button>
+                <div class="recharge-custom ${customVisible}" id="rechargeCustomWrap">
+                    <input id="rechargeCustomAmount" type="number" min="100" step="1" placeholder="输入金额">
+                    <span class="recharge-custom-label">元</span>
+                </div>
+            `;
+            container.querySelectorAll('[data-amount-cent]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    selectedRechargeMode = `preset-${button.getAttribute('data-amount-cent')}`;
+                    selectedRechargeAmountCent = Number(button.getAttribute('data-amount-cent'));
+                    renderRechargeOptions();
+                });
+            });
+            const customBtn = container.querySelector('[data-custom]');
+            if (customBtn) {
+                customBtn.addEventListener('click', () => {
+                    selectedRechargeMode = 'custom';
+                    selectedRechargeAmountCent = null;
+                    renderRechargeOptions();
+                });
+            }
+        }
+
+        async function loadRechargeConfig() {
+            const resp = await fetch('/api/user/recharge-config');
+            const data = await resp.json();
+            if (!data.success) {
+                rechargeConfig = { enabled: false };
+                document.getElementById('rechargeHint').textContent = data.error || '充值功能暂不可用';
+                renderRechargeOptions();
+                return;
+            }
+            rechargeConfig = data.data || {};
+            const presets = rechargeConfig.preset_amounts_cent || [];
+            if (presets.length && !selectedRechargeMode) {
+                selectedRechargeMode = `preset-${presets[0]}`;
+                selectedRechargeAmountCent = Number(presets[0]);
+            }
+            renderRechargeOptions();
+        }
+
+        function getSelectedRechargeAmountYuan() {
+            if (selectedRechargeMode === 'custom') {
+                return document.getElementById('rechargeCustomAmount').value.trim();
+            }
+            if (selectedRechargeAmountCent) {
+                return String(selectedRechargeAmountCent / 100);
+            }
+            return '';
+        }
+
+        function validateCustomRechargeAmount() {
+            if (selectedRechargeMode !== 'custom') return true;
+            const input = document.getElementById('rechargeCustomAmount');
+            const rawValue = input ? input.value.trim() : '';
+            if (!rawValue) return true;
+            const amount = Number(rawValue);
+            const minYuan = Number((Number(rechargeConfig?.min_amount_cent || 0) / 100).toFixed(2));
+            const maxYuan = Number((Number(rechargeConfig?.max_amount_cent || 0) / 100).toFixed(2));
+            if (!Number.isFinite(amount) || amount <= 0) {
+                alert('请输入有效的充值金额');
+                input?.focus();
+                return false;
+            }
+            if (amount < minYuan) {
+                alert(`自定义充值金额不能低于 ${minYuan} 元`);
+                input?.focus();
+                return false;
+            }
+            if (amount > maxYuan) {
+                alert(`自定义充值金额不能高于 ${maxYuan} 元`);
+                input?.focus();
+                return false;
+            }
+            return true;
+        }
+
+        function stopRechargePolling() {
+            if (rechargePollTimer) {
+                clearTimeout(rechargePollTimer);
+                rechargePollTimer = null;
+            }
+        }
+
+        function showRechargeOrder(order, message = '') {
+            toggleRechargeQr(order);
+            if (!order) return;
+            currentRechargeOrderNo = order.order_no;
+            if (message) {
+                setRechargeStatus(message, '#9ed0ff');
+            } else if (order.status === 'paid') {
+                setRechargeStatus(`充值成功，已到账 ${order.amount_yuan} 元`, '#2f9e44');
+            } else if (['pending', 'paying'].includes(order.status)) {
+                setRechargeStatus(`订单 ${order.order_no} 待支付，请扫码完成付款`, '#9ed0ff');
+            } else {
+                setRechargeStatus(order.fail_reason || `订单状态：${rechargeStatusText(order.status)}`, '#d14343');
+            }
+        }
+
+        async function continueRechargeOrder(orderNo) {
+            stopRechargePolling();
+            const resp = await fetch(`/api/user/recharge-orders/${encodeURIComponent(orderNo)}`);
+            const data = await resp.json();
+            if (!data.success) {
+                setRechargeStatus(data.error || '加载充值订单失败', '#d14343');
+                return;
+            }
+            const order = data.data && data.data.order ? data.data.order : null;
+            if (!order) {
+                setRechargeStatus('充值订单不存在', '#d14343');
+                return;
+            }
+            showRechargeOrder(order);
+            if (['pending', 'paying'].includes(order.status)) {
+                pollRechargeOrder(order.order_no);
+            }
+        }
+
+        async function cancelRechargeOrder(orderNo) {
+            const confirmed = window.confirm(`确认取消订单 ${orderNo} 吗？`);
+            if (!confirmed) return;
+            stopRechargePolling();
+            const resp = await fetch(`/api/user/recharge-orders/${encodeURIComponent(orderNo)}/cancel`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            const data = await resp.json();
+            if (!data.success) {
+                alert(data.error || '取消订单失败');
+                return;
+            }
+            const order = data.data && data.data.order ? data.data.order : null;
+            upsertRechargeOrder(order);
+            if (currentRechargeOrderNo === orderNo) {
+                toggleRechargeQr(null);
+                setRechargeStatus('订单已取消', '#d14343');
+            }
+            await loadRechargeOrders();
+            if (order) {
+                showRechargeOrder(order);
+            }
+        }
+
+        async function pollRechargeOrder(orderNo) {
+            currentRechargeOrderNo = orderNo;
+            const resp = await fetch(`/api/user/recharge-orders/${encodeURIComponent(orderNo)}`);
+            const data = await resp.json();
+            if (!data.success) {
+                setRechargeStatus(data.error || '查询充值订单失败', '#d14343');
+                return;
+            }
+            const order = data.data && data.data.order ? data.data.order : null;
+            if (!order) return;
+            showRechargeOrder(order);
+            if (order.status === 'paid') {
+                stopRechargePolling();
+                await loadProfile();
+                await loadRechargeOrders();
+                return;
+            }
+            if (['failed', 'closed', 'refunded'].includes(order.status)) {
+                stopRechargePolling();
+                await loadRechargeOrders();
+                return;
+            }
+            rechargePollTimer = setTimeout(() => pollRechargeOrder(orderNo), 3000);
+        }
+
+        async function createRechargeOrder() {
+            if (!rechargeConfig || !rechargeConfig.enabled) {
+                setRechargeStatus('充值功能暂未开放', '#d14343');
+                return;
+            }
+            if (!validateCustomRechargeAmount()) {
+                return;
+            }
+            const amountYuan = getSelectedRechargeAmountYuan();
+            if (!amountYuan) {
+                setRechargeStatus('请选择或输入充值金额', '#d14343');
+                return;
+            }
+            stopRechargePolling();
+            setRechargeStatus('正在创建支付订单...', '#9ed0ff');
+            document.getElementById('createRechargeBtn').disabled = true;
+            try {
+                const resp = await fetch('/api/user/recharge-orders', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        amount_yuan: amountYuan,
+                        selected_option: selectedRechargeMode || '',
+                    }),
+                });
+                const data = await resp.json();
+                if (!data.success) {
+                    throw new Error(data.error || '创建充值订单失败');
+                }
+                const order = data.data && data.data.order ? data.data.order : null;
+                if (!order) {
+                    throw new Error('支付订单返回为空');
+                }
+                upsertRechargeOrder(order);
+                showRechargeOrder(order, `订单已创建，请扫码支付 ${order.amount_yuan} 元`);
+                await loadRechargeOrders();
+                pollRechargeOrder(order.order_no);
+            } catch (error) {
+                setRechargeStatus(error.message || '创建充值订单失败', '#d14343');
+                toggleRechargeQr(null);
+            } finally {
+                document.getElementById('createRechargeBtn').disabled = false;
+            }
         }
 
         async function loadModelPricing() {
@@ -201,6 +518,62 @@
             });
         }
 
+        async function loadRechargeOrders() {
+            const resp = await fetch('/api/user/recharge-orders?page=1&page_size=20');
+            const data = await resp.json();
+            const body = document.getElementById('rechargeOrdersBody');
+            const empty = document.getElementById('rechargeOrdersEmpty');
+            body.innerHTML = '';
+            if (!data.success || !data.data || !data.data.items || data.data.items.length === 0) {
+                rechargeOrdersCache = [];
+                empty.style.display = '';
+                return;
+            }
+            rechargeOrdersCache = data.data.items || [];
+            empty.style.display = 'none';
+            rechargeOrdersCache.forEach((order) => {
+                const canContinue = ['pending', 'paying'].includes(order.status);
+                const canCancel = ['pending', 'paying'].includes(order.status);
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${escapeHtml(order.order_no || '-')}</td>
+                    <td>¥${escapeHtml(order.amount_yuan || '0.00')}</td>
+                    <td>${escapeHtml(rechargeStatusText(order.status))}</td>
+                    <td>${escapeHtml(order.created_at || '-')}</td>
+                    <td>${escapeHtml(order.paid_at || '-')}</td>
+                    <td>${
+                        canContinue || canCancel
+                            ? `
+                                ${canContinue ? `<button type="button" class="btn btn-secondary" data-continue-order="${escapeHtml(order.order_no)}">继续支付</button>` : ''}
+                                ${canCancel ? `<button type="button" class="btn btn-secondary" data-cancel-order="${escapeHtml(order.order_no)}">取消订单</button>` : ''}
+                              `
+                            : '-'
+                    }</td>
+                `;
+                body.appendChild(tr);
+            });
+            body.querySelectorAll('[data-continue-order]').forEach((button) => {
+                button.addEventListener('click', async () => {
+                    await continueRechargeOrder(button.getAttribute('data-continue-order'));
+                });
+            });
+            body.querySelectorAll('[data-cancel-order]').forEach((button) => {
+                button.addEventListener('click', async () => {
+                    await cancelRechargeOrder(button.getAttribute('data-cancel-order'));
+                });
+            });
+        }
+
+        function upsertRechargeOrder(order) {
+            if (!order || !order.order_no) return;
+            const index = rechargeOrdersCache.findIndex((item) => item.order_no === order.order_no);
+            if (index >= 0) {
+                rechargeOrdersCache[index] = order;
+            } else {
+                rechargeOrdersCache.unshift(order);
+            }
+        }
+
         async function changePassword() {
             const hint = document.getElementById('passwordHint');
             hint.textContent = '';
@@ -227,8 +600,9 @@
             document.getElementById('confirmPassword').value = '';
         }
 
+        document.getElementById('createRechargeBtn').addEventListener('click', createRechargeOrder);
         document.getElementById('changePasswordBtn').addEventListener('click', changePassword);
-        Promise.all([loadProfile(), loadModelPricing(), loadRecords()]).catch((err) => {
+        Promise.all([loadProfile(), loadRechargeConfig(), loadRechargeOrders(), loadModelPricing(), loadRecords()]).catch((err) => {
             alert(err.message || '加载失败');
         });
     </script>

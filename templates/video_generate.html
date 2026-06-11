@@ -98,6 +98,7 @@
             const [taskListTasks, setTaskListTasks] = useState([]);
             const [taskListPage, setTaskListPage] = useState(1);
             const [taskListTotalPages, setTaskListTotalPages] = useState(1);
+            const [taskListJumpPage, setTaskListJumpPage] = useState('1');
             const [taskListPageSize, setTaskListPageSize] = useState(10);
             const [taskIdSearch, setTaskIdSearch] = useState('');
             const [statusFilter, setStatusFilter] = useState('');
@@ -133,6 +134,16 @@
                 const total = data.total || items.length;
                 setTaskListTotalPages(Math.max(1, Math.ceil(total / taskListPageSize)));
                 setTaskListPage(p);
+                setTaskListJumpPage(String(p));
+            };
+
+            const jumpTaskListPage = () => {
+                const targetPage = Number(taskListJumpPage || 0);
+                if (!Number.isInteger(targetPage) || targetPage < 1 || targetPage > taskListTotalPages) {
+                    alert(`请输入 1 到 ${taskListTotalPages} 之间的页码`);
+                    return;
+                }
+                loadTasks(targetPage);
             };
 
             const playVideo = (url) => {
@@ -658,6 +669,17 @@
                                     <button className="btn btn-secondary" onClick={() => loadTasks(Math.max(1, taskListPage - 1))}>上一页</button>
                                     <span className="small-hint">第 {taskListPage} 页 / 共 {taskListTotalPages} 页</span>
                                     <button className="btn btn-secondary" onClick={() => loadTasks(Math.min(taskListTotalPages, taskListPage + 1))}>下一页</button>
+                                    <span className="small-hint">跳到</span>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max={taskListTotalPages}
+                                        value={taskListJumpPage}
+                                        onChange={(e) => setTaskListJumpPage(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') jumpTaskListPage(); }}
+                                        style={{ width: '78px', height: '36px', boxSizing: 'border-box' }}
+                                    />
+                                    <button className="btn btn-secondary" onClick={jumpTaskListPage}>确定</button>
                                 </div>
                             </div>
                         </div>

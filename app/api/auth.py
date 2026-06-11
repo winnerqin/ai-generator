@@ -3,6 +3,8 @@
 """
 
 import json
+import uuid
+from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 
 from flask import Blueprint, redirect, render_template, request, session, url_for
@@ -10,6 +12,7 @@ from flask_jwt_extended import jwt_required
 
 import database
 from app.decorators import login_required
+from app.services.payment_service import payment_service
 from app.utils import ApiResponse
 from app.utils.jwt_auth import JWTAuth
 
@@ -262,6 +265,38 @@ def get_user_profile():
     )
 
 
+def _current_recharge_user():
+    user = database.get_user_by_id(session.get("user_id"))
+    if not user:
+        raise ValueError("用户不存在")
+    if user.get("role_code") != database.ROLE_EXTERNAL_USER:
+        raise PermissionError("当前仅外部用户支持自助充值")
+    return user
+
+
+def _serialize_recharge_order(order):
+    if not order:
+        return None
+    return {
+        "order_no": order.get("order_no"),
+        "amount_cent": int(order.get("amount_cent") or 0),
+        "amount_yuan": f"{(int(order.get('amount_cent') or 0) / 100):.2f}",
+        "currency_code": order.get("currency_code") or database.MODEL_CURRENCY_CNY,
+        "status": order.get("status"),
+        "payment_channel": order.get("payment_channel") or "wechat_native",
+        "payment_center_order_no": order.get("payment_center_order_no") or "",
+        "channel_trade_no": order.get("channel_trade_no") or "",
+        "qr_code_url": order.get("qr_code_url") or "",
+        "qr_code_img_url": order.get("qr_code_img_url") or "",
+        "expire_at": order.get("expire_at"),
+        "paid_at": order.get("paid_at"),
+        "closed_at": order.get("closed_at"),
+        "fail_reason": order.get("fail_reason") or "",
+        "created_at": order.get("created_at"),
+        "updated_at": order.get("updated_at"),
+    }
+
+
 @auth_bp.route("/api/user/change-password", methods=["POST"])
 @login_required
 def change_password():
@@ -322,6 +357,187 @@ def _attach_consumption_display_fields(items):
                 "price_per_million_token_cent": pricing.get("price_per_million_token_cent"),
             }
     return items
+
+
+@auth_bp.route("/api/user/recharge-config", methods=["GET"])
+@login_required
+def get_recharge_config():
+    try:
+        user = _current_recharge_user()
+    except PermissionError as exc:
+        return ApiResponse.forbidden(str(exc))
+    del user
+    options = payment_service.get_recharge_options()
+    options["preset_amounts_yuan"] = [f"{value / 100:.0f}" for value in options["preset_amounts_cent"]]
+    options["min_amount_yuan"] = f"{options['min_amount_cent'] / 100:.2f}"
+    options["max_amount_yuan"] = f"{options['max_amount_cent'] / 100:.2f}"
+    return ApiResponse.success(options)
+
+
+@auth_bp.route("/api/user/recharge-orders", methods=["POST"])
+@login_required
+def create_recharge_order():
+    try:
+        user = _current_recharge_user()
+    except PermissionError as exc:
+        return ApiResponse.forbidden(str(exc))
+    data = request.get_json(silent=True) or {}
+    amount_cent = payment_service.normalize_amount_cent(
+        amount_yuan=data.get("amount_yuan"), amount_cent=data.get("amount_cent")
+    )
+    order_no = f"RC{datetime.now().strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:10].upper()}"
+    metadata = {
+        "scene": "user_center",
+        "selected_option": data.get("selected_option"),
+    }
+    order = database.create_recharge_order(
+        {
+            "order_no": order_no,
+            "user_id": user.get("id"),
+            "username": user.get("username"),
+            "amount_cent": amount_cent,
+            "status": "pending",
+            "payment_channel": "wechat_native",
+            "payment_scene": "user_center",
+            "subject": "账户充值",
+            "description": f"AI创作工具账户充值 {amount_cent / 100:.2f} 元",
+            "metadata_json": metadata,
+        }
+    )
+    try:
+        payment_result = payment_service.create_recharge_order(
+            order_no=order_no,
+            user_id=int(user.get("id")),
+            username=user.get("username") or "",
+            amount_cent=amount_cent,
+            callback_url=payment_service.build_callback_url(request.host_url.rstrip("/")),
+            metadata=metadata,
+        )
+    except Exception as exc:
+        order = database.mark_recharge_order_status(
+            order_no,
+            status="failed",
+            fail_reason=str(exc),
+        )
+        return ApiResponse.server_error(str(exc))
+
+    order = database.update_recharge_order(
+        order_no,
+        {
+            "status": payment_result.get("pay_status") or "paying",
+            "payment_center_order_no": payment_result.get("payment_center_order_no"),
+            "qr_code_url": payment_result.get("qr_code_url"),
+            "qr_code_img_url": payment_result.get("qr_code_img_url"),
+            "expire_at": payment_result.get("expire_at"),
+            "request_payload_json": payment_result.get("request_payload"),
+            "callback_payload_json": payment_result.get("response_payload"),
+        },
+    )
+    return ApiResponse.created({"order": _serialize_recharge_order(order)}, "充值订单已创建")
+
+
+@auth_bp.route("/api/user/recharge-orders/<order_no>", methods=["GET"])
+@login_required
+def get_recharge_order_detail(order_no):
+    try:
+        user = _current_recharge_user()
+    except PermissionError as exc:
+        return ApiResponse.forbidden(str(exc))
+    order = database.get_recharge_order(order_no, user_id=user.get("id"))
+    if not order:
+        return ApiResponse.not_found("充值订单不存在")
+    return ApiResponse.success({"order": _serialize_recharge_order(order)})
+
+
+@auth_bp.route("/api/user/recharge-orders", methods=["GET"])
+@login_required
+def list_recharge_orders():
+    try:
+        user = _current_recharge_user()
+    except PermissionError as exc:
+        return ApiResponse.forbidden(str(exc))
+    page = max(request.args.get("page", 1, type=int), 1)
+    page_size = min(max(request.args.get("page_size", 20, type=int), 1), 100)
+    offset = (page - 1) * page_size
+    items = database.get_recharge_orders(user.get("id"), limit=page_size, offset=offset)
+    total = database.count_recharge_orders(user.get("id"))
+    return ApiResponse.paginated(
+        [_serialize_recharge_order(item) for item in items],
+        total,
+        page,
+        page_size,
+    )
+
+
+@auth_bp.route("/api/user/recharge-orders/<order_no>/cancel", methods=["POST"])
+@login_required
+def cancel_recharge_order(order_no):
+    try:
+        user = _current_recharge_user()
+    except PermissionError as exc:
+        return ApiResponse.forbidden(str(exc))
+    try:
+        order = database.cancel_recharge_order(order_no, user.get("id"))
+    except ValueError as exc:
+        return ApiResponse.bad_request(str(exc))
+    return ApiResponse.success({"order": _serialize_recharge_order(order)}, "订单已取消")
+
+
+@auth_bp.route("/api/payment-center/recharge-callback", methods=["POST"])
+def payment_center_recharge_callback():
+    payload = request.get_json(silent=True) or {}
+    signature = request.headers.get("X-Signature") or payload.get("sign") or ""
+    timestamp = request.headers.get("X-Timestamp") or payload.get("timestamp") or ""
+    nonce = request.headers.get("X-Nonce") or payload.get("nonce") or ""
+    payload_for_sign = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"sign", "timestamp", "nonce"}
+    }
+    if payment_service.is_configured() and not payment_service.verify_signature(
+        payload_for_sign, str(timestamp), str(nonce), str(signature)
+    ):
+        return ApiResponse.forbidden("回调验签失败")
+
+    order_no = str(payload.get("merchant_order_no") or "").strip()
+    if not order_no:
+        return ApiResponse.bad_request("缺少 merchant_order_no")
+    order = database.get_recharge_order(order_no)
+    if not order:
+        return ApiResponse.not_found("充值订单不存在")
+
+    amount_cent = int(payload.get("amount_cent") or 0)
+    if amount_cent and amount_cent != int(order.get("amount_cent") or 0):
+        return ApiResponse.bad_request("回调金额与订单金额不一致")
+
+    status = str(payload.get("status") or "").strip().lower()
+    payment_center_order_no = payload.get("payment_center_order_no") or payload.get("order_no")
+    channel_trade_no = payload.get("channel_trade_no") or payload.get("transaction_id")
+    paid_at = payload.get("paid_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if status == "paid":
+        order = database.settle_recharge_order_paid(
+            order_no,
+            payment_center_order_no=payment_center_order_no,
+            channel_trade_no=channel_trade_no,
+            callback_payload=payload,
+            paid_at=paid_at,
+        )
+        return ApiResponse.success({"order": _serialize_recharge_order(order)}, "ok")
+
+    mapped_status = status if status in {"failed", "closed", "refunded"} else "failed"
+    order = database.mark_recharge_order_status(
+        order_no,
+        status=mapped_status,
+        payment_center_order_no=payment_center_order_no,
+        channel_trade_no=channel_trade_no,
+        fail_reason=payload.get("fail_reason") or payload.get("message") or "",
+        callback_payload=payload,
+        closed_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if mapped_status == "closed"
+        else None,
+    )
+    return ApiResponse.success({"order": _serialize_recharge_order(order)}, "ok")
 
 
 @auth_bp.route("/api/user/model-pricing", methods=["GET"])

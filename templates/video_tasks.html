@@ -60,6 +60,7 @@
             const [pageSize, setPageSize] = useState(10);
             const [currentPage, setCurrentPage] = useState(1);
             const [totalPages, setTotalPages] = useState(1);
+            const [jumpPage, setJumpPage] = useState('1');
             const [tasks, setTasks] = useState([]);
             const [error, setError] = useState('');
             const [autoRefresh, setAutoRefresh] = useState(false);
@@ -99,9 +100,19 @@
                 const total = data.total || items.length;
                 setTotalPages(Math.max(1, Math.ceil(total / pageSize)));
                 setCurrentPage(page);
+                setJumpPage(String(page));
                 if (data.message && items.length === 0) {
                     setError(data.message);
                 }
+            };
+
+            const handleJumpPage = () => {
+                const targetPage = Number(jumpPage || 0);
+                if (!Number.isInteger(targetPage) || targetPage < 1 || targetPage > totalPages) {
+                    alert(`请输入 1 到 ${totalPages} 之间的页码`);
+                    return;
+                }
+                loadTasks(targetPage);
             };
 
             // 初始加载与切换项目后重新拉取（依赖 currentProjectId 避免缓存导致列表相同）
@@ -302,6 +313,17 @@
                                     <button className="btn btn-secondary" onClick={() => loadTasks(Math.max(1, currentPage - 1))}>上一页</button>
                                     <span className="small-hint">第 {currentPage} 页 / 共 {totalPages} 页</span>
                                     <button className="btn btn-secondary" onClick={() => loadTasks(Math.min(totalPages, currentPage + 1))}>下一页</button>
+                                    <span className="small-hint">跳到</span>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max={totalPages}
+                                        value={jumpPage}
+                                        onChange={(e) => setJumpPage(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') handleJumpPage(); }}
+                                        style={{ width: '78px', height: '36px', boxSizing: 'border-box' }}
+                                    />
+                                    <button className="btn btn-secondary" onClick={handleJumpPage}>确定</button>
                                 </div>
                             </div>
                         </div>

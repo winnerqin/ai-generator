@@ -370,6 +370,7 @@
             const [sampleImages, setSampleImages] = useState([]);
             const [samplePage, setSamplePage] = useState(1);
             const [sampleTotal, setSampleTotal] = useState(0);
+            const [sampleJumpPage, setSampleJumpPage] = useState('1');
             const [sampleLoading, setSampleLoading] = useState(false);
             const [selectedSample, setSelectedSample] = useState([]);
             const [uploadedFiles, setUploadedFiles] = useState([]);
@@ -584,6 +585,19 @@
                     controller.abort();
                 };
             }, [sampleCategory, currentProjectId, samplePage]);
+
+            useEffect(() => {
+                setSampleJumpPage(String(samplePage));
+            }, [samplePage]);
+
+            const jumpSamplePage = () => {
+                const targetPage = Number(sampleJumpPage || 0);
+                if (!Number.isInteger(targetPage) || targetPage < 1 || targetPage > sampleTotalPages) {
+                    alert(`请输入 1 到 ${sampleTotalPages} 之间的页码`);
+                    return;
+                }
+                setSamplePage(targetPage);
+            };
 
             const referenceChips = useMemo(() => {
                 return selectedSample.map(url => ({ type: 'sample', url }))
@@ -893,6 +907,23 @@
                                                 disabled={samplePage >= sampleTotalPages || sampleLoading}
                                                 onClick={() => runWithBusy('sample-next', async () => setSamplePage(page => Math.min(sampleTotalPages, page + 1)))}
                                             >下一页</button>
+                                            <span className="small-hint">跳到</span>
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                max={sampleTotalPages}
+                                                value={sampleJumpPage}
+                                                disabled={sampleLoading}
+                                                onChange={(e) => setSampleJumpPage(e.target.value)}
+                                                onKeyDown={(e) => { if (e.key === 'Enter') jumpSamplePage(); }}
+                                                style={{ width: '78px', height: '36px', boxSizing: 'border-box' }}
+                                            />
+                                            <button
+                                                type="button"
+                                                className="btn btn-secondary"
+                                                disabled={sampleLoading}
+                                                onClick={jumpSamplePage}
+                                            >确定</button>
                                         </div>
                                     </div>
                                 </div>
@@ -3420,6 +3451,9 @@
                 <button type="button" class="btn" ${samplePage <= 1 ? 'disabled' : ''} onclick="changeSamplePage(${samplePage - 1})">上一页</button>
                 <span class="sample-images-page-status">${samplePage} / ${totalPages}</span>
                 <button type="button" class="btn" ${samplePage >= totalPages ? 'disabled' : ''} onclick="changeSamplePage(${samplePage + 1})">下一页</button>
+                <span style="color:#666;">跳到</span>
+                <input type="number" min="1" max="${totalPages}" value="${samplePage}" style="width:78px;height:36px;box-sizing:border-box;" onkeydown="if(event.key==='Enter'){changeSamplePage(this.value)}">
+                <button type="button" class="btn" onclick="const input=this.previousElementSibling;changeSamplePage(input.value)">确定</button>
             `;
         }
 

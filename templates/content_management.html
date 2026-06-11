@@ -31,6 +31,7 @@
         .asset-meta-line { display: flex; justify-content: space-between; gap: 8px; color: #9ca8cf; font-size: 0.82rem; }
         .asset-actions { display: flex; gap: 8px; flex-wrap: wrap; }
         .pager { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .pager-input { width: 78px; height: 36px; box-sizing: border-box; }
         .empty-hint { color: #9ca8cf; }
         .small-hint { color: #9ca8cf; font-size: 0.82rem; }
         .preview-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.88); display: none; align-items: center; justify-content: center; z-index: 2000; }
@@ -109,6 +110,9 @@
                         <div class="pager">
                             <button class="btn btn-secondary" id="prevPageBtn">上一页</button>
                             <button class="btn btn-secondary" id="nextPageBtn">下一页</button>
+                            <span class="small-hint">跳到</span>
+                            <input id="jumpPageInput" class="pager-input" type="number" min="1" placeholder="页码">
+                            <button class="btn btn-secondary" id="jumpPageBtn">确定</button>
                         </div>
                     </div>
                     <div class="asset-scroll" id="assetScroll">
@@ -363,6 +367,17 @@
             document.getElementById('nextPageBtn').disabled = assetListLoading || currentPage >= totalPages;
         }
 
+        function jumpToPage() {
+            const totalPages = Math.max(1, Math.ceil(totalAssets / pageSize));
+            const input = document.getElementById('jumpPageInput');
+            const targetPage = Number(input.value || 0);
+            if (!Number.isInteger(targetPage) || targetPage < 1 || targetPage > totalPages) {
+                alert(`请输入 1 到 ${totalPages} 之间的页码`);
+                return;
+            }
+            loadAssets(targetPage);
+        }
+
         function updateUploadAccept() {
             const uploadInput = document.getElementById('uploadInput');
             if (currentTab === 'media') {
@@ -592,6 +607,13 @@
             const button = document.getElementById('nextPageBtn');
             const totalPages = Math.max(1, Math.ceil(totalAssets / pageSize));
             if (currentPage < totalPages) withButtonBusy(button, '加载中...', () => loadAssets(currentPage + 1));
+        });
+        document.getElementById('jumpPageBtn').addEventListener('click', jumpToPage);
+        document.getElementById('jumpPageInput').addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                jumpToPage();
+            }
         });
         document.getElementById('uploadTrigger').addEventListener('click', (event) => withButtonBusy(event.currentTarget, '选择中...', async () => {
             document.getElementById('uploadInput').click();

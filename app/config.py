@@ -4,6 +4,7 @@
 使用 pydantic-settings 从环境变量加载配置
 """
 
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 
@@ -57,6 +58,7 @@ class Config:
 
     # ==================== 火山方舟 / Seedance 配置 ====================
     ARK_API_KEY: str = ""
+    ARK_API_KEY_POOL: str = ""
     ARK_BASE_URL: str = "https://ark.cn-beijing.volces.com/api/v3"
     SEEDANCE_OMNI_MODEL: str = "doubao-seedance-2-0-260128"
     SEEDANCE_OMNI_MODEL_INTERNAL: str = "doubao-seedance-2-0-260128"
@@ -69,6 +71,7 @@ class Config:
 
     # ==================== 火山方舟国际版 / Seedance 国际版配置 ====================
     ARK_INTL_API_KEY: str = ""
+    ARK_INTL_API_KEY_POOL: str = ""
     ARK_INTL_BASE_URL: str = "https://ark.ap-southeast.bytepluses.com/api/v3"
     SEEDANCE_INTL_MODEL: str = "dreamina-seedance-2-0-260128"
 
@@ -77,6 +80,20 @@ class Config:
     VIDEO_ENHANCE_BASE_URL: str = "https://amk.cn-beijing.volces.com/api/v1"
     VIDEO_ENHANCE_CREATE_PATH: str = "/tools/enhance-video"
     VIDEO_ENHANCE_QUERY_PATH: str = "/tasks/{task_id}"
+
+    # ==================== 支付中心配置 ====================
+    PUBLIC_BASE_URL: str = ""
+    PAYMENT_CENTER_ENABLED: bool = False
+    PAYMENT_CENTER_BASE_URL: str = ""
+    PAYMENT_CENTER_CREATE_ORDER_PATH: str = "/api/internal/payments/wechat/native-orders"
+    PAYMENT_CENTER_MERCHANT_ID: str = ""
+    PAYMENT_CENTER_APP_ID: str = ""
+    PAYMENT_CENTER_SIGN_SECRET: str = ""
+    PAYMENT_CENTER_TIMEOUT_SECONDS: int = 15
+    PAYMENT_CENTER_NOTIFY_PATH: str = "/api/payment-center/recharge-callback"
+    PAYMENT_CENTER_ALLOWED_AMOUNTS: str = "100,500,1000"
+    PAYMENT_CENTER_MIN_RECHARGE_CENT: int = 10000
+    PAYMENT_CENTER_MAX_RECHARGE_CENT: int = 5000000
 
     # ==================== 脚本/分镜配置 ====================
     SCRIPT_MAX_LENGTH: int = 50000
@@ -148,6 +165,7 @@ class Config:
 
         # 火山方舟 / Seedance 配置
         self.ARK_API_KEY = os.environ.get("ARK_API_KEY", self.ARK_API_KEY)
+        self.ARK_API_KEY_POOL = os.environ.get("ARK_API_KEY_POOL", self.ARK_API_KEY_POOL)
         self.ARK_BASE_URL = os.environ.get("ARK_BASE_URL", self.ARK_BASE_URL)
         self.SEEDANCE_OMNI_MODEL = os.environ.get("SEEDANCE_OMNI_MODEL", self.SEEDANCE_OMNI_MODEL)
         self.SEEDANCE_OMNI_MODEL_INTERNAL = os.environ.get(
@@ -174,6 +192,9 @@ class Config:
 
         # 火山方舟国际版 / Seedance 国际版配置
         self.ARK_INTL_API_KEY = os.environ.get("ARK_INTL_API_KEY", self.ARK_INTL_API_KEY)
+        self.ARK_INTL_API_KEY_POOL = os.environ.get(
+            "ARK_INTL_API_KEY_POOL", self.ARK_INTL_API_KEY_POOL
+        )
         self.ARK_INTL_BASE_URL = os.environ.get("ARK_INTL_BASE_URL", self.ARK_INTL_BASE_URL)
         self.SEEDANCE_INTL_MODEL = os.environ.get("SEEDANCE_INTL_MODEL", self.SEEDANCE_INTL_MODEL)
 
@@ -189,6 +210,48 @@ class Config:
         )
         self.VIDEO_ENHANCE_QUERY_PATH = os.environ.get(
             "VIDEO_ENHANCE_QUERY_PATH", self.VIDEO_ENHANCE_QUERY_PATH
+        )
+
+        # 支付中心配置
+        self.PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", self.PUBLIC_BASE_URL)
+        self.PAYMENT_CENTER_ENABLED = (
+            os.environ.get("PAYMENT_CENTER_ENABLED", "false").lower() == "true"
+        )
+        self.PAYMENT_CENTER_BASE_URL = os.environ.get(
+            "PAYMENT_CENTER_BASE_URL", self.PAYMENT_CENTER_BASE_URL
+        )
+        self.PAYMENT_CENTER_CREATE_ORDER_PATH = os.environ.get(
+            "PAYMENT_CENTER_CREATE_ORDER_PATH", self.PAYMENT_CENTER_CREATE_ORDER_PATH
+        )
+        self.PAYMENT_CENTER_MERCHANT_ID = os.environ.get(
+            "PAYMENT_CENTER_MERCHANT_ID", self.PAYMENT_CENTER_MERCHANT_ID
+        )
+        self.PAYMENT_CENTER_APP_ID = os.environ.get(
+            "PAYMENT_CENTER_APP_ID", self.PAYMENT_CENTER_APP_ID
+        )
+        self.PAYMENT_CENTER_SIGN_SECRET = os.environ.get(
+            "PAYMENT_CENTER_SIGN_SECRET", self.PAYMENT_CENTER_SIGN_SECRET
+        )
+        self.PAYMENT_CENTER_TIMEOUT_SECONDS = int(
+            os.environ.get(
+                "PAYMENT_CENTER_TIMEOUT_SECONDS", self.PAYMENT_CENTER_TIMEOUT_SECONDS
+            )
+        )
+        self.PAYMENT_CENTER_NOTIFY_PATH = os.environ.get(
+            "PAYMENT_CENTER_NOTIFY_PATH", self.PAYMENT_CENTER_NOTIFY_PATH
+        )
+        self.PAYMENT_CENTER_ALLOWED_AMOUNTS = os.environ.get(
+            "PAYMENT_CENTER_ALLOWED_AMOUNTS", self.PAYMENT_CENTER_ALLOWED_AMOUNTS
+        )
+        self.PAYMENT_CENTER_MIN_RECHARGE_CENT = int(
+            os.environ.get(
+                "PAYMENT_CENTER_MIN_RECHARGE_CENT", self.PAYMENT_CENTER_MIN_RECHARGE_CENT
+            )
+        )
+        self.PAYMENT_CENTER_MAX_RECHARGE_CENT = int(
+            os.environ.get(
+                "PAYMENT_CENTER_MAX_RECHARGE_CENT", self.PAYMENT_CENTER_MAX_RECHARGE_CENT
+            )
         )
 
         # 日志配置
@@ -223,11 +286,13 @@ class Config:
 
     def is_seedance_omni_configured(self) -> bool:
         """检查是否配置了 Seedance 2.0 全能视频接口。"""
-        return bool(self.ARK_API_KEY and self.ARK_BASE_URL and self.SEEDANCE_OMNI_MODEL)
+        return bool(self.get_ark_api_key_pool() and self.ARK_BASE_URL and self.SEEDANCE_OMNI_MODEL)
 
     def is_seedance_intl_configured(self) -> bool:
         """检查是否配置了 Seedance 2.0 国际版全能视频接口。"""
-        return bool(self.ARK_INTL_API_KEY and self.ARK_INTL_BASE_URL and self.SEEDANCE_INTL_MODEL)
+        return bool(
+            self.get_ark_intl_api_key_pool() and self.ARK_INTL_BASE_URL and self.SEEDANCE_INTL_MODEL
+        )
 
     @staticmethod
     def _parse_csv_models(value: str | None) -> list[str]:
@@ -262,9 +327,39 @@ class Config:
                 result[model_code] = alias
         return result
 
+    def get_ark_api_key_pool(self) -> list[str]:
+        return self._parse_csv_models(self.ARK_API_KEY_POOL) or self._parse_csv_models(self.ARK_API_KEY)
+
+    def get_ark_intl_api_key_pool(self) -> list[str]:
+        return self._parse_csv_models(self.ARK_INTL_API_KEY_POOL) or self._parse_csv_models(
+            self.ARK_INTL_API_KEY
+        )
+
     def is_video_enhance_configured(self) -> bool:
         """检查是否配置了视频画质增强接口。"""
         return bool(self.VIDEO_ENHANCE_API_KEY and self.VIDEO_ENHANCE_BASE_URL)
+
+    def is_payment_center_configured(self) -> bool:
+        return bool(
+            self.PAYMENT_CENTER_ENABLED
+            and self.PAYMENT_CENTER_BASE_URL
+            and self.PAYMENT_CENTER_MERCHANT_ID
+            and self.PAYMENT_CENTER_APP_ID
+            and self.PAYMENT_CENTER_SIGN_SECRET
+        )
+
+    def get_payment_center_allowed_amounts_cent(self) -> list[int]:
+        items = self._parse_csv_models(self.PAYMENT_CENTER_ALLOWED_AMOUNTS)
+        result = []
+        for item in items:
+            try:
+                value = Decimal(str(item))
+                cent = int((value * Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            except Exception:
+                continue
+            if cent > 0:
+                result.append(cent)
+        return result
 
 
 # 全局配置实例

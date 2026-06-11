@@ -33,6 +33,8 @@
         .meta-list { display: grid; gap: 6px; font-size: 0.92rem; }
         .small-hint { color: #9ca8cf; font-size: 0.86rem; }
         .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+        .pager-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .pager-input { width: 78px; height: 36px; box-sizing: border-box; }
         .preview-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.88); display: none; align-items: center; justify-content: center; z-index: 3000; }
         .preview-inner { width: min(860px, 92vw); max-height: 88vh; padding: 18px; border-radius: 16px; background: rgba(8,13,24,0.96); }
         .preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
@@ -116,9 +118,12 @@
 
         <div class="panel pager">
             <div id="pagerInfo" class="small-hint">第 1 页</div>
-            <div class="actions">
+            <div class="pager-tools">
                 <button id="prevPageBtn" class="btn btn-secondary">上一页</button>
                 <button id="nextPageBtn" class="btn btn-secondary">下一页</button>
+                <span class="small-hint">跳到</span>
+                <input id="jumpPageInput" class="pager-input" type="number" min="1" placeholder="页码">
+                <button id="jumpPageBtn" class="btn btn-secondary">确定</button>
             </div>
         </div>
 
@@ -285,6 +290,17 @@
             document.getElementById('pagerInfo').textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页，合计 ${currentTotal} 条`;
             document.getElementById('prevPageBtn').disabled = taskListLoading || currentPage <= 1;
             document.getElementById('nextPageBtn').disabled = taskListLoading || currentPage >= totalPages;
+        }
+
+        function jumpToPage() {
+            const totalPages = Math.max(1, Math.ceil(currentTotal / PAGE_SIZE));
+            const input = document.getElementById('jumpPageInput');
+            const targetPage = Number(input.value || 0);
+            if (!Number.isInteger(targetPage) || targetPage < 1 || targetPage > totalPages) {
+                alert(`请输入 1 到 ${totalPages} 之间的页码`);
+                return;
+            }
+            withButtonBusy(document.getElementById('jumpPageBtn'), '加载中...', () => loadTasks(targetPage));
         }
 
         function renderDetails(task) {
@@ -478,6 +494,13 @@
         document.getElementById('nextPageBtn').addEventListener('click', () => {
             const totalPages = Math.max(1, Math.ceil(currentTotal / PAGE_SIZE));
             if (currentPage < totalPages) withButtonBusy(document.getElementById('nextPageBtn'), '加载中...', () => loadTasks(currentPage + 1));
+        });
+        document.getElementById('jumpPageBtn').addEventListener('click', jumpToPage);
+        document.getElementById('jumpPageInput').addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                jumpToPage();
+            }
         });
         document.getElementById('closePreviewBtn').addEventListener('click', closePreviewModal);
         document.getElementById('previewModal').addEventListener('click', (event) => {

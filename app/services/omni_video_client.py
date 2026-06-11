@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from typing import Any
@@ -28,6 +29,7 @@ class OmniVideoClient:
         # 国内版配置
         self.base_url = config.ARK_BASE_URL.rstrip("/")
         self.api_key = config.ARK_API_KEY
+        self.api_key_pool = config.get_ark_api_key_pool()
         self.model = config.SEEDANCE_OMNI_MODEL
         self.create_path = config.SEEDANCE_OMNI_CREATE_PATH
         self.query_path = config.SEEDANCE_OMNI_QUERY_PATH
@@ -37,6 +39,7 @@ class OmniVideoClient:
         # 国际版配置
         self.intl_base_url = config.ARK_INTL_BASE_URL.rstrip("/")
         self.intl_api_key = config.ARK_INTL_API_KEY
+        self.intl_api_key_pool = config.get_ark_intl_api_key_pool()
         self.intl_model = config.SEEDANCE_INTL_MODEL
 
     def is_configured(self, model: str | None = None) -> bool:
@@ -45,25 +48,69 @@ class OmniVideoClient:
             return config.is_seedance_intl_configured()
         return config.is_seedance_omni_configured()
 
-    def _get_config_for_model(self, model: str | None = None) -> tuple[str, str]:
-        """根据模型返回对应的base_url和api_key"""
+    def _get_api_key_pool(self, model: str | None = None) -> list[str]:
         if model and is_intl_model(model):
-            return self.intl_base_url, self.intl_api_key
-        return self.base_url, self.api_key
+            return self.intl_api_key_pool
+        return self.api_key_pool
 
-    def _headers(self, model: str | None = None) -> dict[str, str]:
+    def _select_api_key(
+        self, model: str | None = None, route_key: str | None = None, slot: int | None = None
+    ) -> tuple[str, int]:
+        pool = self._get_api_key_pool(model=model)
+        if not pool:
+            return "", 0
+        if slot is not None:
+            selected_slot = slot % len(pool)
+            return pool[selected_slot], selected_slot
+        if route_key:
+            digest = hashlib.sha256(route_key.encode("utf-8")).hexdigest()
+            selected_slot = int(digest[:8], 16) % len(pool)
+            return pool[selected_slot], selected_slot
+        return pool[0], 0
+
+    def _get_config_for_model(
+        self,
+        model: str | None = None,
+        *,
+        route_key: str | None = None,
+        slot: int | None = None,
+    ) -> tuple[str, str, int]:
+        """根据模型返回对应的base_url、api_key 和 slot"""
+        if model and is_intl_model(model):
+            api_key, selected_slot = self._select_api_key(model=model, route_key=route_key, slot=slot)
+            return self.intl_base_url, api_key, selected_slot
+        api_key, selected_slot = self._select_api_key(model=model, route_key=route_key, slot=slot)
+        return self.base_url, api_key, selected_slot
+
+    def _headers(
+        self, model: str | None = None, *, route_key: str | None = None, slot: int | None = None
+    ) -> dict[str, str]:
         """根据模型返回对应的headers"""
-        _, api_key = self._get_config_for_model(model)
+        _, api_key, _ = self._get_config_for_model(model, route_key=route_key, slot=slot)
         return {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
 
-    def _url(self, path: str, model: str | None = None, **kwargs: Any) -> str:
+    def _url(
+        self,
+        path: str,
+        model: str | None = None,
+        *,
+        route_key: str | None = None,
+        slot: int | None = None,
+        **kwargs: Any,
+    ) -> str:
         """根据模型返回对应的URL"""
-        base_url, _ = self._get_config_for_model(model)
+        base_url, _, _ = self._get_config_for_model(model, route_key=route_key, slot=slot)
         rendered = path.format(**kwargs)
         return f"{base_url}{rendered}"
+
+    def select_upstream_slot(
+        self, model: str | None = None, route_key: str | None = None, slot: int | None = None
+    ) -> int:
+        _, _, selected_slot = self._get_config_for_model(model, route_key=route_key, slot=slot)
+        return selected_slot
 
     def _sanitize_headers(self, headers: dict[str, Any]) -> dict[str, Any]:
         sanitized: dict[str, Any] = {}
@@ -125,10 +172,16 @@ class OmniVideoClient:
         )
         raise ValueError(f"Seedance {action} 请求失败，请稍后重试。") from exc
 
-    def create_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def create_task(
+        self,
+        payload: dict[str, Any],
+        *,
+        route_key: str | None = None,
+        slot: int | None = None,
+    ) -> dict[str, Any]:
         model = payload.get("model")
-        url = self._url(self.create_path, model=model)
-        headers = self._headers(model=model)
+        url = self._url(self.create_path, model=model, route_key=route_key, slot=slot)
+        headers = self._headers(model=model, route_key=route_key, slot=slot)
         timeout = (15, 180)
         self._log_request(
             "create_task",
@@ -165,9 +218,9 @@ class OmniVideoClient:
             ) from exc
         return response.json()
 
-    def get_task(self, task_id: str, model: str | None = None) -> dict[str, Any]:
-        url = self._url(self.query_path, model=model, task_id=task_id)
-        headers = self._headers(model=model)
+    def get_task(self, task_id: str, model: str | None = None, *, slot: int | None = None) -> dict[str, Any]:
+        url = self._url(self.query_path, model=model, slot=slot, task_id=task_id)
+        headers = self._headers(model=model, slot=slot)
         timeout = (10, 60)
         self._log_request(
             "get_task",
@@ -203,9 +256,11 @@ class OmniVideoClient:
             ) from exc
         return response.json()
 
-    def list_tasks(self, page: int = 1, page_size: int = 20, model: str | None = None) -> dict[str, Any]:
-        url = self._url(self.list_path, model=model)
-        headers = self._headers(model=model)
+    def list_tasks(
+        self, page: int = 1, page_size: int = 20, model: str | None = None, *, slot: int | None = None
+    ) -> dict[str, Any]:
+        url = self._url(self.list_path, model=model, slot=slot)
+        headers = self._headers(model=model, slot=slot)
         params = {"page": page, "page_size": page_size}
         timeout = (10, 60)
         self._log_request(
@@ -251,9 +306,9 @@ class OmniVideoClient:
             ) from exc
         return response.json()
 
-    def cancel_task(self, task_id: str, model: str | None = None) -> dict[str, Any]:
-        url = self._url(self.cancel_path, model=model, task_id=task_id)
-        headers = self._headers(model=model)
+    def cancel_task(self, task_id: str, model: str | None = None, *, slot: int | None = None) -> dict[str, Any]:
+        url = self._url(self.cancel_path, model=model, slot=slot, task_id=task_id)
+        headers = self._headers(model=model, slot=slot)
         payload = {"action": "cancel"}
         timeout = (10, 60)
         self._log_request(

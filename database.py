@@ -2582,6 +2582,349 @@ def create_account_ledger_entry(
         conn.close()
 
 
+def _ensure_recharge_order_schema(cursor):
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS recharge_orders (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            order_no VARCHAR(64) NOT NULL,
+            user_id INT NOT NULL,
+            username VARCHAR(255),
+            amount_cent BIGINT NOT NULL,
+            currency_code VARCHAR(8) NOT NULL DEFAULT 'CNY',
+            status VARCHAR(32) NOT NULL DEFAULT 'pending',
+            payment_channel VARCHAR(32) NOT NULL DEFAULT 'wechat_native',
+            payment_scene VARCHAR(32) NOT NULL DEFAULT 'user_center',
+            subject VARCHAR(255),
+            description VARCHAR(512),
+            payment_center_order_no VARCHAR(128),
+            channel_trade_no VARCHAR(128),
+            qr_code_url LONGTEXT,
+            qr_code_img_url LONGTEXT,
+            expire_at DATETIME NULL,
+            paid_at DATETIME NULL,
+            closed_at DATETIME NULL,
+            fail_reason VARCHAR(512),
+            request_payload_json LONGTEXT,
+            callback_payload_json LONGTEXT,
+            metadata_json LONGTEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_recharge_orders_order_no (order_no),
+            INDEX idx_recharge_orders_user_created (user_id, created_at DESC),
+            INDEX idx_recharge_orders_status_created (status, created_at DESC),
+            INDEX idx_recharge_orders_payment_center (payment_center_order_no)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """
+    )
+
+
+def _decode_recharge_order(row):
+    if not row:
+        return None
+    item = dict(row)
+    for field in ("request_payload_json", "callback_payload_json", "metadata_json"):
+        raw = item.get(field)
+        if raw in (None, ""):
+            item[field] = {}
+            continue
+        if isinstance(raw, dict):
+            continue
+        try:
+            item[field] = json.loads(raw)
+        except Exception:
+            item[field] = {}
+    return item
+
+
+def create_recharge_order(data):
+    conn = connect()
+    cursor = conn.cursor()
+    _ensure_recharge_order_schema(cursor)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute(
+        """
+        INSERT INTO recharge_orders (
+            order_no, user_id, username, amount_cent, currency_code, status, payment_channel,
+            payment_scene, subject, description, payment_center_order_no, channel_trade_no,
+            qr_code_url, qr_code_img_url, expire_at, paid_at, closed_at, fail_reason,
+            request_payload_json, callback_payload_json, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            data.get("order_no"),
+            data.get("user_id"),
+            data.get("username"),
+            int(data.get("amount_cent") or 0),
+            data.get("currency_code") or MODEL_CURRENCY_CNY,
+            data.get("status") or "pending",
+            data.get("payment_channel") or "wechat_native",
+            data.get("payment_scene") or "user_center",
+            data.get("subject"),
+            data.get("description"),
+            data.get("payment_center_order_no"),
+            data.get("channel_trade_no"),
+            data.get("qr_code_url"),
+            data.get("qr_code_img_url"),
+            data.get("expire_at"),
+            data.get("paid_at"),
+            data.get("closed_at"),
+            data.get("fail_reason"),
+            json.dumps(data.get("request_payload_json") or {}),
+            json.dumps(data.get("callback_payload_json") or {}),
+            json.dumps(data.get("metadata_json") or {}),
+            data.get("created_at") or now,
+            data.get("updated_at") or now,
+        ),
+    )
+    conn.commit()
+    order_id = cursor.lastrowid
+    cursor.execute("SELECT * FROM recharge_orders WHERE id = ?", (order_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return _decode_recharge_order(row)
+
+
+def get_recharge_order(order_no, user_id=None):
+    conn = connect()
+    cursor = conn.cursor()
+    _ensure_recharge_order_schema(cursor)
+    query = "SELECT * FROM recharge_orders WHERE order_no = ?"
+    params = [order_no]
+    if user_id is not None:
+        query += " AND user_id = ?"
+        params.append(user_id)
+    query += " LIMIT 1"
+    cursor.execute(query, params)
+    row = cursor.fetchone()
+    conn.close()
+    return _decode_recharge_order(row)
+
+
+def get_recharge_orders(user_id, limit=20, offset=0):
+    conn = connect()
+    cursor = conn.cursor()
+    _ensure_recharge_order_schema(cursor)
+    cursor.execute(
+        """
+        SELECT * FROM recharge_orders
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        (user_id, int(limit), int(offset)),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_decode_recharge_order(row) for row in rows]
+
+
+def count_recharge_orders(user_id):
+    conn = connect()
+    cursor = conn.cursor()
+    _ensure_recharge_order_schema(cursor)
+    cursor.execute("SELECT COUNT(*) FROM recharge_orders WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return int(row[0] or 0) if row else 0
+
+
+def update_recharge_order(order_no, updates):
+    if not updates:
+        return get_recharge_order(order_no)
+    conn = connect()
+    cursor = conn.cursor()
+    _ensure_recharge_order_schema(cursor)
+    allowed_json_fields = {"request_payload_json", "callback_payload_json", "metadata_json"}
+    assignments = []
+    params = []
+    for key, value in updates.items():
+        if key in allowed_json_fields:
+            value = json.dumps(value or {})
+        assignments.append(f"{key} = ?")
+        params.append(value)
+    assignments.append("updated_at = ?")
+    params.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    params.append(order_no)
+    cursor.execute(f"UPDATE recharge_orders SET {', '.join(assignments)} WHERE order_no = ?", params)
+    conn.commit()
+    cursor.execute("SELECT * FROM recharge_orders WHERE order_no = ? LIMIT 1", (order_no,))
+    row = cursor.fetchone()
+    conn.close()
+    return _decode_recharge_order(row)
+
+
+def settle_recharge_order_paid(
+    order_no,
+    *,
+    payment_center_order_no=None,
+    channel_trade_no=None,
+    callback_payload=None,
+    paid_at=None,
+):
+    conn = connect()
+    cursor = conn.cursor()
+    _ensure_recharge_order_schema(cursor)
+    try:
+        cursor.execute("SELECT * FROM recharge_orders WHERE order_no = ? FOR UPDATE", (order_no,))
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError("充值订单不存在")
+        order = _decode_recharge_order(row)
+        if order.get("status") == "paid":
+            conn.commit()
+            return order
+
+        user_id = int(order["user_id"])
+        amount_cent = int(order["amount_cent"] or 0)
+        if amount_cent <= 0:
+            raise ValueError("充值金额无效")
+
+        cursor.execute("SELECT balance_cent FROM users WHERE id = ? FOR UPDATE", (user_id,))
+        user_row = cursor.fetchone()
+        if not user_row:
+            raise ValueError("用户不存在")
+        before = int(user_row[0] or 0)
+        after = before + amount_cent
+        now = paid_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        callback_json = json.dumps(callback_payload or {})
+
+        cursor.execute(
+            "UPDATE users SET balance_cent = ?, updated_at = ? WHERE id = ?",
+            (after, now, user_id),
+        )
+        cursor.execute(
+            """
+            INSERT INTO account_ledger (
+                user_id, entry_type, amount_cent, balance_before_cent, balance_after_cent,
+                biz_type, biz_id, model_code, tokens_raw, tokens_billed, unit_price_cent_per_ktoken,
+                multiplier, snapshot_json, operator_user_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                "credit",
+                amount_cent,
+                before,
+                after,
+                "recharge",
+                order_no,
+                None,
+                None,
+                None,
+                None,
+                None,
+                json.dumps(
+                    {
+                        "payment_channel": order.get("payment_channel"),
+                        "payment_center_order_no": payment_center_order_no
+                        or order.get("payment_center_order_no"),
+                        "channel_trade_no": channel_trade_no,
+                        "callback_payload": callback_payload or {},
+                    }
+                ),
+                None,
+                now,
+            ),
+        )
+        cursor.execute(
+            """
+            UPDATE recharge_orders
+            SET status = ?, payment_center_order_no = ?, channel_trade_no = ?,
+                callback_payload_json = ?, paid_at = ?, fail_reason = NULL, updated_at = ?
+            WHERE order_no = ?
+            """,
+            (
+                "paid",
+                payment_center_order_no or order.get("payment_center_order_no"),
+                channel_trade_no or order.get("channel_trade_no"),
+                callback_json,
+                now,
+                now,
+                order_no,
+            ),
+        )
+        conn.commit()
+        cursor.execute("SELECT * FROM recharge_orders WHERE order_no = ? LIMIT 1", (order_no,))
+        return _decode_recharge_order(cursor.fetchone())
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def mark_recharge_order_status(
+    order_no,
+    *,
+    status,
+    payment_center_order_no=None,
+    channel_trade_no=None,
+    fail_reason=None,
+    callback_payload=None,
+    qr_code_url=None,
+    qr_code_img_url=None,
+    expire_at=None,
+    closed_at=None,
+):
+    updates = {"status": status}
+    if payment_center_order_no is not None:
+        updates["payment_center_order_no"] = payment_center_order_no
+    if channel_trade_no is not None:
+        updates["channel_trade_no"] = channel_trade_no
+    if fail_reason is not None:
+        updates["fail_reason"] = fail_reason
+    if callback_payload is not None:
+        updates["callback_payload_json"] = callback_payload
+    if qr_code_url is not None:
+        updates["qr_code_url"] = qr_code_url
+    if qr_code_img_url is not None:
+        updates["qr_code_img_url"] = qr_code_img_url
+    if expire_at is not None:
+        updates["expire_at"] = expire_at
+    if closed_at is not None:
+        updates["closed_at"] = closed_at
+    return update_recharge_order(order_no, updates)
+
+
+def cancel_recharge_order(order_no, user_id):
+    conn = connect()
+    cursor = conn.cursor()
+    _ensure_recharge_order_schema(cursor)
+    try:
+        cursor.execute(
+            "SELECT * FROM recharge_orders WHERE order_no = ? AND user_id = ? FOR UPDATE",
+            (order_no, user_id),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError("充值订单不存在")
+        order = _decode_recharge_order(row)
+        status = str(order.get("status") or "").lower()
+        if status not in {"pending", "paying"}:
+            raise ValueError("当前订单状态不允许取消")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            """
+            UPDATE recharge_orders
+            SET status = ?, closed_at = ?, updated_at = ?
+            WHERE order_no = ? AND user_id = ?
+            """,
+            ("closed", now, now, order_no, user_id),
+        )
+        conn.commit()
+        cursor.execute(
+            "SELECT * FROM recharge_orders WHERE order_no = ? AND user_id = ? LIMIT 1",
+            (order_no, user_id),
+        )
+        return _decode_recharge_order(cursor.fetchone())
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def compute_tokens_billed(tokens_raw):
     value = max(int(tokens_raw or 0), 1000)
     return int(math.ceil(value / 1000.0) * 1000)
