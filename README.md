@@ -145,6 +145,44 @@ $env:FLASK_DEBUG="false"
 .\venv\Scripts\python.exe -m pytest -q
 ```
 
+## 数据库备份
+
+仓库已提供 Linux 备份脚本：
+
+- `scripts/backup_generation_prod.sh`
+
+默认行为：
+
+- 每次将 `generation_prod` 导出到 `/opt/dbbackup`
+- 输出文件格式为 `.sql.gz`
+- 本地仅保留最近 `7` 天备份
+- 默认按低权限账号可用方式导出，不依赖 `PROCESS` / `EVENT` 额外权限
+
+可直接执行：
+
+```bash
+chmod +x scripts/backup_generation_prod.sh
+DB_HOST=127.0.0.1 \
+DB_PORT=3306 \
+DB_NAME=generation_prod \
+DB_USER=root \
+DB_PASSWORD=your-password \
+scripts/backup_generation_prod.sh
+```
+
+如需每天自动备份，可加入 `crontab`：
+
+```cron
+0 3 * * * DB_HOST=127.0.0.1 DB_PORT=3306 DB_NAME=generation_prod DB_USER=root DB_PASSWORD=your-password /opt/ai-generator/scripts/backup_generation_prod.sh >> /var/log/generation_prod_backup.log 2>&1
+```
+
+说明：
+
+- `BACKUP_DIR` 默认是 `/opt/dbbackup`
+- `RETENTION_DAYS` 默认是 `7`
+- 也可通过环境变量覆盖以上参数
+- 脚本默认启用 `--no-tablespaces`，且不导出 `events`，适合普通业务库备份账号
+
 ## 保留脚本
 
 仓库保留了少量仍有实际用途的辅助文件：
