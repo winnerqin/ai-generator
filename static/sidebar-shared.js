@@ -14,14 +14,20 @@
     }
 
     async function initMenuVisibility() {
-        hideAllMenuItems();
+        const context = window.__APP_CONTEXT__ || {};
+        const adminFallback = context.is_system_admin || context.role_code === 'system_admin' || context.username === 'system_admin';
+        if (!adminFallback) {
+            hideAllMenuItems();
+        }
         try {
             const resp = await fetch('/api/me/menu-permissions');
             const data = await resp.json();
             const menuKeys = data && data.success && data.data ? data.data.menu_keys : [];
             applyMenuVisibility(menuKeys);
         } catch (_error) {
-            applyMenuVisibility(['index']);
+            if (!adminFallback) {
+                applyMenuVisibility(['index']);
+            }
         }
     }
 

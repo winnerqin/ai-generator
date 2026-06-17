@@ -10,7 +10,12 @@ function toggleSidebar() {
 }
 
 async function applySidebarRoleMenuVisibility() {
-    let menuKeys = ['index'];
+    const allMenuKeys = Array.from(document.querySelectorAll('.sidebar-nav-item[data-menu-key]'))
+        .map((item) => item.getAttribute('data-menu-key'))
+        .filter(Boolean);
+    const context = window.__APP_CONTEXT__ || {};
+    const adminFallback = context.is_system_admin || context.role_code === 'system_admin' || context.username === 'system_admin';
+    let menuKeys = adminFallback ? allMenuKeys : ['index'];
     try {
         const resp = await fetch('/api/me/menu-permissions');
         const data = await resp.json();

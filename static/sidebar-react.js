@@ -1,4 +1,31 @@
 (function () {
+    const ALL_MENU_KEYS = [
+        'index',
+        'batch',
+        'records',
+        'video_generate',
+        'video_tasks',
+        'omni_video',
+        'omni_video_tasks',
+        'enhance_tasks',
+        'script_generate',
+        'storyboard_studio',
+        'txt2csv',
+        'content_management',
+        'user_center',
+        'admin',
+        'role_management',
+        'stats',
+    ];
+
+    function initialMenuKeys() {
+        const context = window.__APP_CONTEXT__ || {};
+        if (context.is_system_admin || context.role_code === 'system_admin' || context.username === 'system_admin') {
+            return ALL_MENU_KEYS;
+        }
+        return null;
+    }
+
     function menuItem(props, item) {
         if (item.type === 'group') {
             return React.createElement('div', { className: 'sidebar-nav-group-title', key: item.key }, item.label);
@@ -11,6 +38,7 @@
             {
                 href: item.href,
                 key: item.key,
+                'data-menu-key': item.key,
                 className: 'sidebar-nav-item' + (props.activePage === item.key ? ' active' : ''),
             },
             React.createElement('span', { className: 'sidebar-nav-icon', 'aria-hidden': 'true' }, item.icon),
@@ -42,7 +70,7 @@
     }
 
     function AppSidebar(props) {
-        const [menuKeys, setMenuKeys] = React.useState(null);
+        const [menuKeys, setMenuKeys] = React.useState(initialMenuKeys);
         const items = [
             { type: 'group', key: 'group_production', label: '内容生产' },
             { key: 'index', href: '/', icon: '🎨', label: '单图生成' },
@@ -72,10 +100,10 @@
                     if (data && data.success && data.data && Array.isArray(data.data.menu_keys)) {
                         setMenuKeys(data.data.menu_keys);
                     } else {
-                        setMenuKeys(['index']);
+                        setMenuKeys(initialMenuKeys() || ['index']);
                     }
                 })
-                .catch(() => setMenuKeys(['index']));
+                .catch(() => setMenuKeys(initialMenuKeys() || ['index']));
         }, []);
 
         const visibleItems = menuKeys

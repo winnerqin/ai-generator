@@ -1,3 +1,10 @@
+<script>
+    window.__APP_CONTEXT__ = Object.assign({}, window.__APP_CONTEXT__ || {}, {
+        username: "{{ user.username }}",
+        role_code: "{{ user.role_code or '' }}",
+        is_system_admin: {{ 'true' if user.role_code == 'system_admin' or user.username == 'system_admin' else 'false' }}
+    });
+</script>
 <nav class="sidebar-nav" id="sidebarNav">
     <div class="sidebar-nav-header">
         <div class="sidebar-nav-title">AI创作工具</div>
