@@ -18,12 +18,17 @@
         .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
         .tab-btn { padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(86,111,255,0.3); background: rgba(86,111,255,0.08); color: inherit; cursor: pointer; }
         .tab-btn.active { background: rgba(86,111,255,0.22); border-color: rgba(86,111,255,0.55); }
-        .toolbar { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: end; }
+        .toolbar { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 12px; align-items: end; }
+        .toolbar-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+        .toolbar-actions .btn { width: auto; flex: 0 0 auto; }
         .asset-list-panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; margin-bottom: 0; }
         .asset-list-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
         .asset-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
         .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
         .asset-card { border-radius: 14px; overflow: hidden; border: 1px solid rgba(86,111,255,0.2); background: rgba(255,255,255,0.02); }
+        .asset-card.selected { border-color: rgba(86,111,255,0.75); box-shadow: 0 0 0 1px rgba(86,111,255,0.25); }
+        .asset-select-line { display: flex; align-items: center; gap: 10px; color: #cbd4f6; font-size: 0.9rem; cursor: pointer; padding: 2px 0; }
+        .asset-select-line input { width: 22px; height: 22px; flex: 0 0 22px; cursor: pointer; }
         .asset-preview { height: 160px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.15); cursor: pointer; }
         .asset-preview img, .asset-preview video { width: 100%; height: 100%; object-fit: contain; display: block; }
         .asset-preview-audio { font-size: 42px; opacity: 0.85; }
@@ -98,8 +103,12 @@
                             <label for="searchInput">搜索素材</label>
                             <input id="searchInput" type="text" placeholder="按文件名搜索">
                         </div>
-                        <button class="btn btn-secondary" id="refreshBtn">刷新</button>
-                        <button class="btn btn-secondary" id="uploadTrigger">上传素材</button>
+                        <div class="toolbar-actions">
+                            <button class="btn btn-secondary" id="refreshBtn">刷新</button>
+                            <button class="btn btn-secondary" id="clearSelectionBtn" style="display:none;">取消选择</button>
+                            <button class="btn btn-secondary" id="batchDownloadBtn" style="display:none;">批量下载</button>
+                            <button class="btn btn-secondary" id="uploadTrigger">上传素材</button>
+                        </div>
                     </div>
                     <input id="uploadInput" type="file" multiple style="display:none;">
                 </div>
@@ -190,6 +199,7 @@
         let searchTimer = null;
         let videoPreviewObserver = null;
         let assetListLoading = false;
+        let selectedAssetIds = new Set();
 
         function setButtonBusy(button, busy, busyText = null) {
             if (!button) return;
@@ -255,6 +265,33 @@
             return currentTab === 'video' && asset.type === 'video';
         }
 
+        function canBatchDownloadAsset(asset) {
+            return asset && asset.type === 'video';
+        }
+
+        function selectedDownloadableAssets() {
+            return allAssets.filter((asset) => selectedAssetIds.has(String(asset.id)) && canBatchDownloadAsset(asset));
+        }
+
+        function updateBatchDownloadButton() {
+            const clearButton = document.getElementById('clearSelectionBtn');
+            const downloadButton = document.getElementById('batchDownloadBtn');
+            const count = selectedDownloadableAssets().length;
+            clearButton.style.display = count > 0 ? 'inline-block' : 'none';
+            downloadButton.style.display = count > 0 ? 'inline-block' : 'none';
+            downloadButton.textContent = count > 0 ? `批量下载(${count})` : '批量下载';
+        }
+
+        function clearAssetSelection() {
+            selectedAssetIds.clear();
+            document.querySelectorAll('[data-select-asset]').forEach((checkbox) => {
+                checkbox.checked = false;
+                const card = checkbox.closest('.asset-card');
+                if (card) card.classList.remove('selected');
+            });
+            updateBatchDownloadButton();
+        }
+
         function renderResolution(asset) {
             const meta = asset.meta || {};
             if (asset.type === 'image') {
@@ -292,13 +329,19 @@
 
             if (!assets.length) {
                 grid.innerHTML = '<div class="empty-hint">当前分类下暂无素材。</div>';
+                selectedAssetIds.clear();
+                updateBatchDownloadButton();
                 return;
             }
 
             grid.innerHTML = assets.map((asset) => `
-                <div class="asset-card">
+                <div class="asset-card ${selectedAssetIds.has(String(asset.id)) ? 'selected' : ''}">
                     <div class="asset-preview" data-preview="${asset.id}">${previewMarkup(asset)}</div>
                     <div class="asset-info">
+                        <label class="asset-select-line">
+                            <input type="checkbox" data-select-asset="${asset.id}" ${selectedAssetIds.has(String(asset.id)) ? 'checked' : ''} ${canBatchDownloadAsset(asset) ? '' : 'disabled'}>
+                            <span>选择</span>
+                        </label>
                         <div>${asset.filename || '-'}</div>
                         <div class="asset-meta-line"><span>${renderTypeWithResolution(asset)}</span><span>${asset.created_at || '-'}</span></div>
                         <div class="asset-actions">
@@ -314,6 +357,16 @@
 
             grid.querySelectorAll('[data-preview]').forEach((preview) => {
                 preview.addEventListener('click', () => openPreview(preview.getAttribute('data-preview')));
+            });
+            grid.querySelectorAll('[data-select-asset]').forEach((checkbox) => {
+                checkbox.addEventListener('change', () => {
+                    const assetId = String(checkbox.getAttribute('data-select-asset'));
+                    if (checkbox.checked) selectedAssetIds.add(assetId);
+                    else selectedAssetIds.delete(assetId);
+                    const card = checkbox.closest('.asset-card');
+                    if (card) card.classList.toggle('selected', checkbox.checked);
+                    updateBatchDownloadButton();
+                });
             });
             grid.querySelectorAll('[data-add-material]').forEach((button) => {
                 button.addEventListener('click', () => addToImageMaterial(button.getAttribute('data-add-material'), button));
@@ -333,6 +386,7 @@
                 button.addEventListener('click', () => renameAsset(button.getAttribute('data-rename'), button));
             });
             setupVideoPreviewLazyLoad();
+            updateBatchDownloadButton();
         }
 
         function setupVideoPreviewLazyLoad() {
@@ -422,12 +476,15 @@
                 if (!resp.ok || !data.success) {
                     throw new Error(data.error || '加载素材失败');
                 }
+                selectedAssetIds.clear();
                 renderAssets();
                 const assetScroll = document.getElementById('assetScroll');
                 if (assetScroll) assetScroll.scrollTop = 0;
             } catch (error) {
                 allAssets = [];
                 totalAssets = 0;
+                selectedAssetIds.clear();
+                updateBatchDownloadButton();
                 grid.innerHTML = `<div class="empty-hint">${error.message || '加载素材失败'}</div>`;
             } finally {
                 assetListLoading = false;
@@ -493,6 +550,37 @@
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
+            });
+        }
+
+        async function batchDownloadAssets(button = null) {
+            const assets = selectedDownloadableAssets();
+            if (!assets.length) return;
+            await withButtonBusy(button, '打包中...', async () => {
+                const resp = await fetch('/api/download-library-assets', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: assets.map((asset) => asset.id) }),
+                });
+                if (!resp.ok) {
+                    let message = '批量下载失败';
+                    try {
+                        const data = await resp.json();
+                        message = data.error || message;
+                    } catch (error) {}
+                    throw new Error(message);
+                }
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `视频批量下载_${new Date().toISOString().slice(0, 10)}.zip`;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(url);
+            }).catch((error) => {
+                alert(error.message || '批量下载失败');
             });
         }
 
@@ -599,6 +687,8 @@
             searchTimer = setTimeout(() => loadAssets(1), 300);
         });
         document.getElementById('refreshBtn').addEventListener('click', (event) => withButtonBusy(event.currentTarget, '刷新中...', () => loadAssets(1)));
+        document.getElementById('clearSelectionBtn').addEventListener('click', clearAssetSelection);
+        document.getElementById('batchDownloadBtn').addEventListener('click', (event) => batchDownloadAssets(event.currentTarget));
         document.getElementById('prevPageBtn').addEventListener('click', () => {
             const button = document.getElementById('prevPageBtn');
             if (currentPage > 1) withButtonBusy(button, '加载中...', () => loadAssets(currentPage - 1));

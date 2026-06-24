@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+import zipfile
 from io import BytesIO
 from pathlib import Path
 
@@ -211,6 +212,41 @@ def _resolve_local_file_path(path_or_url: str) -> Path | None:
     if candidate.exists():
         return candidate.resolve()
     return None
+
+
+def _safe_download_name(filename: str, fallback: str) -> str:
+    value = (filename or "").strip() or fallback
+    for char in '<>:"/\\|?*':
+        value = value.replace(char, "_")
+    return value or fallback
+
+
+def _unique_zip_name(filename: str, used_names: set[str]) -> str:
+    path = Path(filename)
+    stem = path.stem or "asset"
+    suffix = path.suffix
+    candidate = filename
+    index = 2
+    while candidate in used_names:
+        candidate = f"{stem}_{index}{suffix}"
+        index += 1
+    used_names.add(candidate)
+    return candidate
+
+
+def _read_asset_bytes(asset: dict) -> tuple[bytes, str] | tuple[None, str]:
+    filename = _safe_download_name(asset.get("filename") or "asset", "asset")
+    asset_url = str(asset.get("url") or "").strip()
+    local_path = _resolve_local_file_path(asset_url)
+    if local_path and local_path.exists():
+        return local_path.read_bytes(), filename
+
+    if not asset_url:
+        return None, filename
+
+    response = requests.get(_public_asset_url(asset_url), timeout=120)
+    response.raise_for_status()
+    return response.content, filename
 
 
 @content_bp.route("/content-management")
@@ -797,6 +833,62 @@ def download_library_asset():
     )
 
 
+@content_bp.route("/api/download-library-assets", methods=["POST"])
+@login_required
+def download_library_assets():
+    user_id = session.get("user_id")
+    project_id = session.get("current_project_id")
+    data = request.get_json(silent=True) or {}
+    asset_ids = data.get("ids") or []
+    if not isinstance(asset_ids, list):
+        return jsonify({"success": False, "error": "素材 ID 格式不正确"}), 400
+
+    asset_ids = [
+        str(asset_id).strip()
+        for asset_id in asset_ids
+        if str(asset_id).strip().startswith("db_video_")
+    ]
+    if not asset_ids:
+        return jsonify({"success": False, "error": "请选择要下载的素材"}), 400
+
+    assets = []
+    for asset_id in asset_ids:
+        asset = _get_database_asset(asset_id, user_id, project_id)
+        if asset and str(asset.get("url") or "").strip():
+            assets.append(asset)
+
+    if not assets:
+        return jsonify({"success": False, "error": "所选素材没有可下载的视频"}), 400
+
+    archive = BytesIO()
+    used_names: set[str] = set()
+    failed: list[str] = []
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+        for asset in assets:
+            try:
+                content, filename = _read_asset_bytes(asset)
+                if content is None:
+                    failed.append(asset.get("filename") or str(asset.get("id") or "asset"))
+                    continue
+                zip_file.writestr(_unique_zip_name(filename, used_names), content)
+            except Exception:
+                failed.append(asset.get("filename") or str(asset.get("id") or "asset"))
+
+        if failed:
+            zip_file.writestr("download_failed.txt", "\n".join(failed))
+
+    if not used_names:
+        return jsonify({"success": False, "error": "所选素材下载失败"}), 502
+
+    archive.seek(0)
+    return send_file(
+        archive,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="library_videos.zip",
+    )
+
+
 @content_bp.route("/api/image-styles", methods=["POST"])
 @login_required
 @handle_api_error
@@ -840,4 +932,3 @@ def get_output_file_simple(user_id: int, filename: str):
     if not file_path.exists():
         return jsonify({"success": False, "error": "文件不存在"}), 404
     return send_file(file_path)
-

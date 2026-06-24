@@ -5,6 +5,8 @@ from __future__ import annotations
 from io import BytesIO
 import logging
 import mimetypes
+from pathlib import Path
+import zipfile
 
 import requests
 from flask import Blueprint, jsonify, render_template, request, send_file, session
@@ -22,6 +24,26 @@ def _current_user_context() -> dict[str, object]:
 
 def _safe_log_payload(payload):
     return payload if isinstance(payload, dict) else {"value": payload}
+
+
+def _safe_download_name(filename: str, fallback: str) -> str:
+    value = (filename or "").strip() or fallback
+    for char in '<>:"/\\|?*':
+        value = value.replace(char, "_")
+    return value or fallback
+
+
+def _unique_zip_name(filename: str, used_names: set[str]) -> str:
+    path = Path(filename)
+    stem = path.stem or "enhanced"
+    suffix = path.suffix
+    candidate = filename
+    index = 2
+    while candidate in used_names:
+        candidate = f"{stem}_{index}{suffix}"
+        index += 1
+    used_names.add(candidate)
+    return candidate
 
 
 @video_enhance_bp.route("/enhance-tasks")
@@ -202,4 +224,57 @@ def download_enhance_task(task_id: str):
         mimetype=mimetype,
         as_attachment=True,
         download_name=filename,
+    )
+
+
+@video_enhance_bp.route("/api/video-enhance/tasks/batch-download", methods=["POST"])
+@login_required
+@handle_api_error
+def batch_download_enhance_tasks():
+    """批量下载增强后的视频。"""
+    user_id = session.get("user_id")
+    project_id = session.get("current_project_id")
+    data = request.get_json(silent=True) or {}
+    task_ids = data.get("task_ids") or []
+    if not isinstance(task_ids, list):
+        return jsonify({"success": False, "error": "任务 ID 格式不正确"}), 400
+
+    task_ids = [str(task_id).strip() for task_id in task_ids if str(task_id).strip()]
+    if not task_ids:
+        return jsonify({"success": False, "error": "请选择要下载的任务"}), 400
+
+    archive = BytesIO()
+    used_names: set[str] = set()
+    failed: list[str] = []
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+        for task_id in task_ids:
+            task = video_enhance_service.get_task(user_id, project_id, task_id)
+            video_url = (task or {}).get("video_url")
+            if not task or not video_url:
+                failed.append(task_id)
+                continue
+
+            filename = _safe_download_name(
+                task.get("download_filename") or task.get("output_filename") or f"{task_id}.mp4",
+                f"{task_id}.mp4",
+            )
+            try:
+                response = requests.get(video_url, timeout=120)
+                response.raise_for_status()
+                zip_file.writestr(_unique_zip_name(filename, used_names), response.content)
+            except requests.RequestException:
+                failed.append(filename)
+
+        if failed:
+            zip_file.writestr("download_failed.txt", "\n".join(failed))
+
+    if not used_names:
+        return jsonify({"success": False, "error": "所选任务下载失败或尚未生成视频"}), 502
+
+    archive.seek(0)
+    return send_file(
+        archive,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="enhance_videos.zip",
     )

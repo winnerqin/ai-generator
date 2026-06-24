@@ -22,6 +22,9 @@
         .task-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; min-width: 1100px; }
         .task-table th, .task-table td { padding: 10px 12px; border-bottom: 1px solid rgba(86,111,255,0.18); text-align: left; vertical-align: top; }
         .task-table th { font-weight: 600; white-space: nowrap; }
+        .task-table input[type="checkbox"] { width: 22px; height: 22px; cursor: pointer; }
+        .select-cell { text-align: center; vertical-align: middle; min-width: 54px; }
+        .task-table tr.selected { background: rgba(86,111,255,0.08); }
         .task-table td.filename-cell { min-width: 96px; max-width: 130px; word-break: break-all; }
         .status-pill { display: inline-block; padding: 4px 10px; border-radius: 999px; background: rgba(86,111,255,0.16); }
         .actions { display: grid; grid-template-columns: repeat(3, minmax(60px, 1fr)); gap: 6px; min-width: 180px; }
@@ -92,6 +95,8 @@
                     <span>自动刷新未完成任务</span>
                 </label>
                 <span class="small-hint">开启后每 5 分钟自动刷新一次。</span>
+                <button id="clearSelectionBtn" class="btn btn-secondary" style="display:none;">取消选择</button>
+                <button id="batchDownloadBtn" class="btn btn-secondary" style="display:none;">批量下载</button>
             </div>
         </div>
 
@@ -99,6 +104,7 @@
             <table class="task-table">
                 <thead>
                     <tr>
+                        <th>选择</th>
                         <th>任务 ID</th>
                         <th>状态</th>
                         <th>工具版本</th>
@@ -111,7 +117,7 @@
                     </tr>
                 </thead>
                 <tbody id="taskRows">
-                    <tr><td colspan="9">加载中...</td></tr>
+                    <tr><td colspan="10">加载中...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -161,6 +167,7 @@
         let detailExpanded = false;
         let autoRefreshTimer = null;
         let taskListLoading = false;
+        let selectedTaskIds = new Set();
 
         function setButtonBusy(button, busy, busyText = null) {
             if (!button) return;
@@ -207,6 +214,29 @@
             return Boolean(task && task.video_url);
         }
 
+        function selectedDownloadableTasks() {
+            return currentItems.filter((task) => selectedTaskIds.has(String(task.task_id)) && canDownload(task));
+        }
+
+        function updateBatchDownloadButton() {
+            const clearButton = document.getElementById('clearSelectionBtn');
+            const downloadButton = document.getElementById('batchDownloadBtn');
+            const count = selectedDownloadableTasks().length;
+            clearButton.style.display = count > 0 ? 'inline-block' : 'none';
+            downloadButton.style.display = count > 0 ? 'inline-block' : 'none';
+            downloadButton.textContent = count > 0 ? `批量下载(${count})` : '批量下载';
+        }
+
+        function clearTaskSelection() {
+            selectedTaskIds.clear();
+            document.querySelectorAll('[data-select-task]').forEach((checkbox) => {
+                checkbox.checked = false;
+                const row = checkbox.closest('tr');
+                if (row) row.classList.remove('selected');
+            });
+            updateBatchDownloadButton();
+        }
+
         function canDelete(task) {
             const status = String(task.status || '').toLowerCase();
             return !['running'].includes(status);
@@ -239,27 +269,30 @@
             if (filters.end_date) params.set('end_date', filters.end_date);
 
             const tbody = document.getElementById('taskRows');
-            tbody.innerHTML = '<tr><td colspan="9">加载中...</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10">加载中...</td></tr>';
             try {
                 const resp = await fetch(`/api/video-enhance/tasks?${params.toString()}`);
                 const data = await resp.json();
                 if (!resp.ok || !data.success) {
-                    tbody.innerHTML = '<tr><td colspan="9">加载失败</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="10">加载失败</td></tr>';
                     return;
                 }
 
                 currentItems = data.items || [];
                 currentTotal = data.total || 0;
+                selectedTaskIds.clear();
                 updatePager();
+                updateBatchDownloadButton();
 
                 if (!currentItems.length) {
-                    tbody.innerHTML = '<tr><td colspan="9">暂无任务</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="10">暂无任务</td></tr>';
                     collapseDetails('当前没有可查看的任务。');
                     return;
                 }
 
                 tbody.innerHTML = currentItems.map((task) => `
-                <tr>
+                <tr class="${selectedTaskIds.has(String(task.task_id)) ? 'selected' : ''}">
+                    <td class="select-cell"><input type="checkbox" data-select-task="${escapeHtml(task.task_id || '')}" ${canDownload(task) ? '' : 'disabled'}></td>
                     <td>${escapeHtml(task.task_id || '-')}</td>
                     <td><span class="status-pill">${escapeHtml(task.status || '-')}</span></td>
                     <td>${escapeHtml(task.tool_version || '-')}</td>
@@ -279,6 +312,16 @@
                     </td>
                 </tr>
             `).join('');
+                tbody.querySelectorAll('[data-select-task]').forEach((checkbox) => {
+                    checkbox.addEventListener('change', () => {
+                        const taskId = String(checkbox.getAttribute('data-select-task'));
+                        if (checkbox.checked) selectedTaskIds.add(taskId);
+                        else selectedTaskIds.delete(taskId);
+                        const row = checkbox.closest('tr');
+                        if (row) row.classList.toggle('selected', checkbox.checked);
+                        updateBatchDownloadButton();
+                    });
+                });
             } finally {
                 taskListLoading = false;
                 updatePager();
@@ -419,6 +462,37 @@
             });
         }
 
+        async function batchDownloadTasks(button = null) {
+            const tasks = selectedDownloadableTasks();
+            if (!tasks.length) return;
+            await withButtonBusy(button, '打包中...', async () => {
+                const resp = await fetch('/api/video-enhance/tasks/batch-download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_ids: tasks.map((task) => task.task_id) }),
+                });
+                if (!resp.ok) {
+                    let message = '批量下载失败';
+                    try {
+                        const data = await resp.json();
+                        message = data.error || message;
+                    } catch (error) {}
+                    throw new Error(message);
+                }
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `增强任务批量下载_${new Date().toISOString().slice(0, 10)}.zip`;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(url);
+            }).catch((error) => {
+                alert(error.message || '批量下载失败');
+            });
+        }
+
         async function refreshTask(taskId, button = null) {
             const decodedTaskId = decodeURIComponent(taskId);
             await withButtonBusy(button, '刷新中...', async () => {
@@ -488,6 +562,8 @@
         document.getElementById('startDate').addEventListener('change', () => loadTasks(1));
         document.getElementById('endDate').addEventListener('change', () => loadTasks(1));
         document.getElementById('autoRefresh').addEventListener('change', setupAutoRefresh);
+        document.getElementById('clearSelectionBtn').addEventListener('click', clearTaskSelection);
+        document.getElementById('batchDownloadBtn').addEventListener('click', (event) => batchDownloadTasks(event.currentTarget));
         document.getElementById('prevPageBtn').addEventListener('click', () => {
             if (currentPage > 1) withButtonBusy(document.getElementById('prevPageBtn'), '加载中...', () => loadTasks(currentPage - 1));
         });
