@@ -1,6 +1,7 @@
 (function () {
     const ALL_MENU_KEYS = [
         'index',
+        'image2',
         'batch',
         'records',
         'video_generate',
@@ -70,10 +71,13 @@
     }
 
     function AppSidebar(props) {
+        const context = window.__APP_CONTEXT__ || {};
+        const displayUsername = props.username || context.username || 'user';
         const [menuKeys, setMenuKeys] = React.useState(initialMenuKeys);
         const items = [
             { type: 'group', key: 'group_production', label: '内容生产' },
             { key: 'index', href: '/', icon: '🎨', label: '单图生成' },
+            { key: 'image2', href: '/image2', icon: '🖌️', label: 'Image2 生图' },
             { key: 'batch', href: '/batch', icon: '📦', label: '批量生成' },
             { key: 'records', href: '/records', icon: '🖼️', label: '生图任务' },
             { key: 'video_generate', href: '/video-generate', icon: '🎬', label: '视频生成' },
@@ -139,7 +143,7 @@
                     'div',
                     { className: 'sidebar-nav-user-info' },
                     React.createElement('div', { className: 'sidebar-nav-user-avatar' }, '👤'),
-                    React.createElement('div', { className: 'sidebar-nav-user-name' }, props.username || 'user'),
+                    React.createElement('div', { className: 'sidebar-nav-user-name' }, displayUsername),
                     React.createElement('a', { href: '/logout', className: 'sidebar-nav-logout' }, '登出')
                 ),
                 React.createElement(ProjectSwitcher, props)

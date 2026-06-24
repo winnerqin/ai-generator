@@ -410,6 +410,7 @@ def register_remaining_routes(app: Flask) -> None:
     page_routes = [
         ("/batch", "batch.html", "\u6279\u91cf\u751f\u6210"),
         ("/content-management", "content_management.html", "\u5185\u5bb9\u7ba1\u7406"),
+        ("/image2", "image2.html", "Image2 生图"),
         ("/manage-samples", "manage_samples.html", "\u793a\u4f8b\u56fe\u7ba1\u7406"),
         ("/records", "records.html", "\u751f\u6210\u8bb0\u5f55"),
         ("/script-analysis", "script_analysis.html", "\u5267\u672c\u5206\u6790"),

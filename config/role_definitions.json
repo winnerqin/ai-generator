@@ -4,6 +4,7 @@
     "name": "系统管理员",
     "menu_keys": [
       "index",
+      "image2",
       "batch",
       "records",
       "video_generate",
@@ -28,6 +29,7 @@
     "name": "内部用户",
     "menu_keys": [
       "index",
+      "image2",
       "batch",
       "records",
       "video_generate",
@@ -47,6 +49,7 @@
     "name": "外部用户",
     "menu_keys": [
       "index",
+      "image2",
       "records",
       "omni_video",
       "omni_video_tasks",

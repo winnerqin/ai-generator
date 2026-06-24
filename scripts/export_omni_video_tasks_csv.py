@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import csv
 from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal
+import json
 from pathlib import Path
 import sys
 
@@ -13,11 +15,71 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from db_adapter import connect
+import database
+
+
+def to_cent(value: Decimal) -> int:
+    return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def has_video_reference(reference_urls_json: object) -> bool:
+    if not reference_urls_json:
+        return False
+    urls = reference_urls_json
+    if isinstance(urls, str):
+        try:
+            urls = json.loads(urls)
+        except Exception:
+            return False
+    if not isinstance(urls, list):
+        return False
+
+    video_exts = {".mp4", ".mov", ".webm", ".avi", ".mkv", ".m4v"}
+    return any(Path(str(url or "")).suffix.lower() in video_exts for url in urls)
+
+
+def effective_multiplier(row: dict) -> Decimal:
+    role_code = row.get("role_code") or database.ROLE_EXTERNAL_USER
+    role_multiplier = Decimal(str(database.get_role_pricing_multiplier(role_code) or 1))
+    user_multiplier = Decimal(str(row.get("pricing_multiplier") or 1))
+    return user_multiplier if user_multiplier > 0 else role_multiplier
+
+
+def price_to_cny_cent(price_per_million_token_cent: int, currency_code: str) -> Decimal:
+    value = Decimal(str(price_per_million_token_cent or 0))
+    if (currency_code or "").upper() == database.MODEL_CURRENCY_USD:
+        return value * Decimal(str(database.USD_TO_CNY_RATE))
+    return value
+
+
+def estimate_amount_yuan(row: dict) -> str | None:
+    if row.get("amount_yuan") not in (None, ""):
+        return row.get("amount_yuan")
+    if row.get("token_usage") in (None, "") or not row.get("model"):
+        return None
+
+    pricing = database.resolve_model_pricing(
+        model_code=row.get("model"),
+        resolution=row.get("resolution"),
+        has_video_reference=has_video_reference(row.get("reference_urls_json")),
+    )
+    if not pricing:
+        return None
+
+    multiplier = effective_multiplier(row)
+    tokens_billed = to_cent(Decimal(int(row.get("token_usage") or 0)) * multiplier)
+    price_per_million_cny_cent = price_to_cny_cent(
+        int(pricing.get("price_per_million_token_cent") or 0),
+        str(pricing.get("currency_code") or database.MODEL_CURRENCY_CNY),
+    )
+    unit_price_cent_per_ktoken = price_per_million_cny_cent / Decimal(1000)
+    amount_cent = to_cent((Decimal(tokens_billed) / Decimal(1000)) * unit_price_cent_per_ktoken)
+    return f"{amount_cent / 100:.2f}"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Export omni_video_tasks with token usage and ledger amount to CSV."
+        description="Export omni_video_tasks summary with Chinese headers to CSV."
     )
     parser.add_argument(
         "--output",
@@ -81,25 +143,20 @@ def fetch_rows(
             SELECT
                 t.task_id,
                 t.user_id,
-                t.project_id,
-                t.created_at,
-                t.updated_at,
+                u.username,
+                u.role_code,
+                u.pricing_multiplier,
                 t.status,
                 t.model,
-                t.mode,
-                t.prompt,
+                t.created_at,
                 t.duration,
                 t.resolution,
-                t.aspect_ratio,
+                t.reference_urls_json,
                 t.token_usage,
-                l.amount_cent,
-                ROUND(l.amount_cent / 100.0, 2) AS amount_yuan,
-                l.tokens_raw,
-                l.tokens_billed,
-                l.unit_price_cent_per_ktoken,
-                l.multiplier,
-                l.created_at AS ledger_created_at
+                ROUND(l.amount_cent / 100.0, 2) AS amount_yuan
             FROM omni_video_tasks t
+            LEFT JOIN users u
+                ON u.id = t.user_id
             LEFT JOIN account_ledger l
                 ON l.biz_type = 'omni_video'
                AND l.biz_id = t.task_id
@@ -133,34 +190,23 @@ def fetch_rows(
 
 def write_csv(rows: list[dict], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = [
-        "task_id",
-        "user_id",
-        "project_id",
-        "created_at",
-        "updated_at",
-        "status",
-        "model",
-        "mode",
-        "prompt",
-        "duration",
-        "resolution",
-        "aspect_ratio",
-        "token_usage",
-        "amount_cent",
-        "amount_yuan",
-        "tokens_raw",
-        "tokens_billed",
-        "unit_price_cent_per_ktoken",
-        "multiplier",
-        "ledger_created_at",
+    columns = [
+        ("任务ID", "task_id"),
+        ("用户名", "username"),
+        ("状态", "status"),
+        ("模型", "model"),
+        ("创建时间", "created_at"),
+        ("时长", "duration"),
+        ("token用量", "token_usage"),
+        ("金额", "amount_yuan"),
     ]
 
     with output_path.open("w", newline="", encoding="utf-8-sig") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=[label for label, _ in columns])
         writer.writeheader()
         for row in rows:
-            writer.writerow({key: row.get(key) for key in fieldnames})
+            row["amount_yuan"] = estimate_amount_yuan(row)
+            writer.writerow({label: row.get(key) for label, key in columns})
 
 
 def main() -> int:

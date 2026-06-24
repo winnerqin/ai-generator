@@ -29,6 +29,7 @@ STATUS_DISABLED = "disabled"
 
 MENU_DEFINITIONS = [
     {"key": "index", "label": "单图生成"},
+    {"key": "image2", "label": "Image2 生图"},
     {"key": "batch", "label": "批量生成"},
     {"key": "records", "label": "生图任务"},
     {"key": "video_generate", "label": "视频生成"},
@@ -59,6 +60,7 @@ DEFAULT_ROLE_DEFINITIONS = [
         "name": "内部用户",
         "menu_keys": [
             "index",
+            "image2",
             "batch",
             "records",
             "video_generate",
@@ -80,6 +82,7 @@ DEFAULT_ROLE_DEFINITIONS = [
         "name": "外部用户",
         "menu_keys": [
             "index",
+            "image2",
             "records",
             "omni_video",
             "omni_video_tasks",
