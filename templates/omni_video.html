@@ -18,6 +18,34 @@
         .field { display: grid; gap: 8px; margin-bottom: 14px; }
         .field input, .field select, .field textarea { width: 100%; box-sizing: border-box; }
         .field textarea { min-height: 110px; resize: vertical; }
+        .prompt-editor {
+            width: 100%;
+            min-height: 110px;
+            box-sizing: border-box;
+            resize: vertical;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            outline: none;
+            border: 1px solid rgba(86,111,255,0.28);
+            border-radius: 8px;
+            padding: 10px 12px;
+            background: rgba(255,255,255,0.03);
+            color: inherit;
+        }
+        .prompt-editor:focus { border-color: rgba(86,111,255,0.8); box-shadow: 0 0 0 2px rgba(86,111,255,0.14); }
+        .prompt-editor:empty::before {
+            content: attr(data-placeholder);
+            color: #7480a5;
+        }
+        .prompt-reference {
+            color: #9ed0ff;
+            font-weight: 700;
+            background: rgba(86,111,255,0.16);
+            border-radius: 6px;
+            padding: 0 4px;
+            white-space: nowrap;
+        }
         .filename-field { grid-template-columns: auto minmax(280px, 420px) auto; align-items: center; column-gap: 12px; row-gap: 10px; }
         .filename-field label { white-space: nowrap; }
         .filename-input-wrap { position: relative; min-width: 0; }
@@ -47,7 +75,7 @@
         .pager-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .pager-input { width: 78px; height: 36px; box-sizing: border-box; }
         .selected-list { display: grid; gap: 10px; }
-        .selected-item { display: grid; grid-template-columns: 56px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; background: rgba(86,111,255,0.08); }
+        .selected-item { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; background: rgba(86,111,255,0.08); }
         .selected-item[draggable="true"] { cursor: grab; }
         .selected-item.dragging { opacity: 0.5; }
         .selected-item.drag-over { outline: 1px dashed rgba(158,208,255,0.8); outline-offset: 2px; }
@@ -109,7 +137,7 @@
                 <div class="panel">
                     <div class="field">
                         <label for="prompt">提示词</label>
-                        <textarea id="prompt" placeholder="描述视频内容、镜头运动、风格、节奏和重点主体"></textarea>
+                        <div id="prompt" class="prompt-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="描述视频内容、镜头运动、风格、节奏和重点主体"></div>
                     </div>
 
                     <div class="field filename-field">
@@ -312,6 +340,7 @@
         const libraryPageSize = 20;
         let libraryState = { activeType: null, page: 1, total: 0, items: [], loading: false, search: '' };
         let librarySearchTimer = null;
+        let savedPromptRange = null;
 
         function setButtonBusy(button, busy, busyText = null) {
             if (!button) return;
@@ -367,6 +396,119 @@
 
         function isAssetSelected(asset) {
             return selectedAssets.some((item) => item.url === asset.url);
+        }
+
+        function escapeHtml(value) {
+            return String(value || '').replace(/[&<>"']/g, (char) => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;',
+            }[char]));
+        }
+
+        function getAssetMentionName(asset) {
+            return String(asset?.filename || getAssetLabel(asset) || '参考素材').trim();
+        }
+
+        function getAssetMentionText(asset) {
+            return `@${getAssetMentionName(asset)}`;
+        }
+
+        function getPromptEditor() {
+            return document.getElementById('prompt');
+        }
+
+        function getPromptText() {
+            return getPromptEditor().innerText.trim();
+        }
+
+        function setPromptText(text) {
+            getPromptEditor().textContent = text || '';
+        }
+
+        function placeCaretAfter(node) {
+            const range = document.createRange();
+            range.setStartAfter(node);
+            range.collapse(true);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            savedPromptRange = range.cloneRange();
+        }
+
+        function savePromptSelection() {
+            const editor = getPromptEditor();
+            const selection = window.getSelection();
+            if (!selection || !selection.rangeCount) return;
+            const range = selection.getRangeAt(0);
+            if (editor.contains(range.commonAncestorContainer)) {
+                savedPromptRange = range.cloneRange();
+            }
+        }
+
+        function insertAssetMention(asset) {
+            if (!asset) return;
+            const editor = getPromptEditor();
+            editor.focus();
+
+            const mention = document.createElement('span');
+            mention.className = 'prompt-reference';
+            mention.contentEditable = 'false';
+            mention.dataset.referenceUrl = asset.url || '';
+            mention.dataset.referenceName = getAssetMentionName(asset);
+            mention.textContent = getAssetMentionText(asset);
+
+            const selection = window.getSelection();
+            let range = null;
+            if (selection && selection.rangeCount) {
+                range = selection.getRangeAt(0);
+                if (!editor.contains(range.commonAncestorContainer)) {
+                    range = null;
+                }
+            }
+            if (!range && savedPromptRange && editor.contains(savedPromptRange.commonAncestorContainer)) {
+                range = savedPromptRange.cloneRange();
+            }
+            if (!range) {
+                range = document.createRange();
+                range.selectNodeContents(editor);
+                range.collapse(false);
+            }
+
+            const needsLeadingSpace = editor.innerText && !/\s$/.test(editor.innerText);
+            const fragment = document.createDocumentFragment();
+            if (needsLeadingSpace) fragment.appendChild(document.createTextNode(' '));
+            fragment.appendChild(mention);
+            fragment.appendChild(document.createTextNode(' '));
+            range.deleteContents();
+            range.insertNode(fragment);
+            placeCaretAfter(mention.nextSibling || mention);
+        }
+
+        function removeAssetMention(asset) {
+            const editor = getPromptEditor();
+            const mentionText = getAssetMentionText(asset);
+            editor.querySelectorAll('.prompt-reference').forEach((node) => {
+                if (node.dataset.referenceUrl === asset.url || node.textContent === mentionText) {
+                    const next = node.nextSibling;
+                    if (next && next.nodeType === Node.TEXT_NODE) {
+                        next.textContent = next.textContent.replace(/^\s+/, ' ');
+                    }
+                    node.remove();
+                }
+            });
+            const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+            const textNodes = [];
+            while (walker.nextNode()) textNodes.push(walker.currentNode);
+            textNodes.forEach((node) => {
+                node.textContent = node.textContent.replaceAll(mentionText, '').replace(/[ \t]{2,}/g, ' ');
+            });
+        }
+
+        function removeAllAssetMentions() {
+            getPromptEditor().querySelectorAll('.prompt-reference').forEach((node) => node.remove());
         }
 
         function updateLibrarySelectionState() {
@@ -497,8 +639,9 @@
                 return isVideoAsset(item);
             });
             const index = filtered.findIndex((item) => item.url === asset.url) + 1;
-            if (kind === 'audio') return useEnglish ? `Audio ${index}` : `音频${index}`;
-            return useEnglish ? `Video ${index}` : `视频${index}`;
+            const filename = asset.filename || '';
+            if (kind === 'audio') return useEnglish ? `Audio ${index}${filename ? ' ' + filename : ''}` : `音频${index}${filename ? ' ' + filename : ''}`;
+            return useEnglish ? `Video ${index}${filename ? ' ' + filename : ''}` : `视频${index}${filename ? ' ' + filename : ''}`;
         }
 
         function renderSelectedAssets() {
@@ -511,28 +654,37 @@
             }
 
             container.innerHTML = selectedAssets.map((asset, index) => {
-                let preview = `<img src="${asset.url}" alt="${asset.filename || 'asset'}">`;
+                let preview = `<img src="${escapeHtml(asset.url)}" alt="${escapeHtml(asset.filename || 'asset')}">`;
                 if (isVirtualAvatarAsset(asset)) preview = '<div style="font-size:28px;color:#9ed0ff;">👤</div>';
-                else if (isVideoAsset(asset)) preview = `<video src="${asset.url}" preload="metadata"></video>`;
+                else if (isVideoAsset(asset)) preview = `<video src="${escapeHtml(asset.url)}" preload="metadata"></video>`;
                 else if (isAudioAsset(asset)) preview = '<div style="font-size:28px;">♪</div>';
-                const hintText = isVirtualAvatarAsset(asset) ? `ID: ${asset.filename}` : '双击缩略图可放大预览';
+                const filename = asset.filename || '-';
+                const hintText = isVirtualAvatarAsset(asset) ? `ID: ${filename}` : '双击缩略图可放大预览';
                 return `
                     <div class="selected-item" draggable="true" data-selected-index="${index}">
                         <div class="selected-thumb" data-preview-selected="${index}" title="${isVirtualAvatarAsset(asset) ? '虚拟人像' : '双击放大预览'}">${preview}</div>
                         <div>
-                            <div class="selected-label">${getAssetLabel(asset)}</div>
-                            <div class="small-hint">${hintText}</div>
+                            <div class="selected-label">${escapeHtml(getAssetLabel(asset))}</div>
+                            <div class="small-hint">${escapeHtml(hintText)}</div>
                         </div>
                         <div class="row">
+                            <button class="btn btn-secondary" data-insert="${index}" type="button">插入</button>
                             <button class="btn btn-danger" data-remove="${index}">移除</button>
                         </div>
                     </div>
                 `;
             }).join('');
 
+            container.querySelectorAll('[data-insert]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const asset = selectedAssets[Number(button.getAttribute('data-insert'))];
+                    insertAssetMention(asset);
+                });
+            });
             container.querySelectorAll('[data-remove]').forEach((button) => {
                 button.addEventListener('click', () => {
-                    selectedAssets.splice(Number(button.getAttribute('data-remove')), 1);
+                    const [removed] = selectedAssets.splice(Number(button.getAttribute('data-remove')), 1);
+                    if (removed) removeAssetMention(removed);
                     renderSelectedAssets();
                 });
             });
@@ -596,6 +748,7 @@
         }
 
         function clearSelectedAssets() {
+            removeAllAssetMentions();
             selectedAssets = [];
             try {
                 localStorage.removeItem(selectedAssetsStorageKey);
@@ -609,7 +762,8 @@
             if (!asset || !asset.url) return;
             const existingIndex = selectedAssets.findIndex((item) => item.url === asset.url);
             if (existingIndex >= 0) {
-                selectedAssets.splice(existingIndex, 1);
+                const [removed] = selectedAssets.splice(existingIndex, 1);
+                if (removed) removeAssetMention(removed);
                 renderSelectedAssets();
                 return;
             }
@@ -807,8 +961,11 @@
         function applyPickerSelection() {
             if (!currentPickerType) return;
             const type = currentPickerType;
-            selectedAssets = selectedAssets.filter((asset) => getSelectionKind(asset) !== type);
             const picked = pickerAssets.filter((asset) => tempSelectedIds.has(String(asset.id)));
+            const pickedUrls = new Set(picked.map((asset) => asset.url));
+            const removedAssets = selectedAssets.filter((asset) => getSelectionKind(asset) === type && !pickedUrls.has(asset.url));
+            selectedAssets = selectedAssets.filter((asset) => getSelectionKind(asset) !== type);
+            removedAssets.forEach(removeAssetMention);
             selectedAssets = selectedAssets.concat(picked);
             renderSelectedAssets();
             closePicker();
@@ -918,7 +1075,7 @@
 
             try {
                 const data = JSON.parse(raw);
-                document.getElementById('prompt').value = data.prompt || '';
+                setPromptText(data.prompt || '');
                 document.getElementById('filename').value = data.filename_base || data.filename || '';
                 if (data.model) document.getElementById('model').value = data.model;
                 if (data.resolution) document.getElementById('resolution').value = data.resolution;
@@ -994,7 +1151,7 @@
             const frameCountValue = document.getElementById('frameCount').value.trim();
             const hasFrameCount = frameCountValue && Number(frameCountValue) >= 29 && Number(frameCountValue) <= 289;
             return {
-                prompt: document.getElementById('prompt').value.trim(),
+                prompt: getPromptText(),
                 filename: document.getElementById('filename').value.trim(),
                 model: document.getElementById('model').value,
                 resolution: document.getElementById('resolution').value,
@@ -1059,6 +1216,15 @@
         }
 
         document.getElementById('submitBtn').addEventListener('click', createTask);
+        document.getElementById('prompt').addEventListener('paste', (event) => {
+            event.preventDefault();
+            const text = event.clipboardData?.getData('text/plain') || '';
+            document.execCommand('insertText', false, text);
+            savePromptSelection();
+        });
+        ['keyup', 'mouseup', 'input', 'focus'].forEach((eventName) => {
+            document.getElementById('prompt').addEventListener(eventName, savePromptSelection);
+        });
         document.getElementById('clearSelectedAssetsBtn').addEventListener('click', clearSelectedAssets);
         document.getElementById('uploadBox').dataset.busyTextTarget = '#uploadBoxLabel';
         document.getElementById('uploadBox').addEventListener('click', () => {
