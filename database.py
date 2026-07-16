@@ -200,6 +200,48 @@ def _ensure_model_pricing_columns():
         conn.close()
 
 
+def _ensure_default_model_pricing():
+    default_items = [
+        {
+            "model_code": "doubao-seedance-2-0-mini-260615",
+            "model_name": "Seedance 2.0 Mini",
+            "currency_code": MODEL_CURRENCY_CNY,
+            "resolution_code": "",
+            "reference_video_mode": REFERENCE_VIDEO_MODE_WITH,
+            "price_per_million_token_cent": 1400,
+        },
+        {
+            "model_code": "doubao-seedance-2-0-mini-260615",
+            "model_name": "Seedance 2.0 Mini",
+            "currency_code": MODEL_CURRENCY_CNY,
+            "resolution_code": "",
+            "reference_video_mode": REFERENCE_VIDEO_MODE_WITHOUT,
+            "price_per_million_token_cent": 2300,
+        },
+    ]
+    for item in default_items:
+        conn = connect()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT id FROM model_pricing
+                WHERE model_code = ? AND currency_code = ? AND resolution_code = ? AND reference_video_mode = ?
+            """,
+                (
+                    item["model_code"],
+                    item["currency_code"],
+                    item["resolution_code"],
+                    item["reference_video_mode"],
+                ),
+            )
+            exists = cursor.fetchone()
+        finally:
+            conn.close()
+        if not exists:
+            upsert_model_pricing(**item, enabled=True)
+
+
 def _get_user_table_columns():
     conn = connect()
     cursor = conn.cursor()
@@ -215,6 +257,7 @@ def init_database():
     initialize_mysql_schema()
     _ensure_users_extended_columns()
     _ensure_model_pricing_columns()
+    _ensure_default_model_pricing()
     print("数据库初始化完成: MySQL")
 
 

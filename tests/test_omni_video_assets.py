@@ -19,7 +19,38 @@ def test_build_omni_video_payload_restricts_model_and_resolution():
     assert payload["generate_audio"] is True
 
 
-def test_build_omni_video_payload_rejects_1080p():
+def test_build_omni_video_payload_accepts_mini_model_720p():
+    from app.services.omni_video_service import build_omni_video_payload
+
+    payload = build_omni_video_payload(
+        {
+            "prompt": "demo prompt",
+            "model": "doubao-seedance-2-0-mini-260615",
+            "resolution": "720p",
+            "duration": 4,
+        }
+    )
+
+    assert payload["model"] == "doubao-seedance-2-0-mini-260615"
+    assert payload["resolution"] == "720p"
+
+
+def test_build_omni_video_payload_rejects_mini_1080p():
+    import pytest
+    from app.services.omni_video_service import build_omni_video_payload
+
+    with pytest.raises(ValueError, match="480P.*720P|720P.*480P"):
+        build_omni_video_payload(
+            {
+                "prompt": "demo prompt",
+                "model": "doubao-seedance-2-0-mini-260615",
+                "resolution": "1080p",
+                "duration": 4,
+            }
+        )
+
+
+def test_build_omni_video_payload_rejects_fast_1080p():
     import pytest
     from app.services.omni_video_service import build_omni_video_payload
 
@@ -27,7 +58,7 @@ def test_build_omni_video_payload_rejects_1080p():
         build_omni_video_payload(
             {
                 "prompt": "demo prompt",
-                "model": "doubao-seedance-2-0-260128",
+                "model": "doubao-seedance-2-0-fast-260128",
                 "resolution": "1080p",
                 "duration": 4,
             }

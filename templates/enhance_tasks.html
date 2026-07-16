@@ -42,6 +42,11 @@
         .preview-inner { width: min(860px, 92vw); max-height: 88vh; padding: 18px; border-radius: 16px; background: rgba(8,13,24,0.96); }
         .preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
         .preview-video { width: 100%; max-height: 72vh; border-radius: 12px; background: rgba(0,0,0,0.24); }
+        .upload-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+        .upload-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .form-row { margin-top: 12px; }
+        .form-row label { display: block; margin-bottom: 6px; }
+        .form-row select { width: 100%; padding: 8px; border-radius: 8px; box-sizing: border-box; }
         .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
         .is-busy { opacity: 0.7; cursor: wait; }
         @media (max-width: 980px) {
@@ -62,6 +67,16 @@
         <div class="page-subtitle">将视频画质提升至更高分辨率，支持standard/professional版本，最高支持4K输出。</div>
 
         <div class="panel">
+            <div class="upload-row">
+                <div>
+                    <div style="font-weight:600;">上传本地视频并增强</div>
+                    <div class="small-hint">上传后会自动保存到视频库；如已配置 OSS，会同步保存到 OSS，再选择增强参数创建任务。</div>
+                </div>
+                <div class="upload-actions">
+                    <button id="uploadVideoBtn" class="btn btn-primary">上传视频</button>
+                    <input id="uploadVideoInput" type="file" accept="video/*" style="display:none;">
+                </div>
+            </div>
             <div class="filters">
                 <div>
                     <label for="search">搜索任务</label>
@@ -143,6 +158,35 @@
         </main>
     </div>
 
+    <div id="enhanceModal" class="preview-modal">
+        <div class="preview-inner" style="width:min(500px, 92vw);">
+            <div class="preview-header">
+                <div style="font-weight:600;">画质增强</div>
+                <button id="enhanceModalClose" class="btn btn-secondary">关闭</button>
+            </div>
+            <div style="padding:12px 0;">
+                <div class="small-hint" style="margin-bottom:12px;">原视频：<span id="enhanceSourceFilename"></span></div>
+                <div class="form-row">
+                    <label for="enhanceToolVersion">工具版本</label>
+                    <select id="enhanceToolVersion">
+                        <option value="standard" selected>standard（推荐）</option>
+                        <option value="professional">professional</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label for="enhanceResolution">目标分辨率</label>
+                    <select id="enhanceResolution">
+                        <option value="720p">720p</option>
+                        <option value="1080p" selected>1080p（推荐）</option>
+                        <option value="2k">2K</option>
+                        <option value="4k">4K</option>
+                    </select>
+                </div>
+                <button id="submitEnhanceBtn" class="btn btn-primary" style="width:100%;margin-top:16px;">开始增强</button>
+            </div>
+        </div>
+    </div>
+
     <div id="previewModal" class="preview-modal">
         <div class="preview-inner">
             <div class="preview-header">
@@ -168,6 +212,7 @@
         let autoRefreshTimer = null;
         let taskListLoading = false;
         let selectedTaskIds = new Set();
+        let currentEnhanceAsset = null;
 
         function setButtonBusy(button, busy, busyText = null) {
             if (!button) return;
@@ -240,6 +285,75 @@
         function canDelete(task) {
             const status = String(task.status || '').toLowerCase();
             return !['running'].includes(status);
+        }
+
+        function openEnhanceModal(asset) {
+            if (!asset || !asset.url) {
+                alert('上传结果缺少视频地址，无法创建增强任务');
+                return;
+            }
+            currentEnhanceAsset = asset;
+            document.getElementById('enhanceSourceFilename').textContent = asset.filename || '-';
+            document.getElementById('enhanceToolVersion').value = 'standard';
+            document.getElementById('enhanceResolution').value = '1080p';
+            document.getElementById('enhanceModal').style.display = 'flex';
+        }
+
+        function closeEnhanceModal() {
+            document.getElementById('enhanceModal').style.display = 'none';
+            currentEnhanceAsset = null;
+        }
+
+        async function uploadLocalVideo(file, button = null) {
+            if (!file) return;
+            if (!String(file.type || '').startsWith('video/')) {
+                alert('请选择视频文件');
+                return;
+            }
+            await withButtonBusy(button, '上传中...', async () => {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('type', 'video');
+                const resp = await fetch('/api/upload-media-asset', {
+                    method: 'POST',
+                    body: formData,
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data.success) {
+                    throw new Error(data.error || '视频上传失败');
+                }
+                openEnhanceModal(data.asset);
+            }).catch((error) => {
+                alert(error.message || '视频上传失败');
+            });
+        }
+
+        async function submitEnhance(button = null) {
+            if (!currentEnhanceAsset) return;
+            const toolVersion = document.getElementById('enhanceToolVersion').value;
+            const resolution = document.getElementById('enhanceResolution').value;
+            await withButtonBusy(button, '提交中...', async () => {
+                const resp = await fetch('/api/video-enhance/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        source_video_url: currentEnhanceAsset.url,
+                        source_video_id: currentEnhanceAsset.id,
+                        source_filename: currentEnhanceAsset.filename,
+                        tool_version: toolVersion,
+                        resolution: resolution,
+                    }),
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data.success) {
+                    throw new Error(data.error || '画质增强任务创建失败');
+                }
+                closeEnhanceModal();
+                await loadTasks(1);
+                collapseDetails(`画质增强任务已创建：${data.task_id || '-'}`);
+            }).catch((error) => {
+                alert(error.message || '画质增强任务创建失败');
+            });
         }
 
         function collapseDetails(message = '点击上方任务的"查看"按钮查看详情。') {
@@ -564,6 +678,22 @@
         document.getElementById('autoRefresh').addEventListener('change', setupAutoRefresh);
         document.getElementById('clearSelectionBtn').addEventListener('click', clearTaskSelection);
         document.getElementById('batchDownloadBtn').addEventListener('click', (event) => batchDownloadTasks(event.currentTarget));
+        document.getElementById('uploadVideoBtn').addEventListener('click', () => {
+            document.getElementById('uploadVideoInput').click();
+        });
+        document.getElementById('uploadVideoInput').addEventListener('change', async (event) => {
+            const input = event.currentTarget;
+            try {
+                await uploadLocalVideo((input.files || [])[0], document.getElementById('uploadVideoBtn'));
+            } finally {
+                input.value = '';
+            }
+        });
+        document.getElementById('enhanceModalClose').addEventListener('click', closeEnhanceModal);
+        document.getElementById('enhanceModal').addEventListener('click', (event) => {
+            if (event.target === event.currentTarget) closeEnhanceModal();
+        });
+        document.getElementById('submitEnhanceBtn').addEventListener('click', (event) => submitEnhance(event.currentTarget));
         document.getElementById('prevPageBtn').addEventListener('click', () => {
             if (currentPage > 1) withButtonBusy(document.getElementById('prevPageBtn'), '加载中...', () => loadTasks(currentPage - 1));
         });

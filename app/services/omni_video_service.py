@@ -30,12 +30,14 @@ logger = logging.getLogger(__name__)
 SUPPORTED_OMNI_MODELS = {
     "doubao-seedance-2-0-260128",
     "doubao-seedance-2-0-fast-260128",
+    "doubao-seedance-2-0-mini-260615",
     "dreamina-seedance-2-0-260128",  # 国际版模型
 }
 SUPPORTED_OMNI_RESOLUTIONS_BY_MODEL = {
     "doubao-seedance-2-0-260128": {"480p", "720p", "1080p"},
     "dreamina-seedance-2-0-260128": {"480p", "720p", "1080p"},
     "doubao-seedance-2-0-fast-260128": {"480p", "720p"},
+    "doubao-seedance-2-0-mini-260615": {"480p", "720p"},
 }
 SUPPORTED_OMNI_ASPECT_RATIOS = {"16:9", "9:16", "1:1", "4:3", "3:4"}
 SUCCESS_STATUSES = {"succeeded", "success", "completed", "done", "finished"}

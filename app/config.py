@@ -14,7 +14,7 @@ class Config:
     # ==================== Flask 配置 ====================
     SECRET_KEY: str = "dev-secret-key-change-in-production"
     DEBUG: bool = False
-    MAX_CONTENT_LENGTH: int = 16 * 1024 * 1024  # 16MB
+    MAX_CONTENT_LENGTH: int = 500 * 1024 * 1024  # 500MB
     SESSION_LIFETIME_DAYS: int = 7
 
     # ==================== 目录配置 ====================
@@ -61,9 +61,13 @@ class Config:
     ARK_API_KEY_POOL: str = ""
     ARK_BASE_URL: str = "https://ark.cn-beijing.volces.com/api/v3"
     SEEDANCE_OMNI_MODEL: str = "doubao-seedance-2-0-260128"
-    SEEDANCE_OMNI_MODEL_INTERNAL: str = "doubao-seedance-2-0-260128"
-    SEEDANCE_OMNI_MODEL_EXTERNAL: str = "doubao-seedance-2-0-fast-260128"
-    SEEDANCE_OMNI_MODEL_ALIASES: str = ""
+    SEEDANCE_OMNI_MODEL_INTERNAL: str = (
+        "doubao-seedance-2-0-260128,doubao-seedance-2-0-mini-260615"
+    )
+    SEEDANCE_OMNI_MODEL_EXTERNAL: str = (
+        "doubao-seedance-2-0-fast-260128,doubao-seedance-2-0-mini-260615"
+    )
+    SEEDANCE_OMNI_MODEL_ALIASES: str = "doubao-seedance-2-0-mini-260615=Seedance 2.0 Mini"
     SEEDANCE_OMNI_CREATE_PATH: str = "/contents/generations/tasks"
     SEEDANCE_OMNI_QUERY_PATH: str = "/contents/generations/tasks/{task_id}"
     SEEDANCE_OMNI_LIST_PATH: str = "/contents/generations/tasks"

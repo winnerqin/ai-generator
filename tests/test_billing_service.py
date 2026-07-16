@@ -54,3 +54,66 @@ def test_settle_omni_video_charge_uses_multiplied_actual_tokens(monkeypatch):
     assert entry["tokens_raw"] == 1234
     assert entry["tokens_billed"] == 1851
     assert entry["amount_cent"] == 185
+
+
+def test_settle_omni_video_charge_uses_mini_video_reference_pricing(monkeypatch):
+    created_entries = []
+    pricing_calls = []
+
+    monkeypatch.setattr(
+        billing_service.database,
+        "has_ledger_entry",
+        lambda user_id, entry_type, biz_type, biz_id: False,
+    )
+    monkeypatch.setattr(
+        billing_service.database,
+        "get_user_by_id",
+        lambda user_id: {
+            "id": user_id,
+            "role_code": "external_user",
+            "balance_cent": 10000,
+            "pricing_multiplier": 1.0,
+        },
+    )
+    monkeypatch.setattr(
+        billing_service.database,
+        "get_role_pricing_multiplier",
+        lambda role_code: 1.0,
+    )
+
+    def fake_resolve_model_pricing(**kwargs):
+        pricing_calls.append(kwargs)
+        return {
+            "model_code": kwargs["model_code"],
+            "currency_code": "CNY",
+            "price_per_million_token_cent": 1400
+            if kwargs["has_video_reference"]
+            else 2300,
+            "enabled": 1,
+        }
+
+    monkeypatch.setattr(
+        billing_service.database,
+        "resolve_model_pricing",
+        fake_resolve_model_pricing,
+    )
+    monkeypatch.setattr(
+        billing_service.database,
+        "create_account_ledger_entry",
+        lambda **kwargs: created_entries.append(kwargs),
+    )
+
+    billing_service.settle_omni_video_charge(
+        {
+            "task_id": "task-mini-1",
+            "user_id": 10,
+            "model": "doubao-seedance-2-0-mini-260615",
+            "token_usage": 1000000,
+            "resolution": "720p",
+            "reference_urls_json": ["https://example.com/ref.mp4"],
+        }
+    )
+
+    assert pricing_calls[0]["has_video_reference"] is True
+    assert created_entries[0]["amount_cent"] == 1400
+    assert created_entries[0]["snapshot_json"]["price_per_million_token_cent"] == 1400
