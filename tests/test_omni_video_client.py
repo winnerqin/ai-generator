@@ -66,6 +66,42 @@ def test_get_task_uses_explicit_slot(monkeypatch):
     assert captured["authorization"] == "Bearer key-b"
 
 
+def test_create_task_normalizes_international_model_display_suffix(monkeypatch):
+    client_module = importlib.import_module("app.services.omni_video_client")
+    monkeypatch.setattr(client_module.config, "ARK_INTL_API_KEY", "intl-key")
+    monkeypatch.setattr(client_module.config, "ARK_INTL_API_KEY_POOL", "intl-key")
+    monkeypatch.setattr(client_module.config, "ARK_INTL_BASE_URL", "https://intl.example.com")
+    monkeypatch.setattr(
+        client_module.config,
+        "SEEDANCE_INTL_MODEL",
+        "dreamina-seedance-2-0-260128",
+    )
+    client = client_module.OmniVideoClient()
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        headers = {}
+        text = "{}"
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"task_id": "task-intl"}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["url"] = url
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr(client_module.requests, "post", fake_post)
+    client.create_task({"model": "dreamina-seedance-2-0-260128国际版", "prompt": "demo"})
+
+    assert captured["url"] == "https://intl.example.com/contents/generations/tasks"
+    assert captured["payload"]["model"] == "dreamina-seedance-2-0-260128"
+
+
 def test_create_task_timeout_raises_friendly_error(monkeypatch):
     client_module = importlib.import_module("app.services.omni_video_client")
     client = client_module.OmniVideoClient()

@@ -22,6 +22,19 @@ def is_intl_model(model: str) -> bool:
     return model.startswith(INTL_MODEL_PREFIX) if model else False
 
 
+def normalize_upstream_model(model: str | None, intl_model: str | None = None) -> str | None:
+    """Return the real upstream model id, never a UI label."""
+    if not model:
+        return model
+    normalized = model.strip()
+    if is_intl_model(normalized):
+        configured = (intl_model or "").strip().removesuffix("国际版").strip()
+        if is_intl_model(configured):
+            return configured
+        return normalized.removesuffix("国际版").strip()
+    return normalized
+
+
 class OmniVideoClient:
     """Thin wrapper around the remote Seedance omni video endpoints."""
 
@@ -179,7 +192,10 @@ class OmniVideoClient:
         route_key: str | None = None,
         slot: int | None = None,
     ) -> dict[str, Any]:
-        model = payload.get("model")
+        payload = dict(payload)
+        model = normalize_upstream_model(payload.get("model"), self.intl_model)
+        if model:
+            payload["model"] = model
         url = self._url(self.create_path, model=model, route_key=route_key, slot=slot)
         headers = self._headers(model=model, route_key=route_key, slot=slot)
         timeout = (15, 180)
