@@ -12,9 +12,86 @@ from flask import Blueprint, current_app, jsonify, render_template, request, sen
 
 import database
 from app.decorators import handle_api_error, login_required
-from app.services import file_upload_service, oss_service
+from app.services import ArkAssetError, ark_asset_service, file_upload_service, oss_service
 
 content_bp = Blueprint("content", __name__)
+
+
+def _ark_error_response(exc: ArkAssetError):
+    return jsonify({"success": False, "error": str(exc), "code": exc.code}), exc.status_code
+
+
+def _required_text(payload: dict, key: str, label: str, max_length: int = 200) -> str:
+    value = str(payload.get(key) or "").strip()
+    if not value:
+        raise ValueError(f"{label}不能为空")
+    if len(value) > max_length:
+        raise ValueError(f"{label}不能超过{max_length}个字符")
+    return value
+
+
+def _ark_list_payload() -> tuple[dict, int, int]:
+    def safe_int(value, default):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    page = max(1, safe_int(request.args.get("page"), 1))
+    page_size = max(1, min(100, safe_int(request.args.get("page_size"), 20)))
+    payload = {
+        "Filter": {"GroupType": "AIGC"},
+        "PageNumber": page,
+        "PageSize": page_size,
+        "ProjectName": "default",
+    }
+    keyword = (request.args.get("search") or "").strip()
+    if keyword:
+        payload["Filter"]["Name"] = keyword
+    return payload, page, page_size
+
+
+def _ark_items(result: dict, *keys: str) -> list[dict]:
+    for key in keys:
+        value = result.get(key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
+def _validate_virtual_asset_upload(upload, asset_type: str) -> None:
+    rules = {
+        "Image": ({".jpg", ".jpeg", ".png", ".webp", ".gif"}, 30 * 1024 * 1024),
+        "Video": ({".mp4", ".mov"}, 50 * 1024 * 1024),
+        "Audio": ({".mp3", ".wav"}, 15 * 1024 * 1024),
+    }
+    extensions, max_size = rules[asset_type]
+    suffix = Path(upload.filename or "").suffix.lower()
+    if suffix not in extensions:
+        raise ValueError(f"不支持的{asset_type}文件格式")
+    stream = upload.stream
+    position = stream.tell()
+    stream.seek(0, 2)
+    size = stream.tell()
+    stream.seek(position)
+    if size <= 0:
+        raise ValueError("上传文件不能为空")
+    if size > max_size:
+        raise ValueError(f"上传文件超过限制（最大 {max_size // 1024 // 1024}MB）")
+
+
+def _ark_list_response(result: dict, items: list[dict], page: int, page_size: int):
+    total = result.get("TotalCount", result.get("Total", len(items)))
+    return jsonify(
+        {
+            "success": True,
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "next_page_token": result.get("NextPageToken") or result.get("NextToken"),
+        }
+    )
 
 
 def _current_user_context() -> dict[str, object]:
@@ -253,6 +330,135 @@ def _read_asset_bytes(asset: dict) -> tuple[bytes, str] | tuple[None, str]:
 @login_required
 def content_management_page():
     return render_template("content_management.html", user=_current_user_context())
+
+
+@content_bp.route("/api/virtual-asset-groups", methods=["GET", "POST"])
+@login_required
+def virtual_asset_groups():
+    try:
+        if request.method == "GET":
+            payload, page, page_size = _ark_list_payload()
+            result = ark_asset_service.list_asset_groups(payload)
+            items = _ark_items(result, "AssetGroups", "Items", "asset_groups", "items")
+            return _ark_list_response(result, items, page, page_size)
+
+        data = request.get_json(silent=True) or {}
+        payload = {
+            "Name": _required_text(data, "name", "组合名称"),
+            "Description": str(data.get("description") or "").strip(),
+            "GroupType": "AIGC",
+            "ProjectName": "default",
+        }
+        return jsonify({"success": True, "item": ark_asset_service.create_asset_group(payload)})
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc), "code": "INVALID_ARGUMENT"}), 400
+    except ArkAssetError as exc:
+        return _ark_error_response(exc)
+
+
+@content_bp.route("/api/virtual-asset-groups/<group_id>", methods=["PUT", "DELETE"])
+@login_required
+def virtual_asset_group_detail(group_id: str):
+    try:
+        group_id = _required_text({"id": group_id}, "id", "组合ID", 200)
+        if request.method == "DELETE":
+            result = ark_asset_service.delete_asset_group({"Id": group_id})
+        else:
+            data = request.get_json(silent=True) or {}
+            result = ark_asset_service.update_asset_group(
+                {
+                    "Id": group_id,
+                    "Name": _required_text(data, "name", "组合名称"),
+                    "Description": str(data.get("description") or "").strip(),
+                }
+            )
+        return jsonify({"success": True, "item": result})
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc), "code": "INVALID_ARGUMENT"}), 400
+    except ArkAssetError as exc:
+        return _ark_error_response(exc)
+
+
+@content_bp.route("/api/virtual-assets", methods=["GET", "POST"])
+@login_required
+def virtual_assets():
+    try:
+        if request.method == "GET":
+            payload, page, page_size = _ark_list_payload()
+            group_id = (request.args.get("group_id") or "").strip()
+            if group_id:
+                payload["Filter"]["GroupIds"] = [group_id]
+            result = ark_asset_service.list_assets(payload)
+            items = _ark_items(result, "Assets", "Items", "assets", "items")
+            return _ark_list_response(result, items, page, page_size)
+
+        data = request.form
+        group_id = _required_text(data, "group_id", "组合ID")
+        name = _required_text(data, "name", "资产名称", 64)
+        description = str(data.get("description") or "").strip()
+        if len(description) > 256:
+            raise ValueError("资产描述不能超过256个字符")
+        asset_type = str(data.get("asset_type") or "").strip().capitalize()
+        if asset_type not in {"Image", "Video", "Audio"}:
+            raise ValueError("资产类型仅支持图片、视频或音频")
+
+        upload = request.files.get("file")
+        if not upload:
+            raise ValueError("请选择需要创建为资产的文件")
+        _validate_virtual_asset_upload(upload, asset_type)
+        type_name = asset_type.lower()
+        success, uploaded_url, error = file_upload_service.save_uploaded_file(
+            upload,
+            user_id=session.get("user_id"),
+            project_id=session.get("current_project_id"),
+            subfolder="virtual_assets",
+            file_type=type_name,
+            upload_to_oss=True,
+        )
+        if not success:
+            raise ValueError(error or "文件上传失败")
+        source_url = str(uploaded_url or "")
+        if not source_url.startswith(("http://", "https://")):
+            raise ValueError("创建虚拟资产需要先配置可公网访问的 OSS")
+
+        result = ark_asset_service.create_asset(
+            {
+                "GroupId": group_id,
+                "Name": name,
+                "Description": description,
+                "AssetType": asset_type,
+                "URL": source_url,
+                "ProjectName": "default",
+            }
+        )
+        return jsonify({"success": True, "item": result})
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc), "code": "INVALID_ARGUMENT"}), 400
+    except ArkAssetError as exc:
+        return _ark_error_response(exc)
+
+
+@content_bp.route("/api/virtual-assets/<asset_id>", methods=["PUT", "DELETE"])
+@login_required
+def virtual_asset_detail(asset_id: str):
+    try:
+        asset_id = _required_text({"id": asset_id}, "id", "资产ID", 200)
+        if request.method == "DELETE":
+            result = ark_asset_service.delete_asset({"Id": asset_id})
+        else:
+            data = request.get_json(silent=True) or {}
+            result = ark_asset_service.update_asset(
+                {
+                    "Id": asset_id,
+                    "Name": _required_text(data, "name", "资产名称"),
+                    "Description": str(data.get("description") or "").strip(),
+                }
+            )
+        return jsonify({"success": True, "item": result})
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc), "code": "INVALID_ARGUMENT"}), 400
+    except ArkAssetError as exc:
+        return _ark_error_response(exc)
 
 
 @content_bp.route("/manage-samples")

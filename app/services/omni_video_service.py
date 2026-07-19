@@ -74,7 +74,15 @@ def _to_cent(value: Decimal) -> int:
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-def _has_video_reference_urls(reference_urls: list[str] | None) -> bool:
+def _has_video_reference_urls(
+    reference_urls: list[str] | None,
+    reference_assets: list[dict[str, Any]] | None = None,
+) -> bool:
+    if any(
+        isinstance(item, dict) and str(item.get("type") or "").strip().lower() == "video"
+        for item in (reference_assets or [])
+    ):
+        return True
     if not reference_urls:
         return False
     video_exts = {".mp4", ".mov", ".webm", ".avi", ".mkv", ".m4v"}
@@ -212,9 +220,13 @@ def _get_supported_omni_models() -> set[str]:
     return set(SUPPORTED_OMNI_MODELS) | configured
 
 
-def _content_item_for_url(url: str) -> dict[str, Any]:
+def _content_item_for_url(url: str, reference_type: str | None = None) -> dict[str, Any]:
     # 虚拟人像URL格式: asset://asset-xxx
     if url.startswith("asset://"):
+        if reference_type == "video":
+            return {"type": "video_url", "role": "reference_video", "video_url": {"url": url}}
+        if reference_type == "audio":
+            return {"type": "audio_url", "role": "reference_audio", "audio_url": {"url": url}}
         return {"type": "image_url", "role": "reference_image", "image_url": {"url": url}}
     lower = url.lower()
     if any(lower.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")):
@@ -229,6 +241,7 @@ def _content_item_for_url(url: str) -> dict[str, Any]:
 def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
     """Map local form fields into an omni-reference request payload."""
 
+    raw_reference_urls = _normalize_reference_urls(data.get("reference_urls"))
     reference_urls = [
         _resolve_reference_url(
             url,
@@ -236,8 +249,21 @@ def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
             project_id=data.get("_project_id"),
             public_origin=(data.get("_public_origin") or "").strip() or None,
         )
-        for url in _normalize_reference_urls(data.get("reference_urls"))
+        for url in raw_reference_urls
     ]
+    allowed_reference_types = {"image", "video", "audio", "virtual_avatar"}
+    raw_reference_types = {
+        str(item.get("url") or "").strip(): str(item.get("type") or "").strip().lower()
+        for item in (data.get("reference_assets") or [])
+        if isinstance(item, dict)
+        and str(item.get("url") or "").strip()
+        and str(item.get("type") or "").strip().lower() in allowed_reference_types
+    }
+    reference_types = {
+        resolved_url: raw_reference_types.get(raw_url)
+        for raw_url, resolved_url in zip(raw_reference_urls, reference_urls)
+        if raw_reference_types.get(raw_url)
+    }
     model = (data.get("model") or config.SEEDANCE_OMNI_MODEL or "").strip()
     resolution = str(data.get("resolution") or "720p").strip().lower()
     aspect_ratio = str(data.get("aspect_ratio") or data.get("ratio") or "16:9").strip()
@@ -283,6 +309,11 @@ def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
         "seed": data.get("seed"),
         "generate_audio": _coerce_bool(data.get("generate_audio"), default=True),
         "reference_urls": reference_urls,
+        "reference_assets": [
+            {"url": url, "type": reference_types[url]}
+            for url in reference_urls
+            if url in reference_types
+        ],
         "filename": _normalize_filename(data.get("filename")),
     }
 
@@ -290,7 +321,7 @@ def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
     if payload["prompt"]:
         content.append({"type": "text", "text": payload["prompt"]})
     for url in reference_urls:
-        content.append(_content_item_for_url(url))
+        content.append(_content_item_for_url(url, reference_types.get(url)))
     payload["content"] = content
     return payload
 
@@ -633,7 +664,8 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
                     model_code=candidate,
                     resolution=task.get("resolution"),
                     has_video_reference=_has_video_reference_urls(
-                        task.get("reference_urls_json") or []
+                        task.get("reference_urls_json") or [],
+                        (task.get("input_payload_json") or {}).get("reference_assets") or [],
                     ),
                 )
                 if pricing:

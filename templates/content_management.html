@@ -39,6 +39,22 @@
         .pager-input { width: 78px; height: 36px; box-sizing: border-box; }
         .empty-hint { color: #9ca8cf; }
         .small-hint { color: #9ca8cf; font-size: 0.82rem; }
+        .virtual-layout { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 320px 1fr; gap: 16px; }
+        .virtual-pane { min-height: 0; display: flex; flex-direction: column; }
+        .virtual-list { overflow-y: auto; display: grid; gap: 8px; margin-top: 12px; }
+        .virtual-group { text-align: left; padding: 10px; border: 1px solid rgba(86,111,255,.2); border-radius: 10px; background: rgba(255,255,255,.02); color: inherit; cursor: pointer; }
+        .virtual-group.active { border-color: #667cff; background: rgba(86,111,255,.18); }
+        .virtual-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+        .virtual-form .wide { grid-column: 1 / -1; }
+        .virtual-assets { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 2px 6px 24px 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-auto-rows: max-content; gap: 12px; align-content: start; }
+        .virtual-asset { min-width: 0; width: 100%; display: flex; flex-direction: column; border: 1px solid rgba(86,111,255,.3); border-radius: 14px; overflow: hidden; background: #111827; }
+        .virtual-asset-preview { position: relative; flex: 0 0 150px; height: 150px; min-height: 150px; overflow: hidden; display: grid; place-items: center; background: #0b1220; cursor: pointer; }
+        .virtual-asset-preview:hover { background: rgba(86,111,255,.12); }
+        .virtual-thumb { position: absolute; inset: 0; width: 100% !important; height: 100% !important; max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+        .virtual-type-icon { position: relative; z-index: 1; font-size: 48px; }
+        .virtual-asset-info { position: relative; z-index: 2; flex: 0 0 auto; min-height: 126px; box-sizing: border-box; padding: 12px; display: grid; gap: 7px; border-top: 1px solid rgba(86,111,255,.22); background: #111827; color: #e8ecff; overflow-wrap: anywhere; word-break: break-word; }
+        .virtual-asset-name { white-space: normal; overflow: visible; overflow-wrap: anywhere; word-break: break-word; }
+        .virtual-asset-info .small-hint { white-space: normal; overflow-wrap: anywhere; word-break: break-all; }
         .preview-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.88); display: none; align-items: center; justify-content: center; z-index: 2000; }
         .preview-inner { position: relative; width: min(960px, 92vw); max-height: 88vh; padding: 18px; border-radius: 16px; background: rgba(8,13,24,0.95); }
         .preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -81,7 +97,10 @@
         }
         @media (max-width: 900px) {
             .toolbar { grid-template-columns: 1fr; }
+            .virtual-layout { grid-template-columns: 1fr; overflow-y: auto; }
         }
+        @media (max-width: 900px) { .virtual-assets { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 560px) { .virtual-assets { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body class="react-theme sidebar-compact">
@@ -97,7 +116,7 @@
                     <div class="tabs" id="tabBar"></div>
                 </div>
 
-                <div class="panel">
+                <div class="panel" id="standardToolbar">
                     <div class="toolbar">
                         <div>
                             <label for="searchInput">搜索素材</label>
@@ -113,7 +132,7 @@
                     <input id="uploadInput" type="file" multiple style="display:none;">
                 </div>
 
-                <div class="panel asset-list-panel">
+                <div class="panel asset-list-panel" id="standardAssets">
                     <div class="asset-list-header">
                         <div id="pagerInfo" class="small-hint">第 1 页</div>
                         <div class="pager">
@@ -128,8 +147,44 @@
                         <div id="assetGrid" class="asset-grid"></div>
                     </div>
                 </div>
+
+                <div class="virtual-layout" id="virtualAssetsView" style="display:none;">
+                    <section class="panel virtual-pane">
+                        <div class="asset-list-header"><strong>资产组合</strong><button class="btn btn-primary" id="createVirtualGroupBtn">新建组合</button></div>
+                        <input id="virtualGroupSearch" placeholder="搜索资产组合">
+                        <div class="virtual-list" id="virtualGroupList"></div>
+                    </section>
+                    <section class="panel virtual-pane">
+                        <div class="asset-list-header">
+                            <div><strong id="virtualAssetTitle">请选择资产组合</strong><div class="small-hint" id="virtualAssetGroupMeta"></div></div>
+                            <div class="toolbar-actions">
+                                <button class="btn btn-primary" id="openVirtualAssetCreateBtn" disabled>创建资产</button>
+                                <button class="btn btn-secondary" id="editVirtualGroupBtn" disabled>编辑组合</button>
+                                <button class="btn btn-danger" id="deleteVirtualGroupBtn" disabled>删除组合</button>
+                            </div>
+                        </div>
+                        <div class="asset-list-header"><span class="small-hint" id="virtualAssetPager"></span><button class="btn btn-secondary" id="refreshVirtualAssetsBtn">刷新</button></div>
+                        <div class="virtual-assets" id="virtualAssetList"></div>
+                    </section>
+                </div>
             </div>
         </main>
+    </div>
+
+    <div id="virtualAssetCreateModal" class="preview-modal" style="display:none;">
+        <div class="preview-inner" style="width:min(560px, 92vw);">
+            <div class="preview-header">
+                <strong>创建资产</strong>
+                <button class="btn btn-secondary" id="closeVirtualAssetCreateBtn">关闭</button>
+            </div>
+            <form id="virtualAssetForm" class="virtual-form">
+                <div><label>资产名称</label><input name="name" maxlength="64" required placeholder="请输入资产名称"></div>
+                <div><label>类型</label><select name="asset_type" required><option value="Image">图片</option><option value="Video">视频</option><option value="Audio">音乐</option></select></div>
+                <div class="wide"><label>描述</label><input name="description" maxlength="256" placeholder="请输入资产描述（可选）"></div>
+                <div class="wide"><label>选择文件</label><input name="file" type="file" accept="image/*,video/*,audio/*" required></div>
+                <button class="btn btn-primary wide" type="submit">确认创建</button>
+            </form>
+        </div>
     </div>
 
     <div id="previewModal" class="preview-modal">
@@ -186,6 +241,7 @@
             { key: 'media', label: '音/视频素材' },
             { key: 'image', label: '图片库' },
             { key: 'video', label: '视频库' },
+            { key: 'virtual_asset', label: '虚拟资产' },
         ];
 
         let currentTab = 'video';
@@ -247,6 +303,7 @@
                     currentTab = button.getAttribute('data-tab');
                     currentPage = 1;
                     renderTabs();
+                    updateContentMode();
                     updateUploadAccept();
                     await loadAssets();
                 }));
@@ -448,6 +505,10 @@
         }
 
         async function loadAssets(page = currentPage) {
+            if (currentTab === 'virtual_asset') {
+                await loadVirtualGroups();
+                return;
+            }
             if (assetListLoading) return;
             assetListLoading = true;
             currentPage = Math.max(1, page);
@@ -742,6 +803,221 @@
             if (event.key === 'ArrowRight') navigatePreview(1);
         });
 
+        // 火山方舟虚拟资产
+        let virtualGroups = [];
+        let selectedVirtualGroup = null;
+        let virtualAssetItems = [];
+
+        function updateContentMode() {
+            const virtual = currentTab === 'virtual_asset';
+            document.getElementById('standardToolbar').style.display = virtual ? 'none' : '';
+            document.getElementById('standardAssets').style.display = virtual ? 'none' : '';
+            document.getElementById('virtualAssetsView').style.display = virtual ? 'grid' : 'none';
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>'"]/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+        }
+
+        function field(item, ...names) {
+            for (const name of names) if (item?.[name] != null) return item[name];
+            return '';
+        }
+
+        function virtualGroupId(item) { return String(field(item, 'GroupId', 'AssetGroupId', 'Id', 'group_id', 'id')); }
+        function virtualAssetId(item) { return String(field(item, 'AssetId', 'Id', 'asset_id', 'id')); }
+
+        async function jsonRequest(url, options = {}) {
+            const resp = await fetch(url, options);
+            let data = {};
+            try { data = await resp.json(); } catch (_) {}
+            if (!resp.ok || !data.success) throw new Error(data.error || `请求失败（${resp.status}）`);
+            return data;
+        }
+
+        async function loadVirtualGroups() {
+            const list = document.getElementById('virtualGroupList');
+            list.innerHTML = '<div class="empty-hint">加载中...</div>';
+            const params = new URLSearchParams({page: '1', page_size: '100'});
+            const search = document.getElementById('virtualGroupSearch').value.trim();
+            if (search) params.set('search', search);
+            try {
+                const data = await jsonRequest(`/api/virtual-asset-groups?${params}`);
+                virtualGroups = data.items || [];
+                if (selectedVirtualGroup) {
+                    const id = virtualGroupId(selectedVirtualGroup);
+                    selectedVirtualGroup = virtualGroups.find((item) => virtualGroupId(item) === id) || null;
+                }
+                renderVirtualGroups();
+                if (selectedVirtualGroup) await loadVirtualAssets();
+                else renderVirtualAssetPane();
+            } catch (error) {
+                list.innerHTML = `<div class="empty-hint">${escapeHtml(error.message)}</div>`;
+                renderVirtualAssetPane(error.message);
+            }
+        }
+
+        function renderVirtualGroups() {
+            const list = document.getElementById('virtualGroupList');
+            if (!virtualGroups.length) {
+                list.innerHTML = '<div class="empty-hint">暂无资产组合</div>';
+                return;
+            }
+            list.innerHTML = virtualGroups.map((group) => {
+                const id = virtualGroupId(group);
+                const name = field(group, 'Name', 'GroupName', 'name') || id;
+                const active = selectedVirtualGroup && virtualGroupId(selectedVirtualGroup) === id;
+                return `<button class="virtual-group ${active ? 'active' : ''}" data-group-id="${escapeHtml(id)}"><strong>${escapeHtml(name)}</strong><div class="small-hint">${escapeHtml(id)}</div></button>`;
+            }).join('');
+            list.querySelectorAll('[data-group-id]').forEach((button) => button.addEventListener('click', async () => {
+                selectedVirtualGroup = virtualGroups.find((item) => virtualGroupId(item) === button.dataset.groupId) || null;
+                renderVirtualGroups();
+                renderVirtualAssetPane();
+                await loadVirtualAssets();
+            }));
+        }
+
+        function renderVirtualAssetPane(error = '') {
+            const selected = Boolean(selectedVirtualGroup);
+            const id = selected ? virtualGroupId(selectedVirtualGroup) : '';
+            const name = selected ? (field(selectedVirtualGroup, 'Name', 'GroupName', 'name') || id) : '请选择资产组合';
+            document.getElementById('virtualAssetTitle').textContent = name;
+            document.getElementById('virtualAssetGroupMeta').textContent = selected ? id : (error || '');
+            document.getElementById('openVirtualAssetCreateBtn').disabled = !selected;
+            document.getElementById('editVirtualGroupBtn').disabled = !selected;
+            document.getElementById('deleteVirtualGroupBtn').disabled = !selected;
+            if (!selected) document.getElementById('virtualAssetList').innerHTML = '<div class="empty-hint">请先创建或选择资产组合</div>';
+        }
+
+        async function loadVirtualAssets() {
+            if (!selectedVirtualGroup) return;
+            const list = document.getElementById('virtualAssetList');
+            list.innerHTML = '<div class="empty-hint">加载中...</div>';
+            const params = new URLSearchParams({group_id: virtualGroupId(selectedVirtualGroup), page: '1', page_size: '100'});
+            try {
+                const data = await jsonRequest(`/api/virtual-assets?${params}`);
+                const items = data.items || [];
+                virtualAssetItems = items;
+                document.getElementById('virtualAssetPager').textContent = `共 ${Number(data.total || items.length)} 项`;
+                if (!items.length) { list.innerHTML = '<div class="empty-hint">该组合暂无资产</div>'; return; }
+                list.innerHTML = items.map((asset) => {
+                    const id = virtualAssetId(asset);
+                    const name = field(asset, 'Name', 'AssetName', 'name') || id;
+                    const type = field(asset, 'AssetType', 'Type', 'asset_type', 'type');
+                    const status = field(asset, 'Status', 'status') || '-';
+                    const url = field(asset, 'URL', 'Url', 'url');
+                    const typeKey = String(type).toLowerCase();
+                    const typeLabel = {image:'图片', audio:'音乐', video:'视频'}[typeKey] || type || '-';
+                    const thumb = typeKey === 'image' && url
+                        ? `<img class="virtual-thumb" src="${escapeHtml(url)}" alt="">`
+                        : typeKey === 'video' && url
+                            ? `<video class="virtual-thumb" src="${escapeHtml(url)}" preload="metadata" muted></video>`
+                            : `<div class="virtual-type-icon">${typeKey === 'audio' ? '🎵' : typeKey === 'video' ? '🎬' : '🖼️'}</div>`;
+                    return `<article class="virtual-asset"><div class="virtual-asset-preview" data-preview-virtual="${escapeHtml(id)}">${thumb}</div><div class="virtual-asset-info"><strong class="virtual-asset-name" title="${escapeHtml(name)}">${escapeHtml(name)}</strong><div class="small-hint">资产号：${escapeHtml(id)}</div><div class="asset-meta-line"><span>类型：${escapeHtml(typeLabel)}</span><span>${escapeHtml(status)}</span></div><div class="asset-actions"><button class="btn btn-secondary" data-edit-asset="${escapeHtml(id)}">编辑</button><button class="btn btn-danger" data-delete-asset="${escapeHtml(id)}">删除</button></div></div></article>`;
+                }).join('');
+                list.querySelectorAll('[data-preview-virtual]').forEach((preview) => preview.addEventListener('click', () => openVirtualAssetPreview(preview.dataset.previewVirtual)));
+                list.querySelectorAll('[data-edit-asset]').forEach((button) => button.addEventListener('click', () => editVirtualAsset(button.dataset.editAsset, items)));
+                list.querySelectorAll('[data-delete-asset]').forEach((button) => button.addEventListener('click', () => deleteVirtualAsset(button.dataset.deleteAsset)));
+            } catch (error) {
+                list.innerHTML = `<div class="empty-hint">${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        function openVirtualAssetPreview(id) {
+            const asset = virtualAssetItems.find((item) => virtualAssetId(item) === id);
+            if (!asset) return;
+            const url = field(asset, 'URL', 'Url', 'url');
+            if (!url) { alert('该资产尚在处理中，暂时无法预览'); return; }
+            previewAssets = virtualAssetItems
+                .filter((item) => field(item, 'URL', 'Url', 'url'))
+                .map((item) => ({
+                    id: virtualAssetId(item),
+                    filename: field(item, 'Name', 'AssetName', 'name') || virtualAssetId(item),
+                    type: String(field(item, 'AssetType', 'Type', 'asset_type', 'type')).toLowerCase(),
+                    url: field(item, 'URL', 'Url', 'url'),
+                    meta: {},
+                }));
+            openPreview(id);
+        }
+
+        function openVirtualAssetCreateModal() {
+            if (!selectedVirtualGroup) return;
+            const form = document.getElementById('virtualAssetForm');
+            form.reset();
+            document.getElementById('virtualAssetCreateModal').style.display = 'flex';
+        }
+
+        function closeVirtualAssetCreateModal() {
+            document.getElementById('virtualAssetCreateModal').style.display = 'none';
+        }
+
+        async function createVirtualGroup() {
+            const name = prompt('资产组合名称');
+            if (!name?.trim()) return;
+            const description = prompt('资产组合描述（可选）') || '';
+            await jsonRequest('/api/virtual-asset-groups', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name.trim(), description})});
+            await loadVirtualGroups();
+        }
+
+        async function editVirtualGroup() {
+            if (!selectedVirtualGroup) return;
+            const currentName = field(selectedVirtualGroup, 'Name', 'GroupName', 'name');
+            const name = prompt('资产组合名称', currentName);
+            if (!name?.trim()) return;
+            const description = prompt('资产组合描述', field(selectedVirtualGroup, 'Description', 'description')) || '';
+            await jsonRequest(`/api/virtual-asset-groups/${encodeURIComponent(virtualGroupId(selectedVirtualGroup))}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name.trim(), description})});
+            await loadVirtualGroups();
+        }
+
+        async function deleteVirtualGroup() {
+            if (!selectedVirtualGroup || !confirm('确定删除该资产组合？非空组合可能被火山方舟拒绝删除。')) return;
+            await jsonRequest(`/api/virtual-asset-groups/${encodeURIComponent(virtualGroupId(selectedVirtualGroup))}`, {method:'DELETE'});
+            selectedVirtualGroup = null;
+            await loadVirtualGroups();
+        }
+
+        async function editVirtualAsset(id, items) {
+            const item = items.find((value) => virtualAssetId(value) === id) || {};
+            const name = prompt('资产名称', field(item, 'Name', 'AssetName', 'name'));
+            if (!name?.trim()) return;
+            const description = prompt('资产描述', field(item, 'Description', 'description')) || '';
+            await jsonRequest(`/api/virtual-assets/${encodeURIComponent(id)}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name.trim(), description})});
+            await loadVirtualAssets();
+        }
+
+        async function deleteVirtualAsset(id) {
+            if (!confirm('确定删除该虚拟资产？此操作不可撤销。')) return;
+            await jsonRequest(`/api/virtual-assets/${encodeURIComponent(id)}`, {method:'DELETE'});
+            await loadVirtualAssets();
+        }
+
+        document.getElementById('createVirtualGroupBtn').addEventListener('click', () => createVirtualGroup().catch((error) => alert(error.message)));
+        document.getElementById('openVirtualAssetCreateBtn').addEventListener('click', openVirtualAssetCreateModal);
+        document.getElementById('closeVirtualAssetCreateBtn').addEventListener('click', closeVirtualAssetCreateModal);
+        document.getElementById('virtualAssetCreateModal').addEventListener('click', (event) => { if (event.target === event.currentTarget) closeVirtualAssetCreateModal(); });
+        document.getElementById('editVirtualGroupBtn').addEventListener('click', () => editVirtualGroup().catch((error) => alert(error.message)));
+        document.getElementById('deleteVirtualGroupBtn').addEventListener('click', () => deleteVirtualGroup().catch((error) => alert(error.message)));
+        document.getElementById('refreshVirtualAssetsBtn').addEventListener('click', loadVirtualAssets);
+        document.getElementById('virtualGroupSearch').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadVirtualGroups, 350); });
+        document.getElementById('virtualAssetForm').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (!selectedVirtualGroup) return;
+            const form = event.currentTarget;
+            const data = new FormData(form);
+            const file = data.get('file');
+            if (!file || !file.size) { alert('请选择文件'); return; }
+            data.set('group_id', virtualGroupId(selectedVirtualGroup));
+            const button = form.querySelector('[type="submit"]');
+            await withButtonBusy(button, '创建中...', async () => {
+                try {
+                    await jsonRequest('/api/virtual-assets', {method:'POST', body:data});
+                    form.reset();
+                    closeVirtualAssetCreateModal();
+                    await loadVirtualAssets();
+                } catch (error) { alert(error.message); }
+            });
+        });
+
         // 画质增强弹窗相关
         let currentEnhanceAsset = null;
 
@@ -794,6 +1070,7 @@
         document.getElementById('submitEnhanceBtn').addEventListener('click', (event) => submitEnhance(event.currentTarget));
 
         renderTabs();
+        updateContentMode();
         updateUploadAccept();
         loadAssets();
     </script>

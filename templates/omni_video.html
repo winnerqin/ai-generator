@@ -71,6 +71,9 @@
         .library-preview { height: 92px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.15); }
         .library-preview img, .library-preview video { width: 100%; height: 100%; object-fit: contain; display: block; }
         .library-info { padding: 6px 8px; font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .virtual-group-row { grid-column: 1 / -1; display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+        .virtual-group-chip { flex: 0 0 auto; border: 1px solid rgba(86,111,255,0.28); background: rgba(255,255,255,0.03); color: inherit; border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+        .virtual-group-chip.active { border-color: rgba(86,111,255,0.9); background: rgba(86,111,255,0.2); color: #fff; }
         .library-pager { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
         .pager-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .pager-input { width: 78px; height: 36px; box-sizing: border-box; }
@@ -264,6 +267,7 @@
             <div style="font-weight: 600; margin-bottom: 10px;">素材库</div>
             <div class="library-tabs" id="libraryTabs">
                 <button class="library-tab" type="button" data-library-tab="image_material">图片素材</button>
+                <button class="library-tab" type="button" data-library-tab="virtual_asset">虚拟资产</button>
                 <button class="library-tab" type="button" data-library-tab="media">音/视频素材</button>
                 <button class="library-tab" type="button" data-library-tab="recent_generated">最近生成</button>
                 <div class="library-search">
@@ -339,6 +343,8 @@
         const selectedAssetsStorageKey = 'omniVideoSelectedAssets';
         const libraryPageSize = 20;
         let libraryState = { activeType: null, page: 1, total: 0, items: [], loading: false, search: '' };
+        let virtualAssetGroups = [];
+        let selectedVirtualAssetGroupId = '';
         let librarySearchTimer = null;
         let savedPromptRange = null;
 
@@ -391,7 +397,12 @@
         }
 
         function isVirtualAvatarAsset(asset) {
-            return asset.type === 'virtual_avatar' || (asset.url && asset.url.startsWith('asset://'));
+            return asset.type === 'virtual_avatar'
+                || (asset.url && asset.url.startsWith('asset://') && !asset.meta?.virtual_asset_type);
+        }
+
+        function getAssetPreviewUrl(asset) {
+            return asset?.preview_url || asset?.url || '';
         }
 
         function isAssetSelected(asset) {
@@ -409,11 +420,23 @@
         }
 
         function getAssetMentionName(asset) {
-            return String(asset?.filename || getAssetLabel(asset) || '参考素材').trim();
+            const useEnglish = isIntlModelSelected();
+            let kind = 'image';
+            if (isAudioAsset(asset)) kind = 'audio';
+            else if (isVideoAsset(asset)) kind = 'video';
+            const sameKind = selectedAssets.filter((item) => {
+                if (kind === 'audio') return isAudioAsset(item);
+                if (kind === 'video') return isVideoAsset(item);
+                return !isAudioAsset(item) && !isVideoAsset(item);
+            });
+            const index = Math.max(1, sameKind.findIndex((item) => item.url === asset.url) + 1);
+            if (kind === 'audio') return useEnglish ? `Audio ${index}` : `音频${index}`;
+            if (kind === 'video') return useEnglish ? `Video ${index}` : `视频${index}`;
+            return useEnglish ? `Image ${index}` : `图片${index}`;
         }
 
         function getAssetMentionText(asset) {
-            return `@${getAssetMentionName(asset)}`;
+            return getAssetMentionName(asset);
         }
 
         function getPromptEditor() {
@@ -550,8 +573,9 @@
         }
 
         function getSelectionKind(asset) {
+            if (isAudioAsset(asset) || isVideoAsset(asset)) return 'media';
             if (isVirtualAvatarAsset(asset)) return 'virtual_avatar';
-            return isAudioAsset(asset) || isVideoAsset(asset) ? 'media' : 'image_material';
+            return 'image_material';
         }
 
         function isIntlModelSelected() {
@@ -654,9 +678,10 @@
             }
 
             container.innerHTML = selectedAssets.map((asset, index) => {
-                let preview = `<img src="${escapeHtml(asset.url)}" alt="${escapeHtml(asset.filename || 'asset')}">`;
+                const previewUrl = getAssetPreviewUrl(asset);
+                let preview = `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.filename || 'asset')}">`;
                 if (isVirtualAvatarAsset(asset)) preview = '<div style="font-size:28px;color:#9ed0ff;">👤</div>';
-                else if (isVideoAsset(asset)) preview = `<video src="${escapeHtml(asset.url)}" preload="metadata"></video>`;
+                else if (isVideoAsset(asset)) preview = `<video src="${escapeHtml(previewUrl)}" preload="metadata"></video>`;
                 else if (isAudioAsset(asset)) preview = '<div style="font-size:28px;">♪</div>';
                 const filename = asset.filename || '-';
                 const hintText = isVirtualAvatarAsset(asset) ? `ID: ${filename}` : '双击缩略图可放大预览';
@@ -831,6 +856,37 @@
                 pagerInfo.textContent = `第 ${libraryState.page} 页`;
                 return;
             }
+            if (libraryState.activeType === 'virtual_asset') {
+                const groupRow = virtualAssetGroups.map((group) => {
+                    const id = String(group.Id || group.GroupId || group.id || '');
+                    const name = group.Name || group.GroupName || group.name || id;
+                    return `<button class="virtual-group-chip ${id === selectedVirtualAssetGroupId ? 'active' : ''}" type="button" data-virtual-group="${escapeHtml(id)}">${escapeHtml(name)}</button>`;
+                }).join('');
+                const cards = libraryState.items.map((asset, index) => {
+                    const previewUrl = escapeHtml(getAssetPreviewUrl(asset));
+                    let preview = `<img src="${previewUrl}" alt="${escapeHtml(asset.filename || 'asset')}">`;
+                    if (isVideoAsset(asset)) preview = `<video src="${previewUrl}" preload="metadata"></video>`;
+                    if (isAudioAsset(asset)) preview = '<div style="font-size:42px;">♪</div>';
+                    return `
+                        <div class="library-card ${isAssetSelected(asset) ? 'selected' : ''}" data-library-index="${index}" data-library-url="${escapeHtml(asset.url)}">
+                            <div class="library-preview">${preview}</div>
+                            <div class="library-info" title="${escapeHtml(asset.filename || '-')}">${escapeHtml(asset.filename || '-')}</div>
+                        </div>
+                    `;
+                }).join('');
+                const empty = libraryState.items.length ? '' : '<div class="small-hint">当前资产组暂无素材。</div>';
+                content.innerHTML = `<div class="virtual-group-row">${groupRow || '<span class="small-hint">暂无资产组</span>'}</div>${cards}${empty}`;
+                pagerInfo.textContent = `第 ${libraryState.page} 页 / 共 ${totalPages} 页，合计 ${libraryState.total || 0} 条`;
+                content.querySelectorAll('[data-virtual-group]').forEach((button) => button.addEventListener('click', () => {
+                    selectedVirtualAssetGroupId = button.getAttribute('data-virtual-group') || '';
+                    loadLibrary('virtual_asset', 1, libraryState.search);
+                }));
+                content.querySelectorAll('[data-library-index]').forEach((card) => card.addEventListener('click', () => {
+                    addOrRemoveReferenceAsset(libraryState.items[Number(card.getAttribute('data-library-index'))]);
+                }));
+                return;
+            }
+
             if (!libraryState.items.length) {
                 content.innerHTML = '<div class="small-hint">当前暂无素材。</div>';
                 pagerInfo.textContent = `第 ${libraryState.page} 页 / 共 ${totalPages} 页，合计 ${libraryState.total || 0} 条`;
@@ -875,7 +931,37 @@
             try {
                 let items = [];
                 let total = 0;
-                if (type === 'recent_generated') {
+                if (type === 'virtual_asset') {
+                    const groupResp = await fetch('/api/virtual-asset-groups?page=1&page_size=100');
+                    const groupData = await groupResp.json();
+                    if (!groupResp.ok || !groupData.success) throw new Error(groupData.error || '加载虚拟资产组失败');
+                    virtualAssetGroups = groupData.items || [];
+                    const groupIds = new Set(virtualAssetGroups.map((group) => String(group.Id || group.GroupId || group.id || '')));
+                    if (!selectedVirtualAssetGroupId || !groupIds.has(selectedVirtualAssetGroupId)) {
+                        const first = virtualAssetGroups[0] || {};
+                        selectedVirtualAssetGroupId = String(first.Id || first.GroupId || first.id || '');
+                    }
+                    if (selectedVirtualAssetGroupId) {
+                        const params = new URLSearchParams({ group_id: selectedVirtualAssetGroupId, page: String(page), page_size: String(libraryPageSize) });
+                        if (search.trim()) params.set('search', search.trim());
+                        const resp = await fetch(`/api/virtual-assets?${params.toString()}`);
+                        const data = await resp.json();
+                        if (!resp.ok || !data.success) throw new Error(data.error || '加载虚拟资产失败');
+                        items = (data.items || []).map((asset) => {
+                            const id = String(asset.Id || asset.AssetId || asset.id || '');
+                            const assetType = String(asset.AssetType || asset.Type || asset.type || 'Image').toLowerCase();
+                            return {
+                                id: `virtual-asset-${id}`,
+                                url: `asset://${id}`,
+                                preview_url: asset.URL || asset.Url || asset.url || '',
+                                filename: asset.Name || asset.AssetName || asset.name || id,
+                                type: assetType,
+                                meta: { virtual_asset_type: assetType, asset_id: id, group_id: selectedVirtualAssetGroupId },
+                            };
+                        }).filter((asset) => asset.preview_url);
+                        total = data.total || items.length;
+                    }
+                } else if (type === 'recent_generated') {
                     const params = new URLSearchParams({ page: String(page), page_size: String(libraryPageSize), status: 'succeeded' });
                     if (search.trim()) params.set('search', search.trim());
                     const resp = await fetch(`/api/omni-video/tasks?${params.toString()}`);
@@ -974,14 +1060,15 @@
         function openSelectedPreview(asset) {
             document.getElementById('selectedPreviewTitle').textContent = getAssetLabel(asset);
             const body = document.getElementById('selectedPreviewBody');
+            const previewUrl = getAssetPreviewUrl(asset);
             if (isVirtualAvatarAsset(asset)) {
                 body.innerHTML = `<div style="text-align:center;padding:40px;"><div style="font-size:80px;color:#9ed0ff;">👤</div><div style="margin-top:20px;color:#9ed0ff;">虚拟人像</div><div style="margin-top:10px;font-size:0.9rem;color:#aeb8d9;">ID: ${asset.filename}</div></div>`;
             } else if (isVideoAsset(asset)) {
-                body.innerHTML = `<video controls autoplay src="${asset.url}"></video>`;
+                body.innerHTML = `<video controls autoplay src="${previewUrl}"></video>`;
             } else if (isAudioAsset(asset)) {
-                body.innerHTML = `<div style="text-align:center;font-size:64px;">♪</div><audio controls autoplay src="${asset.url}"></audio>`;
+                body.innerHTML = `<div style="text-align:center;font-size:64px;">♪</div><audio controls autoplay src="${previewUrl}"></audio>`;
             } else {
-                body.innerHTML = `<img src="${asset.url}" alt="${getAssetLabel(asset)}">`;
+                body.innerHTML = `<img src="${previewUrl}" alt="${getAssetLabel(asset)}">`;
             }
             document.getElementById('selectedPreviewModal').style.display = 'flex';
         }
@@ -1162,6 +1249,10 @@
                 seed: Number(document.getElementById('seed').value || -1),
                 generate_audio: document.getElementById('generateAudio').checked,
                 reference_urls: selectedAssets.map((asset) => asset.url).filter(Boolean),
+                reference_assets: selectedAssets.filter((asset) => asset.url).map((asset) => ({
+                    url: asset.url,
+                    type: asset.type,
+                })),
             };
         }
 

@@ -38,6 +38,11 @@ class Config:
     # ==================== 火山引擎配置 ====================
     VOLCENGINE_AK: str = ""
     VOLCENGINE_SK: str = ""
+    ARK_ASSET_REGION: str = "cn-beijing"
+    ARK_ASSET_SERVICE: str = "ark"
+    ARK_ASSET_HOST: str = "open.volcengineapi.com"
+    ARK_ASSET_VERSION: str = "2024-01-01"
+    ARK_ASSET_TIMEOUT_SECONDS: int = 15
 
     # ==================== 阿里云 OSS 配置 ====================
     OSS_ENABLED: bool = False
@@ -149,6 +154,13 @@ class Config:
         # 火山引擎配置
         self.VOLCENGINE_AK = os.environ.get("VOLCENGINE_AK", self.VOLCENGINE_AK)
         self.VOLCENGINE_SK = os.environ.get("VOLCENGINE_SK", self.VOLCENGINE_SK)
+        self.ARK_ASSET_REGION = os.environ.get("ARK_ASSET_REGION", self.ARK_ASSET_REGION)
+        self.ARK_ASSET_SERVICE = os.environ.get("ARK_ASSET_SERVICE", self.ARK_ASSET_SERVICE)
+        self.ARK_ASSET_HOST = os.environ.get("ARK_ASSET_HOST", self.ARK_ASSET_HOST)
+        self.ARK_ASSET_VERSION = os.environ.get("ARK_ASSET_VERSION", self.ARK_ASSET_VERSION)
+        self.ARK_ASSET_TIMEOUT_SECONDS = int(
+            os.environ.get("ARK_ASSET_TIMEOUT_SECONDS", self.ARK_ASSET_TIMEOUT_SECONDS)
+        )
 
         # OSS 配置
         self.OSS_ENABLED = os.environ.get("OSS_ENABLED", "false").lower() == "true"

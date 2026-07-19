@@ -99,6 +99,36 @@ def test_build_omni_video_payload_respects_generate_audio_false():
     assert payload["generate_audio"] is False
 
 
+def test_build_omni_video_payload_maps_virtual_assets_by_type():
+    from app.services.omni_video_service import build_omni_video_payload
+
+    references = [
+        {"url": "asset://asset-image", "type": "image"},
+        {"url": "asset://asset-video", "type": "video"},
+        {"url": "asset://asset-audio", "type": "audio"},
+    ]
+    payload = build_omni_video_payload(
+        {
+            "prompt": "use virtual assets",
+            "model": "doubao-seedance-2-0-260128",
+            "resolution": "480p",
+            "duration": 6,
+            "reference_urls": [item["url"] for item in references],
+            "reference_assets": references,
+        }
+    )
+
+    assert payload["content"][1] == {
+        "type": "image_url", "role": "reference_image", "image_url": {"url": "asset://asset-image"}
+    }
+    assert payload["content"][2] == {
+        "type": "video_url", "role": "reference_video", "video_url": {"url": "asset://asset-video"}
+    }
+    assert payload["content"][3] == {
+        "type": "audio_url", "role": "reference_audio", "audio_url": {"url": "asset://asset-audio"}
+    }
+
+
 def test_build_omni_video_payload_rejects_invalid_duration_range():
     import pytest
     from app.services.omni_video_service import build_omni_video_payload
