@@ -318,6 +318,54 @@ def test_get_omni_video_task(auth_client, monkeypatch):
     assert data["task"]["task_id"] == "task-2"
 
 
+def test_download_omni_video_task_streams_upstream_response(auth_client, monkeypatch):
+    from io import BytesIO
+
+    from app.api import omni_video as omni_video_api
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"Content-Type": "video/mp4", "Content-Length": "11"}
+
+        def __init__(self):
+            self.raw = BytesIO(b"video-bytes")
+            self.closed = False
+
+        def raise_for_status(self):
+            return None
+
+        def close(self):
+            self.closed = True
+
+    upstream_response = FakeResponse()
+    captured = {}
+    monkeypatch.setattr(
+        omni_video_api.omni_video_service,
+        "get_task",
+        lambda user_id, project_id, task_id: {
+            "task_id": task_id,
+            "video_url": "https://example.com/video.mp4",
+            "download_filename": "result.mp4",
+        },
+    )
+
+    def fake_get(url, **kwargs):
+        captured.update({"url": url, **kwargs})
+        return upstream_response
+
+    monkeypatch.setattr(omni_video_api.requests, "get", fake_get)
+
+    response = auth_client.get("/api/omni-video/tasks/task-stream/download")
+
+    assert response.status_code == 200
+    assert response.data == b"video-bytes"
+    assert response.headers["Content-Type"] == "video/mp4"
+    assert response.headers["Content-Length"] == "11"
+    assert response.headers["Content-Disposition"] == "attachment; filename=result.mp4"
+    assert captured["stream"] is True
+    assert captured["timeout"] == (10, 120)
+
+
 def test_refresh_cancel_and_delete_omni_video_task(auth_client, monkeypatch):
     from app.api import omni_video as omni_video_api
 

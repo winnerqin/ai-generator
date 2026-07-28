@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-from io import BytesIO
 
 import requests
 import volcenginesdkbilling
@@ -488,7 +487,7 @@ def download_omni_video_task(task_id: str):
 
     filename = task.get("download_filename") or f"{task_id}.mp4"
     try:
-        response = requests.get(video_url, timeout=120)
+        response = requests.get(video_url, timeout=(10, 120), stream=True)
         response.raise_for_status()
     except requests.RequestException as exc:
         logger.exception(
@@ -508,12 +507,18 @@ def download_omni_video_task(task_id: str):
         response.headers.get("Content-Length"),
         filename,
     )
-    return send_file(
-        BytesIO(response.content),
+    response.raw.decode_content = True
+    download_response = send_file(
+        response.raw,
         mimetype=mimetype,
         as_attachment=True,
         download_name=filename,
     )
+    content_length = response.headers.get("Content-Length")
+    if content_length:
+        download_response.headers["Content-Length"] = content_length
+    download_response.call_on_close(response.close)
+    return download_response
 
 
 @omni_video_bp.route("/api/omni-video/tasks/<task_id>/refresh", methods=["POST"])
