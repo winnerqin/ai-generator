@@ -264,6 +264,27 @@ def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
         for raw_url, resolved_url in zip(raw_reference_urls, reference_urls)
         if raw_reference_types.get(raw_url)
     }
+    reference_asset_by_url = {
+        str(item.get("url") or "").strip(): item
+        for item in (data.get("reference_assets") or [])
+        if isinstance(item, dict) and str(item.get("url") or "").strip()
+    }
+    virtual_account_ids = {
+        str(item.get("account_id") or "").strip()
+        for item in reference_asset_by_url.values()
+        if str(item.get("url") or "").startswith("asset://")
+        and str(item.get("account_id") or "").strip()
+    }
+    requested_account_id = str(data.get("ark_account_id") or "").strip()
+    if len(virtual_account_ids) > 1:
+        raise ValueError("一次全能视频任务不能混用不同火山账号的虚拟资产")
+    asset_account_id = next(iter(virtual_account_ids), "")
+    if requested_account_id and asset_account_id and requested_account_id != asset_account_id:
+        raise ValueError("任务账号与所选虚拟资产账号不一致")
+    try:
+        ark_account_id = config.get_ark_account(asset_account_id or requested_account_id or None)["id"]
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
     model = (data.get("model") or config.SEEDANCE_OMNI_MODEL or "").strip()
     resolution = str(data.get("resolution") or "720p").strip().lower()
     aspect_ratio = str(data.get("aspect_ratio") or data.get("ratio") or "16:9").strip()
@@ -310,10 +331,19 @@ def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
         "generate_audio": _coerce_bool(data.get("generate_audio"), default=True),
         "reference_urls": reference_urls,
         "reference_assets": [
-            {"url": url, "type": reference_types[url]}
+            {
+                "url": url,
+                "type": reference_types[url],
+                **(
+                    {"account_id": ark_account_id}
+                    if url.startswith("asset://")
+                    else {}
+                ),
+            }
             for url in reference_urls
             if url in reference_types
         ],
+        "ark_account_id": ark_account_id,
         "filename": _normalize_filename(data.get("filename")),
     }
 
@@ -868,17 +898,20 @@ class OmniVideoService:
         except (TypeError, ValueError):
             return None
 
-    def _is_configured(self, model: str | None = None) -> bool:
+    def _is_configured(self, model: str | None = None, account_id: str | None = None) -> bool:
         try:
-            return self.client.is_configured(model=model)
+            return self.client.is_configured(model=model, account_id=account_id)
         except TypeError:
             return self.client.is_configured()
 
     def _get_remote_task(
-        self, task_id: str, model: str | None = None, upstream_slot: int | None = None
+        self, task_id: str, model: str | None = None, upstream_slot: int | None = None,
+        account_id: str | None = None
     ) -> dict[str, Any]:
         try:
-            return self.client.get_task(task_id, model=model, slot=upstream_slot)
+            return self.client.get_task(
+                task_id, model=model, slot=upstream_slot, account_id=account_id
+            )
         except TypeError:
             return self.client.get_task(task_id)
 
@@ -1020,9 +1053,10 @@ class OmniVideoService:
     def _sync_task_from_remote(self, task: dict[str, Any]) -> dict[str, Any]:
         local_payload = task.get("input_payload_json", {})
         model = local_payload.get("model") or task.get("model")
+        account_id = local_payload.get("ark_account_id")
         upstream_slot = self._get_upstream_slot(task)
 
-        if not self._is_configured(model=model):
+        if not self._is_configured(model=model, account_id=account_id):
             task = _decorate_task(task)
             self._ensure_video_library_entry(task)
             return task
@@ -1033,7 +1067,9 @@ class OmniVideoService:
             self._ensure_video_library_entry(task)
             return task
 
-        remote = self._get_remote_task(task_id, model=model, upstream_slot=upstream_slot)
+        remote = self._get_remote_task(
+            task_id, model=model, upstream_slot=upstream_slot, account_id=account_id
+        )
         record = _task_record_from_remote(
             user_id=task["user_id"],
             project_id=task.get("project_id"),
@@ -1068,19 +1104,26 @@ class OmniVideoService:
             raise ValueError(error_msg)
 
         model = payload.get("model")
-        is_configured = self._is_configured(model=model)
+        account_id = payload.get("ark_account_id")
+        is_configured = self._is_configured(model=model, account_id=account_id)
         route_key = self._build_upstream_route_key(user_id, project_id, data, payload)
-        upstream_slot = self.client.select_upstream_slot(model=model, route_key=route_key) if is_configured else None
+        upstream_slot = self.client.select_upstream_slot(
+            model=model, route_key=route_key, account_id=account_id
+        ) if is_configured else None
         if upstream_slot is not None:
             payload["_upstream_api_slot"] = upstream_slot
         api_endpoint = (
-            self.client._url(self.client.create_path, model=model, slot=upstream_slot)
+            self.client._url(
+                self.client.create_path, model=model, slot=upstream_slot, account_id=account_id
+            )
             if is_configured
             else "local"
         )
 
         if is_configured:
-            remote = self.client.create_task(payload, route_key=route_key, slot=upstream_slot)
+            remote = self.client.create_task(
+                payload, route_key=route_key, slot=upstream_slot, account_id=account_id
+            )
             log_external_api_call(
                 user_id=user_id,
                 username=username,
@@ -1256,10 +1299,13 @@ class OmniVideoService:
 
         local_payload = existing.get("input_payload_json", {})
         model = local_payload.get("model") or existing.get("model")
+        account_id = local_payload.get("ark_account_id")
         upstream_slot = self._get_upstream_slot(existing)
 
-        if self._is_configured(model=model):
-            remote = self.client.cancel_task(task_id, model=model, slot=upstream_slot)
+        if self._is_configured(model=model, account_id=account_id):
+            remote = self.client.cancel_task(
+                task_id, model=model, slot=upstream_slot, account_id=account_id
+            )
             status = _extract_status(remote, "cancelled")
         else:
             remote = {"task_id": task_id, "status": "cancelled", "message": "本地占位任务已取消。"}

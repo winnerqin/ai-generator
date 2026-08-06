@@ -129,6 +129,45 @@ def test_build_omni_video_payload_maps_virtual_assets_by_type():
     }
 
 
+def test_build_payload_freezes_virtual_asset_account(monkeypatch):
+    from app.config import config
+    from app.services.omni_video_service import build_omni_video_payload
+
+    monkeypatch.setattr(config, "get_ark_account", lambda account_id=None: {"id": account_id or "account_a"})
+    payload = build_omni_video_payload(
+        {
+            "prompt": "account-scoped asset",
+            "duration": 6,
+            "reference_urls": ["asset://asset-a"],
+            "reference_assets": [
+                {"url": "asset://asset-a", "type": "image", "account_id": "account_b"}
+            ],
+        }
+    )
+    assert payload["ark_account_id"] == "account_b"
+    assert payload["reference_assets"][0]["account_id"] == "account_b"
+
+
+def test_build_payload_rejects_mixed_virtual_asset_accounts(monkeypatch):
+    import pytest
+    from app.config import config
+    from app.services.omni_video_service import build_omni_video_payload
+
+    monkeypatch.setattr(config, "get_ark_account", lambda account_id=None: {"id": account_id or "account_a"})
+    with pytest.raises(ValueError, match="不能混用"):
+        build_omni_video_payload(
+            {
+                "prompt": "mixed accounts",
+                "duration": 6,
+                "reference_urls": ["asset://asset-a", "asset://asset-b"],
+                "reference_assets": [
+                    {"url": "asset://asset-a", "type": "image", "account_id": "account_a"},
+                    {"url": "asset://asset-b", "type": "image", "account_id": "account_b"},
+                ],
+            }
+        )
+
+
 def test_build_omni_video_payload_rejects_invalid_duration_range():
     import pytest
     from app.services.omni_video_service import build_omni_video_payload

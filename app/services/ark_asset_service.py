@@ -32,21 +32,30 @@ class ArkAssetService:
         "DeleteAsset",
     }
 
-    def is_configured(self) -> bool:
-        return bool(config.VOLCENGINE_AK and config.VOLCENGINE_SK)
+    def is_configured(self, account_id: str | None = None) -> bool:
+        try:
+            account = config.get_ark_account(account_id)
+        except ValueError:
+            return False
+        return bool(account["ak"] and account["sk"])
 
-    def _validate_action(self, action: str) -> None:
+    def _validate_action(self, action: str, account_id: str | None = None) -> dict[str, str]:
         if action not in self.ACTIONS:
             raise ArkAssetError("不支持的虚拟资产操作", code="INVALID_ACTION", status_code=400)
-        if not self.is_configured():
+        try:
+            account = config.get_ark_account(account_id)
+        except ValueError as exc:
+            raise ArkAssetError(str(exc), code="ARK_ACCOUNT_NOT_FOUND", status_code=400) from exc
+        if not account["ak"] or not account["sk"]:
             raise ArkAssetError(
-                "火山引擎凭据未配置",
+                f"火山引擎账号 {account['id']} 的 AK/SK 未配置",
                 code="ARK_ASSET_NOT_CONFIGURED",
                 status_code=503,
             )
+        return account
 
-    def _send(self, action: str, body: str) -> dict[str, Any]:
-        self._validate_action(action)
+    def _send(self, action: str, body: str, account_id: str | None = None) -> dict[str, Any]:
+        account = self._validate_action(action, account_id)
         try:
             from volcengine.ApiInfo import ApiInfo
             from volcengine.Credentials import Credentials
@@ -63,8 +72,8 @@ class ArkAssetService:
             config.ARK_ASSET_HOST,
             {"Accept": "application/json"},
             Credentials(
-                config.VOLCENGINE_AK,
-                config.VOLCENGINE_SK,
+                account["ak"],
+                account["sk"],
                 config.ARK_ASSET_SERVICE,
                 config.ARK_ASSET_REGION,
             ),
@@ -84,10 +93,16 @@ class ArkAssetService:
         raw = client.json(action, {}, body)
         return json.loads(raw) if isinstance(raw, str) else raw
 
-    def call(self, action: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def call(
+        self,
+        action: str,
+        payload: dict[str, Any] | None = None,
+        account_id: str | None = None,
+    ) -> dict[str, Any]:
         body = {key: value for key, value in (payload or {}).items() if value is not None}
         try:
-            response = self._send(action, json.dumps(body, ensure_ascii=False, separators=(",", ":")))
+            body_json = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+            response = self._send(action, body_json, account_id) if account_id else self._send(action, body_json)
         except ArkAssetError:
             raise
         except Exception as exc:
@@ -107,7 +122,10 @@ class ArkAssetService:
     @staticmethod
     def _safe_error_message(exc: Exception) -> str:
         text = str(exc)
-        for secret in (config.VOLCENGINE_AK, config.VOLCENGINE_SK):
+        secrets = [config.VOLCENGINE_AK, config.VOLCENGINE_SK]
+        for account in config.get_ark_accounts():
+            secrets.extend((account.get("ak"), account.get("sk"), account.get("api_key")))
+        for secret in secrets:
             if secret:
                 text = text.replace(secret, "***")
         try:
@@ -126,29 +144,29 @@ class ArkAssetService:
         value = response.get("Result") or response.get("result") or response.get("Data") or response.get("data")
         return value if isinstance(value, dict) else response
 
-    def create_asset_group(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.result(self.call("CreateAssetGroup", payload))
+    def create_asset_group(self, payload: dict[str, Any], account_id: str | None = None) -> dict[str, Any]:
+        return self.result(self.call("CreateAssetGroup", payload, account_id))
 
-    def list_asset_groups(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.result(self.call("ListAssetGroups", payload))
+    def list_asset_groups(self, payload: dict[str, Any], account_id: str | None = None) -> dict[str, Any]:
+        return self.result(self.call("ListAssetGroups", payload, account_id))
 
-    def update_asset_group(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.result(self.call("UpdateAssetGroup", payload))
+    def update_asset_group(self, payload: dict[str, Any], account_id: str | None = None) -> dict[str, Any]:
+        return self.result(self.call("UpdateAssetGroup", payload, account_id))
 
-    def delete_asset_group(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.result(self.call("DeleteAssetGroup", payload))
+    def delete_asset_group(self, payload: dict[str, Any], account_id: str | None = None) -> dict[str, Any]:
+        return self.result(self.call("DeleteAssetGroup", payload, account_id))
 
-    def create_asset(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.result(self.call("CreateAsset", payload))
+    def create_asset(self, payload: dict[str, Any], account_id: str | None = None) -> dict[str, Any]:
+        return self.result(self.call("CreateAsset", payload, account_id))
 
-    def list_assets(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.result(self.call("ListAssets", payload))
+    def list_assets(self, payload: dict[str, Any], account_id: str | None = None) -> dict[str, Any]:
+        return self.result(self.call("ListAssets", payload, account_id))
 
-    def update_asset(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.result(self.call("UpdateAsset", payload))
+    def update_asset(self, payload: dict[str, Any], account_id: str | None = None) -> dict[str, Any]:
+        return self.result(self.call("UpdateAsset", payload, account_id))
 
-    def delete_asset(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.result(self.call("DeleteAsset", payload))
+    def delete_asset(self, payload: dict[str, Any], account_id: str | None = None) -> dict[str, Any]:
+        return self.result(self.call("DeleteAsset", payload, account_id))
 
 
 ark_asset_service = ArkAssetService()

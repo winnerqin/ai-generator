@@ -91,6 +91,9 @@
         .task-meta { display: grid; gap: 8px; font-size: 0.92rem; }
         .video-preview { width: 100%; margin-top: 14px; border-radius: 12px; background: rgba(0,0,0,0.2); }
         .small-hint { color: #9ca8cf; font-size: 0.85rem; }
+        .ark-account-switch { display: flex; align-items: center; gap: 10px; color: #cbd3f5; font-size: 0.92rem; font-weight: 600; }
+        .ark-account-switch select { min-width: 220px; min-height: 46px; padding: 0 40px 0 14px; border-radius: 10px; font-size: 1rem; font-weight: 600; cursor: pointer; }
+        @media (max-width: 640px) { .ark-account-switch { width: 100%; align-items: stretch; flex-direction: column; gap: 6px; } .ark-account-switch select { width: 100%; min-width: 0; } }
         .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
         .filename-audio-toggle { margin-top: 0; white-space: nowrap; justify-self: start; }
         .task-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
@@ -264,7 +267,10 @@
         </div>
 
         <div class="panel">
-            <div style="font-weight: 600; margin-bottom: 10px;">素材库</div>
+            <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <div style="font-weight: 600;">素材库</div>
+                <label id="omniArkAccountSwitch" class="ark-account-switch" style="display:none;"><span>虚拟资产账号</span><select id="omniArkAccountSelect"></select></label>
+            </div>
             <div class="library-tabs" id="libraryTabs">
                 <button class="library-tab" type="button" data-library-tab="image_material">图片素材</button>
                 <button class="library-tab" type="button" data-library-tab="virtual_asset">虚拟资产</button>
@@ -345,6 +351,8 @@
         let libraryState = { activeType: null, page: 1, total: 0, items: [], loading: false, search: '' };
         let virtualAssetGroups = [];
         let selectedVirtualAssetGroupId = '';
+        let arkAccounts = [];
+        let selectedArkAccountId = '';
         let librarySearchTimer = null;
         let savedPromptRange = null;
 
@@ -417,6 +425,21 @@
                 '"': '&quot;',
                 "'": '&#39;',
             }[char]));
+        }
+
+        async function loadArkAccounts() {
+            if (arkAccounts.length) return;
+            const resp = await fetch('/api/ark-accounts');
+            const data = await resp.json();
+            if (!resp.ok || !data.success) throw new Error(data.error || '加载火山方舟账号失败');
+            arkAccounts = data.items || [];
+            const saved = localStorage.getItem('selectedArkAccountId');
+            selectedArkAccountId = arkAccounts.some((item) => item.id === saved)
+                ? saved
+                : (data.default_account_id || arkAccounts[0]?.id || '');
+            const select = document.getElementById('omniArkAccountSelect');
+            select.innerHTML = arkAccounts.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join('');
+            select.value = selectedArkAccountId;
         }
 
         function getAssetMentionName(asset) {
@@ -926,13 +949,16 @@
         }
 
         async function loadLibrary(type, page = 1, search = libraryState.search || '') {
+            document.getElementById('omniArkAccountSwitch').style.display = type === 'virtual_asset' ? 'flex' : 'none';
             libraryState = { activeType: type, page, total: libraryState.total, items: [], loading: true, search };
             renderLibraryGrid();
             try {
                 let items = [];
                 let total = 0;
                 if (type === 'virtual_asset') {
-                    const groupResp = await fetch('/api/virtual-asset-groups?page=1&page_size=100');
+                    await loadArkAccounts();
+                    const groupParams = new URLSearchParams({ account_id: selectedArkAccountId, page: '1', page_size: '100' });
+                    const groupResp = await fetch(`/api/virtual-asset-groups?${groupParams.toString()}`);
                     const groupData = await groupResp.json();
                     if (!groupResp.ok || !groupData.success) throw new Error(groupData.error || '加载虚拟资产组失败');
                     virtualAssetGroups = groupData.items || [];
@@ -943,6 +969,7 @@
                     }
                     if (selectedVirtualAssetGroupId) {
                         const params = new URLSearchParams({ group_id: selectedVirtualAssetGroupId, page: String(page), page_size: String(libraryPageSize) });
+                        params.set('account_id', selectedArkAccountId);
                         if (search.trim()) params.set('search', search.trim());
                         const resp = await fetch(`/api/virtual-assets?${params.toString()}`);
                         const data = await resp.json();
@@ -951,12 +978,12 @@
                             const id = String(asset.Id || asset.AssetId || asset.id || '');
                             const assetType = String(asset.AssetType || asset.Type || asset.type || 'Image').toLowerCase();
                             return {
-                                id: `virtual-asset-${id}`,
+                                id: `virtual-asset-${selectedArkAccountId}-${id}`,
                                 url: `asset://${id}`,
                                 preview_url: asset.URL || asset.Url || asset.url || '',
                                 filename: asset.Name || asset.AssetName || asset.name || id,
                                 type: assetType,
-                                meta: { virtual_asset_type: assetType, asset_id: id, group_id: selectedVirtualAssetGroupId },
+                                meta: { virtual_asset_type: assetType, asset_id: id, group_id: selectedVirtualAssetGroupId, account_id: selectedArkAccountId },
                             };
                         }).filter((asset) => asset.preview_url);
                         total = data.total || items.length;
@@ -1252,6 +1279,7 @@
                 reference_assets: selectedAssets.filter((asset) => asset.url).map((asset) => ({
                     url: asset.url,
                     type: asset.type,
+                    ...(asset.meta?.account_id ? { account_id: asset.meta.account_id } : {}),
                 })),
             };
         }
@@ -1307,6 +1335,13 @@
         }
 
         document.getElementById('submitBtn').addEventListener('click', createTask);
+        document.getElementById('omniArkAccountSelect').addEventListener('change', (event) => {
+            selectedArkAccountId = event.target.value;
+            localStorage.setItem('selectedArkAccountId', selectedArkAccountId);
+            selectedVirtualAssetGroupId = '';
+            virtualAssetGroups = [];
+            if (libraryState.activeType === 'virtual_asset') loadLibrary('virtual_asset', 1, libraryState.search);
+        });
         document.getElementById('prompt').addEventListener('paste', (event) => {
             event.preventDefault();
             const text = event.clipboardData?.getData('text/plain') || '';
@@ -1405,6 +1440,10 @@
 
         syncDurationState();
         renderLibraryGrid();
+        loadArkAccounts().catch((error) => {
+            document.getElementById('omniArkAccountSelect').innerHTML = '<option value="">账号加载失败</option>';
+            console.warn(error);
+        });
         loadOmniConfig().then(() => {
             restoreSelectedAssets();
             applyRegeneratePrefill();

@@ -11,6 +11,7 @@ import requests
 from flask import Blueprint, current_app, jsonify, render_template, request, send_file, session
 
 import database
+from app.config import config
 from app.decorators import handle_api_error, login_required
 from app.services import ArkAssetError, ark_asset_service, file_upload_service, oss_service
 
@@ -19,6 +20,16 @@ content_bp = Blueprint("content", __name__)
 
 def _ark_error_response(exc: ArkAssetError):
     return jsonify({"success": False, "error": str(exc), "code": exc.code}), exc.status_code
+
+
+def _ark_account_id(data=None) -> str:
+    value = request.args.get("account_id")
+    if value in (None, "") and data is not None:
+        value = data.get("account_id")
+    try:
+        return config.get_ark_account(value)["id"]
+    except ValueError as exc:
+        raise ArkAssetError(str(exc), code="ARK_ACCOUNT_NOT_FOUND", status_code=400) from exc
 
 
 def _required_text(payload: dict, key: str, label: str, max_length: int = 200) -> str:
@@ -80,7 +91,9 @@ def _validate_virtual_asset_upload(upload, asset_type: str) -> None:
         raise ValueError(f"上传文件超过限制（最大 {max_size // 1024 // 1024}MB）")
 
 
-def _ark_list_response(result: dict, items: list[dict], page: int, page_size: int):
+def _ark_list_response(
+    result: dict, items: list[dict], page: int, page_size: int, account_id: str | None = None
+):
     total = result.get("TotalCount", result.get("Total", len(items)))
     return jsonify(
         {
@@ -90,6 +103,7 @@ def _ark_list_response(result: dict, items: list[dict], page: int, page_size: in
             "page": page,
             "page_size": page_size,
             "next_page_token": result.get("NextPageToken") or result.get("NextToken"),
+            "account_id": account_id,
         }
     )
 
@@ -332,24 +346,49 @@ def content_management_page():
     return render_template("content_management.html", user=_current_user_context())
 
 
+@content_bp.route("/api/ark-accounts", methods=["GET"])
+@login_required
+def ark_accounts():
+    accounts = config.get_ark_accounts()
+    return jsonify(
+        {
+            "success": True,
+            "default_account_id": config.get_ark_account()["id"],
+            "items": [
+                {
+                    "id": account["id"],
+                    "name": account["name"],
+                    "asset_configured": bool(account["ak"] and account["sk"]),
+                    "generation_configured": bool(
+                        config.get_ark_account_api_key_pool(account["id"])
+                    ),
+                }
+                for account in accounts
+            ],
+        }
+    )
+
+
 @content_bp.route("/api/virtual-asset-groups", methods=["GET", "POST"])
 @login_required
 def virtual_asset_groups():
     try:
         if request.method == "GET":
+            account_id = _ark_account_id()
             payload, page, page_size = _ark_list_payload()
-            result = ark_asset_service.list_asset_groups(payload)
+            result = ark_asset_service.list_asset_groups(payload, account_id=account_id)
             items = _ark_items(result, "AssetGroups", "Items", "asset_groups", "items")
-            return _ark_list_response(result, items, page, page_size)
+            return _ark_list_response(result, items, page, page_size, account_id)
 
         data = request.get_json(silent=True) or {}
+        account_id = _ark_account_id(data)
         payload = {
             "Name": _required_text(data, "name", "组合名称"),
             "Description": str(data.get("description") or "").strip(),
             "GroupType": "AIGC",
             "ProjectName": "default",
         }
-        return jsonify({"success": True, "item": ark_asset_service.create_asset_group(payload)})
+        return jsonify({"success": True, "account_id": account_id, "item": ark_asset_service.create_asset_group(payload, account_id=account_id)})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc), "code": "INVALID_ARGUMENT"}), 400
     except ArkAssetError as exc:
@@ -360,19 +399,21 @@ def virtual_asset_groups():
 @login_required
 def virtual_asset_group_detail(group_id: str):
     try:
+        data = request.get_json(silent=True) or {}
+        account_id = _ark_account_id(data)
         group_id = _required_text({"id": group_id}, "id", "组合ID", 200)
         if request.method == "DELETE":
-            result = ark_asset_service.delete_asset_group({"Id": group_id})
+            result = ark_asset_service.delete_asset_group({"Id": group_id}, account_id=account_id)
         else:
-            data = request.get_json(silent=True) or {}
             result = ark_asset_service.update_asset_group(
                 {
                     "Id": group_id,
                     "Name": _required_text(data, "name", "组合名称"),
                     "Description": str(data.get("description") or "").strip(),
-                }
+                },
+                account_id=account_id,
             )
-        return jsonify({"success": True, "item": result})
+        return jsonify({"success": True, "account_id": account_id, "item": result})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc), "code": "INVALID_ARGUMENT"}), 400
     except ArkAssetError as exc:
@@ -384,15 +425,17 @@ def virtual_asset_group_detail(group_id: str):
 def virtual_assets():
     try:
         if request.method == "GET":
+            account_id = _ark_account_id()
             payload, page, page_size = _ark_list_payload()
             group_id = (request.args.get("group_id") or "").strip()
             if group_id:
                 payload["Filter"]["GroupIds"] = [group_id]
-            result = ark_asset_service.list_assets(payload)
+            result = ark_asset_service.list_assets(payload, account_id=account_id)
             items = _ark_items(result, "Assets", "Items", "assets", "items")
-            return _ark_list_response(result, items, page, page_size)
+            return _ark_list_response(result, items, page, page_size, account_id)
 
         data = request.form
+        account_id = _ark_account_id(data)
         group_id = _required_text(data, "group_id", "组合ID")
         name = _required_text(data, "name", "资产名称", 64)
         description = str(data.get("description") or "").strip()
@@ -429,9 +472,10 @@ def virtual_assets():
                 "AssetType": asset_type,
                 "URL": source_url,
                 "ProjectName": "default",
-            }
+            },
+            account_id=account_id,
         )
-        return jsonify({"success": True, "item": result})
+        return jsonify({"success": True, "account_id": account_id, "item": result})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc), "code": "INVALID_ARGUMENT"}), 400
     except ArkAssetError as exc:
@@ -442,19 +486,21 @@ def virtual_assets():
 @login_required
 def virtual_asset_detail(asset_id: str):
     try:
+        data = request.get_json(silent=True) or {}
+        account_id = _ark_account_id(data)
         asset_id = _required_text({"id": asset_id}, "id", "资产ID", 200)
         if request.method == "DELETE":
-            result = ark_asset_service.delete_asset({"Id": asset_id})
+            result = ark_asset_service.delete_asset({"Id": asset_id}, account_id=account_id)
         else:
-            data = request.get_json(silent=True) or {}
             result = ark_asset_service.update_asset(
                 {
                     "Id": asset_id,
                     "Name": _required_text(data, "name", "资产名称"),
                     "Description": str(data.get("description") or "").strip(),
-                }
+                },
+                account_id=account_id,
             )
-        return jsonify({"success": True, "item": result})
+        return jsonify({"success": True, "account_id": account_id, "item": result})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc), "code": "INVALID_ARGUMENT"}), 400
     except ArkAssetError as exc:

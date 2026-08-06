@@ -7,6 +7,7 @@ def test_create_task_uses_hashed_api_key_slot(monkeypatch):
     client_module = importlib.import_module("app.services.omni_video_client")
     monkeypatch.setattr(client_module.config, "ARK_API_KEY", "key-a")
     monkeypatch.setattr(client_module.config, "ARK_API_KEY_POOL", "key-a,key-b")
+    monkeypatch.setattr(client_module.config, "ARK_ACCOUNT_IDS", "")
     monkeypatch.setattr(client_module.config, "ARK_BASE_URL", "https://example.com")
     client = client_module.OmniVideoClient()
 
@@ -40,6 +41,7 @@ def test_get_task_uses_explicit_slot(monkeypatch):
     client_module = importlib.import_module("app.services.omni_video_client")
     monkeypatch.setattr(client_module.config, "ARK_API_KEY", "key-a")
     monkeypatch.setattr(client_module.config, "ARK_API_KEY_POOL", "key-a,key-b")
+    monkeypatch.setattr(client_module.config, "ARK_ACCOUNT_IDS", "")
     monkeypatch.setattr(client_module.config, "ARK_BASE_URL", "https://example.com")
     client = client_module.OmniVideoClient()
 
@@ -64,6 +66,39 @@ def test_get_task_uses_explicit_slot(monkeypatch):
     client.get_task("task-1", slot=1)
 
     assert captured["authorization"] == "Bearer key-b"
+
+
+def test_account_id_selects_matching_api_key_for_create_and_query(monkeypatch):
+    client_module = importlib.import_module("app.services.omni_video_client")
+    monkeypatch.setattr(client_module.config, "ARK_BASE_URL", "https://example.com")
+    monkeypatch.setattr(
+        client_module.config,
+        "get_ark_account_api_key_pool",
+        lambda account_id=None: [f"key-{account_id or 'default'}"],
+    )
+    client = client_module.OmniVideoClient()
+    authorizations = []
+
+    class FakeResponse:
+        status_code = 200
+        headers = {}
+        text = "{}"
+        def raise_for_status(self): return None
+        def json(self): return {"task_id": "task-1", "status": "queued"}
+
+    monkeypatch.setattr(
+        client_module.requests,
+        "post",
+        lambda url, headers=None, json=None, timeout=None: authorizations.append(headers["Authorization"]) or FakeResponse(),
+    )
+    monkeypatch.setattr(
+        client_module.requests,
+        "get",
+        lambda url, headers=None, timeout=None, params=None: authorizations.append(headers["Authorization"]) or FakeResponse(),
+    )
+    client.create_task({"prompt": "demo"}, account_id="account_b")
+    client.get_task("task-1", account_id="account_b")
+    assert authorizations == ["Bearer key-account_b", "Bearer key-account_b"]
 
 
 def test_create_task_normalizes_international_model_display_suffix(monkeypatch):
