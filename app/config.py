@@ -38,6 +38,8 @@ class Config:
     # ==================== 火山引擎配置 ====================
     VOLCENGINE_AK: str = ""
     VOLCENGINE_SK: str = ""
+    ARK_ACCOUNT_IDS: str = ""
+    ARK_DEFAULT_ACCOUNT_ID: str = "default"
     ARK_ASSET_REGION: str = "cn-beijing"
     ARK_ASSET_SERVICE: str = "ark"
     ARK_ASSET_HOST: str = "open.volcengineapi.com"
@@ -154,6 +156,10 @@ class Config:
         # 火山引擎配置
         self.VOLCENGINE_AK = os.environ.get("VOLCENGINE_AK", self.VOLCENGINE_AK)
         self.VOLCENGINE_SK = os.environ.get("VOLCENGINE_SK", self.VOLCENGINE_SK)
+        self.ARK_ACCOUNT_IDS = os.environ.get("ARK_ACCOUNT_IDS", self.ARK_ACCOUNT_IDS)
+        self.ARK_DEFAULT_ACCOUNT_ID = os.environ.get(
+            "ARK_DEFAULT_ACCOUNT_ID", self.ARK_DEFAULT_ACCOUNT_ID
+        ).strip() or "default"
         self.ARK_ASSET_REGION = os.environ.get("ARK_ASSET_REGION", self.ARK_ASSET_REGION)
         self.ARK_ASSET_SERVICE = os.environ.get("ARK_ASSET_SERVICE", self.ARK_ASSET_SERVICE)
         self.ARK_ASSET_HOST = os.environ.get("ARK_ASSET_HOST", self.ARK_ASSET_HOST)
@@ -298,7 +304,7 @@ class Config:
 
     def is_volcengine_configured(self) -> bool:
         """检查是否配置了火山引擎"""
-        return bool(self.VOLCENGINE_AK and self.VOLCENGINE_SK)
+        return any(account["ak"] and account["sk"] for account in self.get_ark_accounts())
 
     def is_seedance_omni_configured(self) -> bool:
         """检查是否配置了 Seedance 2.0 全能视频接口。"""
@@ -345,6 +351,65 @@ class Config:
 
     def get_ark_api_key_pool(self) -> list[str]:
         return self._parse_csv_models(self.ARK_API_KEY_POOL) or self._parse_csv_models(self.ARK_API_KEY)
+
+    @staticmethod
+    def _ark_account_env_prefix(account_id: str) -> str:
+        normalized = "".join(char if char.isalnum() else "_" for char in account_id.upper())
+        return f"ARK_ACCOUNT_{normalized}"
+
+    def get_ark_accounts(self) -> list[dict[str, str]]:
+        """Return configured domestic Ark accounts without exposing this object externally."""
+        import os
+
+        account_ids = self._parse_csv_models(self.ARK_ACCOUNT_IDS)
+        if not account_ids:
+            return [
+                {
+                    "id": self.ARK_DEFAULT_ACCOUNT_ID,
+                    "name": os.environ.get("ARK_DEFAULT_ACCOUNT_NAME", "默认账号").strip()
+                    or "默认账号",
+                    "ak": self.VOLCENGINE_AK,
+                    "sk": self.VOLCENGINE_SK,
+                    "api_key": self.ARK_API_KEY,
+                    "api_key_pool": self.ARK_API_KEY_POOL,
+                }
+            ]
+
+        accounts: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for raw_id in account_ids:
+            account_id = raw_id.strip()
+            if not account_id or account_id in seen:
+                continue
+            seen.add(account_id)
+            prefix = self._ark_account_env_prefix(account_id)
+            accounts.append(
+                {
+                    "id": account_id,
+                    "name": os.environ.get(f"{prefix}_NAME", account_id).strip() or account_id,
+                    "ak": os.environ.get(f"{prefix}_AK", "").strip(),
+                    "sk": os.environ.get(f"{prefix}_SK", "").strip(),
+                    "api_key": os.environ.get(f"{prefix}_API_KEY", "").strip(),
+                    "api_key_pool": os.environ.get(f"{prefix}_API_KEY_POOL", "").strip(),
+                }
+            )
+        return accounts
+
+    def get_ark_account(self, account_id: str | None = None) -> dict[str, str]:
+        accounts = self.get_ark_accounts()
+        requested = str(account_id or self.ARK_DEFAULT_ACCOUNT_ID).strip()
+        for account in accounts:
+            if account["id"] == requested:
+                return account
+        if not account_id and accounts:
+            return accounts[0]
+        raise ValueError(f"未知的火山方舟账号: {requested}")
+
+    def get_ark_account_api_key_pool(self, account_id: str | None = None) -> list[str]:
+        account = self.get_ark_account(account_id)
+        return self._parse_csv_models(account.get("api_key_pool")) or self._parse_csv_models(
+            account.get("api_key")
+        )
 
     def get_ark_intl_api_key_pool(self) -> list[str]:
         return self._parse_csv_models(self.ARK_INTL_API_KEY_POOL) or self._parse_csv_models(

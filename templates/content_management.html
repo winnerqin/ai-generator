@@ -39,6 +39,8 @@
         .pager-input { width: 78px; height: 36px; box-sizing: border-box; }
         .empty-hint { color: #9ca8cf; }
         .small-hint { color: #9ca8cf; font-size: 0.82rem; }
+        .ark-account-label { display: block; margin-bottom: 7px; font-size: 0.9rem; }
+        .ark-account-select { width: 100%; min-height: 46px; margin-bottom: 14px; padding: 0 40px 0 14px; border-radius: 10px; font-size: 1rem; font-weight: 600; cursor: pointer; }
         .virtual-layout { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 320px 1fr; gap: 16px; }
         .virtual-pane { min-height: 0; display: flex; flex-direction: column; }
         .virtual-list { overflow-y: auto; display: grid; gap: 8px; margin-top: 12px; }
@@ -150,6 +152,8 @@
 
                 <div class="virtual-layout" id="virtualAssetsView" style="display:none;">
                     <section class="panel virtual-pane">
+                        <label class="small-hint ark-account-label" for="arkAccountSelect">火山方舟账号</label>
+                        <select id="arkAccountSelect" class="ark-account-select"></select>
                         <div class="asset-list-header"><strong>资产组合</strong><button class="btn btn-primary" id="createVirtualGroupBtn">新建组合</button></div>
                         <input id="virtualGroupSearch" placeholder="搜索资产组合">
                         <div class="virtual-list" id="virtualGroupList"></div>
@@ -807,6 +811,21 @@
         let virtualGroups = [];
         let selectedVirtualGroup = null;
         let virtualAssetItems = [];
+        let arkAccounts = [];
+        let selectedArkAccountId = '';
+
+        async function loadArkAccounts() {
+            if (arkAccounts.length) return;
+            const data = await jsonRequest('/api/ark-accounts');
+            arkAccounts = data.items || [];
+            const saved = localStorage.getItem('selectedArkAccountId');
+            selectedArkAccountId = arkAccounts.some((item) => item.id === saved)
+                ? saved
+                : (data.default_account_id || arkAccounts[0]?.id || '');
+            const select = document.getElementById('arkAccountSelect');
+            select.innerHTML = arkAccounts.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join('');
+            select.value = selectedArkAccountId;
+        }
 
         function updateContentMode() {
             const virtual = currentTab === 'virtual_asset';
@@ -836,9 +855,11 @@
         }
 
         async function loadVirtualGroups() {
+            await loadArkAccounts();
             const list = document.getElementById('virtualGroupList');
             list.innerHTML = '<div class="empty-hint">加载中...</div>';
             const params = new URLSearchParams({page: '1', page_size: '100'});
+            params.set('account_id', selectedArkAccountId);
             const search = document.getElementById('virtualGroupSearch').value.trim();
             if (search) params.set('search', search);
             try {
@@ -894,6 +915,7 @@
             const list = document.getElementById('virtualAssetList');
             list.innerHTML = '<div class="empty-hint">加载中...</div>';
             const params = new URLSearchParams({group_id: virtualGroupId(selectedVirtualGroup), page: '1', page_size: '100'});
+            params.set('account_id', selectedArkAccountId);
             try {
                 const data = await jsonRequest(`/api/virtual-assets?${params}`);
                 const items = data.items || [];
@@ -955,7 +977,7 @@
             const name = prompt('资产组合名称');
             if (!name?.trim()) return;
             const description = prompt('资产组合描述（可选）') || '';
-            await jsonRequest('/api/virtual-asset-groups', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name.trim(), description})});
+            await jsonRequest('/api/virtual-asset-groups', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({account_id:selectedArkAccountId, name:name.trim(), description})});
             await loadVirtualGroups();
         }
 
@@ -965,13 +987,13 @@
             const name = prompt('资产组合名称', currentName);
             if (!name?.trim()) return;
             const description = prompt('资产组合描述', field(selectedVirtualGroup, 'Description', 'description')) || '';
-            await jsonRequest(`/api/virtual-asset-groups/${encodeURIComponent(virtualGroupId(selectedVirtualGroup))}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name.trim(), description})});
+            await jsonRequest(`/api/virtual-asset-groups/${encodeURIComponent(virtualGroupId(selectedVirtualGroup))}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({account_id:selectedArkAccountId, name:name.trim(), description})});
             await loadVirtualGroups();
         }
 
         async function deleteVirtualGroup() {
             if (!selectedVirtualGroup || !confirm('确定删除该资产组合？非空组合可能被火山方舟拒绝删除。')) return;
-            await jsonRequest(`/api/virtual-asset-groups/${encodeURIComponent(virtualGroupId(selectedVirtualGroup))}`, {method:'DELETE'});
+            await jsonRequest(`/api/virtual-asset-groups/${encodeURIComponent(virtualGroupId(selectedVirtualGroup))}?account_id=${encodeURIComponent(selectedArkAccountId)}`, {method:'DELETE'});
             selectedVirtualGroup = null;
             await loadVirtualGroups();
         }
@@ -981,13 +1003,13 @@
             const name = prompt('资产名称', field(item, 'Name', 'AssetName', 'name'));
             if (!name?.trim()) return;
             const description = prompt('资产描述', field(item, 'Description', 'description')) || '';
-            await jsonRequest(`/api/virtual-assets/${encodeURIComponent(id)}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name.trim(), description})});
+            await jsonRequest(`/api/virtual-assets/${encodeURIComponent(id)}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({account_id:selectedArkAccountId, name:name.trim(), description})});
             await loadVirtualAssets();
         }
 
         async function deleteVirtualAsset(id) {
             if (!confirm('确定删除该虚拟资产？此操作不可撤销。')) return;
-            await jsonRequest(`/api/virtual-assets/${encodeURIComponent(id)}`, {method:'DELETE'});
+            await jsonRequest(`/api/virtual-assets/${encodeURIComponent(id)}?account_id=${encodeURIComponent(selectedArkAccountId)}`, {method:'DELETE'});
             await loadVirtualAssets();
         }
 
@@ -998,6 +1020,13 @@
         document.getElementById('editVirtualGroupBtn').addEventListener('click', () => editVirtualGroup().catch((error) => alert(error.message)));
         document.getElementById('deleteVirtualGroupBtn').addEventListener('click', () => deleteVirtualGroup().catch((error) => alert(error.message)));
         document.getElementById('refreshVirtualAssetsBtn').addEventListener('click', loadVirtualAssets);
+        document.getElementById('arkAccountSelect').addEventListener('change', async (event) => {
+            selectedArkAccountId = event.target.value;
+            localStorage.setItem('selectedArkAccountId', selectedArkAccountId);
+            selectedVirtualGroup = null;
+            virtualAssetItems = [];
+            await loadVirtualGroups();
+        });
         document.getElementById('virtualGroupSearch').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadVirtualGroups, 350); });
         document.getElementById('virtualAssetForm').addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -1007,6 +1036,7 @@
             const file = data.get('file');
             if (!file || !file.size) { alert('请选择文件'); return; }
             data.set('group_id', virtualGroupId(selectedVirtualGroup));
+            data.set('account_id', selectedArkAccountId);
             const button = form.querySelector('[type="submit"]');
             await withButtonBusy(button, '创建中...', async () => {
                 try {

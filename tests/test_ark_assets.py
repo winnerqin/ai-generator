@@ -70,8 +70,10 @@ def test_group_list_api(auth_client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
         "app.api.content.ark_asset_service.list_asset_groups",
-        lambda payload: captured.setdefault("payload", payload)
-        and {"AssetGroups": [{"GroupId": "group-1"}], "TotalCount": 1},
+        lambda payload, account_id=None: (
+            captured.update(payload=payload, account_id=account_id)
+            or {"AssetGroups": [{"GroupId": "group-1"}], "TotalCount": 1}
+        ),
     )
     response = auth_client.get("/api/virtual-asset-groups?page=1&page_size=20")
     assert response.status_code == 200
@@ -83,15 +85,15 @@ def test_group_crud_api(auth_client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
         "app.api.content.ark_asset_service.create_asset_group",
-        lambda payload: captured.setdefault("create", payload),
+        lambda payload, account_id=None: captured.setdefault("create", payload),
     )
     monkeypatch.setattr(
         "app.api.content.ark_asset_service.update_asset_group",
-        lambda payload: captured.setdefault("update", payload),
+        lambda payload, account_id=None: captured.setdefault("update", payload),
     )
     monkeypatch.setattr(
         "app.api.content.ark_asset_service.delete_asset_group",
-        lambda payload: captured.setdefault("delete", payload),
+        lambda payload, account_id=None: captured.setdefault("delete", payload),
     )
     assert auth_client.post("/api/virtual-asset-groups", json={"name": "角色", "description": "主角"}).status_code == 200
     assert auth_client.put("/api/virtual-asset-groups/group-1", json={"name": "角色2"}).status_code == 200
@@ -109,7 +111,7 @@ def test_create_asset_by_file(auth_client, monkeypatch):
     )
     monkeypatch.setattr(
         "app.api.content.ark_asset_service.create_asset",
-        lambda payload: captured.setdefault("payload", payload),
+        lambda payload, account_id=None: captured.setdefault("payload", payload),
     )
     response = auth_client.post(
         "/api/virtual-assets",
@@ -144,7 +146,7 @@ def test_asset_list_wraps_group_in_required_filter(auth_client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
         "app.api.content.ark_asset_service.list_assets",
-        lambda payload: captured.setdefault("payload", payload) and {"Items": []},
+        lambda payload, account_id=None: captured.setdefault("payload", payload) and {"Items": []},
     )
     response = auth_client.get("/api/virtual-assets?group_id=group-1&search=hero")
     assert response.status_code == 200
@@ -169,10 +171,46 @@ def test_create_asset_requires_public_url(auth_client, monkeypatch):
 
 
 def test_ark_error_is_stable_api_response(auth_client, monkeypatch):
-    def fail(payload):
+    def fail(payload, account_id=None):
         raise ArkAssetError("火山引擎凭据未配置", code="ARK_ASSET_NOT_CONFIGURED", status_code=503)
 
     monkeypatch.setattr("app.api.content.ark_asset_service.list_asset_groups", fail)
     response = auth_client.get("/api/virtual-asset-groups")
     assert response.status_code == 503
     assert response.get_json()["code"] == "ARK_ASSET_NOT_CONFIGURED"
+
+
+def test_account_list_and_asset_query_keep_account_id(auth_client, monkeypatch):
+    from app.config import config
+
+    accounts = [
+        {"id": "account_a", "name": "账号A", "ak": "ak-a", "sk": "sk-a", "api_key": "key-a", "api_key_pool": ""},
+        {"id": "account_b", "name": "账号B", "ak": "ak-b", "sk": "sk-b", "api_key": "key-b", "api_key_pool": ""},
+    ]
+    monkeypatch.setattr(config, "get_ark_accounts", lambda: accounts)
+    monkeypatch.setattr(
+        config,
+        "get_ark_account",
+        lambda account_id=None: next(item for item in accounts if item["id"] == (account_id or "account_a")),
+    )
+    monkeypatch.setattr(
+        config,
+        "get_ark_account_api_key_pool",
+        lambda account_id=None: [config.get_ark_account(account_id)["api_key"]],
+    )
+    captured = {}
+    monkeypatch.setattr(
+        "app.api.content.ark_asset_service.list_assets",
+        lambda payload, account_id=None: captured.update(account_id=account_id) or {"Items": []},
+    )
+
+    account_response = auth_client.get("/api/ark-accounts")
+    assert account_response.status_code == 200
+    assert account_response.get_json()["items"] == [
+        {"id": "account_a", "name": "账号A", "asset_configured": True, "generation_configured": True},
+        {"id": "account_b", "name": "账号B", "asset_configured": True, "generation_configured": True},
+    ]
+    response = auth_client.get("/api/virtual-assets?account_id=account_b")
+    assert response.status_code == 200
+    assert response.get_json()["account_id"] == "account_b"
+    assert captured["account_id"] == "account_b"

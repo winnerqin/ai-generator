@@ -55,21 +55,31 @@ class OmniVideoClient:
         self.intl_api_key_pool = config.get_ark_intl_api_key_pool()
         self.intl_model = config.SEEDANCE_INTL_MODEL
 
-    def is_configured(self, model: str | None = None) -> bool:
+    def is_configured(self, model: str | None = None, account_id: str | None = None) -> bool:
         """检查是否配置了对应版本的API"""
         if model and is_intl_model(model):
             return config.is_seedance_intl_configured()
-        return config.is_seedance_omni_configured()
+        try:
+            return bool(
+                config.get_ark_account_api_key_pool(account_id)
+                and self.base_url
+                and self.model
+            )
+        except ValueError:
+            return False
 
-    def _get_api_key_pool(self, model: str | None = None) -> list[str]:
+    def _get_api_key_pool(
+        self, model: str | None = None, account_id: str | None = None
+    ) -> list[str]:
         if model and is_intl_model(model):
             return self.intl_api_key_pool
-        return self.api_key_pool
+        return config.get_ark_account_api_key_pool(account_id)
 
     def _select_api_key(
-        self, model: str | None = None, route_key: str | None = None, slot: int | None = None
+        self, model: str | None = None, route_key: str | None = None,
+        slot: int | None = None, account_id: str | None = None
     ) -> tuple[str, int]:
-        pool = self._get_api_key_pool(model=model)
+        pool = self._get_api_key_pool(model=model, account_id=account_id)
         if not pool:
             return "", 0
         if slot is not None:
@@ -87,19 +97,25 @@ class OmniVideoClient:
         *,
         route_key: str | None = None,
         slot: int | None = None,
+        account_id: str | None = None,
     ) -> tuple[str, str, int]:
         """根据模型返回对应的base_url、api_key 和 slot"""
         if model and is_intl_model(model):
             api_key, selected_slot = self._select_api_key(model=model, route_key=route_key, slot=slot)
             return self.intl_base_url, api_key, selected_slot
-        api_key, selected_slot = self._select_api_key(model=model, route_key=route_key, slot=slot)
+        api_key, selected_slot = self._select_api_key(
+            model=model, route_key=route_key, slot=slot, account_id=account_id
+        )
         return self.base_url, api_key, selected_slot
 
     def _headers(
-        self, model: str | None = None, *, route_key: str | None = None, slot: int | None = None
+        self, model: str | None = None, *, route_key: str | None = None,
+        slot: int | None = None, account_id: str | None = None
     ) -> dict[str, str]:
         """根据模型返回对应的headers"""
-        _, api_key, _ = self._get_config_for_model(model, route_key=route_key, slot=slot)
+        _, api_key, _ = self._get_config_for_model(
+            model, route_key=route_key, slot=slot, account_id=account_id
+        )
         return {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -112,17 +128,23 @@ class OmniVideoClient:
         *,
         route_key: str | None = None,
         slot: int | None = None,
+        account_id: str | None = None,
         **kwargs: Any,
     ) -> str:
         """根据模型返回对应的URL"""
-        base_url, _, _ = self._get_config_for_model(model, route_key=route_key, slot=slot)
+        base_url, _, _ = self._get_config_for_model(
+            model, route_key=route_key, slot=slot, account_id=account_id
+        )
         rendered = path.format(**kwargs)
         return f"{base_url}{rendered}"
 
     def select_upstream_slot(
-        self, model: str | None = None, route_key: str | None = None, slot: int | None = None
+        self, model: str | None = None, route_key: str | None = None,
+        slot: int | None = None, account_id: str | None = None
     ) -> int:
-        _, _, selected_slot = self._get_config_for_model(model, route_key=route_key, slot=slot)
+        _, _, selected_slot = self._get_config_for_model(
+            model, route_key=route_key, slot=slot, account_id=account_id
+        )
         return selected_slot
 
     def _sanitize_headers(self, headers: dict[str, Any]) -> dict[str, Any]:
@@ -191,13 +213,14 @@ class OmniVideoClient:
         *,
         route_key: str | None = None,
         slot: int | None = None,
+        account_id: str | None = None,
     ) -> dict[str, Any]:
         payload = dict(payload)
         model = normalize_upstream_model(payload.get("model"), self.intl_model)
         if model:
             payload["model"] = model
-        url = self._url(self.create_path, model=model, route_key=route_key, slot=slot)
-        headers = self._headers(model=model, route_key=route_key, slot=slot)
+        url = self._url(self.create_path, model=model, route_key=route_key, slot=slot, account_id=account_id)
+        headers = self._headers(model=model, route_key=route_key, slot=slot, account_id=account_id)
         timeout = (15, 180)
         self._log_request(
             "create_task",
@@ -234,9 +257,12 @@ class OmniVideoClient:
             ) from exc
         return response.json()
 
-    def get_task(self, task_id: str, model: str | None = None, *, slot: int | None = None) -> dict[str, Any]:
-        url = self._url(self.query_path, model=model, slot=slot, task_id=task_id)
-        headers = self._headers(model=model, slot=slot)
+    def get_task(
+        self, task_id: str, model: str | None = None, *, slot: int | None = None,
+        account_id: str | None = None
+    ) -> dict[str, Any]:
+        url = self._url(self.query_path, model=model, slot=slot, account_id=account_id, task_id=task_id)
+        headers = self._headers(model=model, slot=slot, account_id=account_id)
         timeout = (10, 60)
         self._log_request(
             "get_task",
@@ -322,9 +348,12 @@ class OmniVideoClient:
             ) from exc
         return response.json()
 
-    def cancel_task(self, task_id: str, model: str | None = None, *, slot: int | None = None) -> dict[str, Any]:
-        url = self._url(self.cancel_path, model=model, slot=slot, task_id=task_id)
-        headers = self._headers(model=model, slot=slot)
+    def cancel_task(
+        self, task_id: str, model: str | None = None, *, slot: int | None = None,
+        account_id: str | None = None
+    ) -> dict[str, Any]:
+        url = self._url(self.cancel_path, model=model, slot=slot, account_id=account_id, task_id=task_id)
+        headers = self._headers(model=model, slot=slot, account_id=account_id)
         payload = {"action": "cancel"}
         timeout = (10, 60)
         self._log_request(
