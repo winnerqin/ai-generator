@@ -535,21 +535,14 @@
 
         function removeAssetMention(asset) {
             const editor = getPromptEditor();
-            const mentionText = getAssetMentionText(asset);
             editor.querySelectorAll('.prompt-reference').forEach((node) => {
-                if (node.dataset.referenceUrl === asset.url || node.textContent === mentionText) {
+                if (node.dataset.referenceUrl === asset.url) {
                     const next = node.nextSibling;
                     if (next && next.nodeType === Node.TEXT_NODE) {
                         next.textContent = next.textContent.replace(/^\s+/, ' ');
                     }
                     node.remove();
                 }
-            });
-            const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
-            const textNodes = [];
-            while (walker.nextNode()) textNodes.push(walker.currentNode);
-            textNodes.forEach((node) => {
-                node.textContent = node.textContent.replaceAll(mentionText, '').replace(/[ \t]{2,}/g, ' ');
             });
         }
 
