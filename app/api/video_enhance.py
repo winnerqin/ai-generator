@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 import logging
 import mimetypes
@@ -255,38 +256,53 @@ def batch_download_enhance_tasks():
     archive = BytesIO()
     used_names: set[str] = set()
     failed: list[str] = []
-    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
-        for task_id in task_ids:
-            task = video_enhance_service.get_task(user_id, project_id, task_id)
-            video_url = (task or {}).get("video_url")
-            if not task or not video_url:
-                failed.append(task_id)
-                logger.warning(
-                    "[video-enhance][batch-download][item-failed] user_id=%s project_id=%s task_id=%s reason=missing_task_or_video_url",
-                    user_id,
-                    project_id,
-                    task_id,
-                )
-                continue
-
-            filename = _safe_download_name(
-                task.get("download_filename") or task.get("output_filename") or f"{task_id}.mp4",
-                f"{task_id}.mp4",
+    download_items = []
+    for task_id in task_ids:
+        task = video_enhance_service.get_task(user_id, project_id, task_id)
+        video_url = (task or {}).get("video_url")
+        if not task or not video_url:
+            failed.append(task_id)
+            logger.warning(
+                "[video-enhance][batch-download][item-failed] user_id=%s project_id=%s task_id=%s reason=missing_task_or_video_url",
+                user_id,
+                project_id,
+                task_id,
             )
-            try:
-                response = requests.get(video_url, timeout=120)
-                response.raise_for_status()
-                zip_file.writestr(_unique_zip_name(filename, used_names), response.content)
-            except requests.RequestException:
-                failed.append(filename)
-                logger.exception(
-                    "[video-enhance][batch-download][item-failed] user_id=%s project_id=%s task_id=%s filename=%s video_url=%s",
-                    user_id,
-                    project_id,
-                    task_id,
-                    filename,
-                    video_url,
-                )
+            continue
+
+        filename = _safe_download_name(
+            task.get("download_filename") or task.get("output_filename") or f"{task_id}.mp4",
+            f"{task_id}.mp4",
+        )
+        download_items.append((task_id, filename, video_url))
+
+    def download_video(video_url):
+        response = requests.get(video_url, timeout=120)
+        response.raise_for_status()
+        return response.content
+
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as zip_file:
+        if download_items:
+            with ThreadPoolExecutor(max_workers=min(3, len(download_items))) as executor:
+                futures = {
+                    executor.submit(download_video, video_url): (task_id, filename, video_url)
+                    for task_id, filename, video_url in download_items
+                }
+                for future in as_completed(futures):
+                    task_id, filename, video_url = futures[future]
+                    try:
+                        content = future.result()
+                        zip_file.writestr(_unique_zip_name(filename, used_names), content)
+                    except requests.RequestException:
+                        failed.append(filename)
+                        logger.exception(
+                            "[video-enhance][batch-download][item-failed] user_id=%s project_id=%s task_id=%s filename=%s video_url=%s",
+                            user_id,
+                            project_id,
+                            task_id,
+                            filename,
+                            video_url,
+                        )
 
         if failed:
             zip_file.writestr("download_failed.txt", "\n".join(failed))
