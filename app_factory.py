@@ -20,6 +20,7 @@ from typing import Any
 from dotenv import load_dotenv
 from flask import Flask, abort, g, render_template, request, send_file, session
 from flask.json.provider import DefaultJSONProvider
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 import database
@@ -293,6 +294,13 @@ def create_app(config_name: str | None = None) -> Flask:
 
     database.init_database()
     app = Flask(__name__)
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=1,
+        x_proto=1,
+        x_host=1,
+        x_port=1,
+    )
     app.json = AppJSONProvider(app)
     app.config.update(
         SECRET_KEY=os.environ.get("SECRET_KEY", config.SECRET_KEY),
