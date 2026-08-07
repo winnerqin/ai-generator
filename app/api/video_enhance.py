@@ -6,6 +6,7 @@ from io import BytesIO
 import logging
 import mimetypes
 from pathlib import Path
+import time
 import zipfile
 
 import requests
@@ -243,6 +244,14 @@ def batch_download_enhance_tasks():
     if not task_ids:
         return jsonify({"success": False, "error": "请选择要下载的任务"}), 400
 
+    started_at = time.monotonic()
+    logger.info(
+        "[video-enhance][batch-download][start] user_id=%s project_id=%s requested_count=%d",
+        user_id,
+        project_id,
+        len(task_ids),
+    )
+
     archive = BytesIO()
     used_names: set[str] = set()
     failed: list[str] = []
@@ -252,6 +261,12 @@ def batch_download_enhance_tasks():
             video_url = (task or {}).get("video_url")
             if not task or not video_url:
                 failed.append(task_id)
+                logger.warning(
+                    "[video-enhance][batch-download][item-failed] user_id=%s project_id=%s task_id=%s reason=missing_task_or_video_url",
+                    user_id,
+                    project_id,
+                    task_id,
+                )
                 continue
 
             filename = _safe_download_name(
@@ -264,9 +279,30 @@ def batch_download_enhance_tasks():
                 zip_file.writestr(_unique_zip_name(filename, used_names), response.content)
             except requests.RequestException:
                 failed.append(filename)
+                logger.exception(
+                    "[video-enhance][batch-download][item-failed] user_id=%s project_id=%s task_id=%s filename=%s video_url=%s",
+                    user_id,
+                    project_id,
+                    task_id,
+                    filename,
+                    video_url,
+                )
 
         if failed:
             zip_file.writestr("download_failed.txt", "\n".join(failed))
+
+    success_count = len(used_names)
+    failed_count = len(task_ids) - success_count
+    status = "success" if not failed_count else ("partial" if success_count else "failed")
+    logger.info(
+        "[video-enhance][batch-download][finish] user_id=%s project_id=%s success_count=%d failed_count=%d duration_ms=%d status=%s",
+        user_id,
+        project_id,
+        success_count,
+        failed_count,
+        round((time.monotonic() - started_at) * 1000),
+        status,
+    )
 
     if not used_names:
         return jsonify({"success": False, "error": "所选任务下载失败或尚未生成视频"}), 502
