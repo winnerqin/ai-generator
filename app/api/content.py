@@ -8,6 +8,7 @@ import time
 import zipfile
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 from flask import Blueprint, current_app, jsonify, render_template, request, send_file, session
@@ -328,6 +329,64 @@ def _unique_zip_name(filename: str, used_names: set[str]) -> str:
     return candidate
 
 
+def _endpoint_netloc(endpoint: str) -> str:
+    value = str(endpoint or "").strip()
+    if not value:
+        return ""
+    return urlsplit(value if "://" in value else f"//{value}").netloc
+
+
+def _oss_fallback_url(asset_url: str) -> str | None:
+    parsed = urlsplit(asset_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return None
+
+    cdn_hosts = {
+        host.lower()
+        for host in (
+            _endpoint_netloc(config.OSS_EXTERNAL_ENDPOINT),
+            _endpoint_netloc(config.OSS_ENDPOINT),
+        )
+        if host
+    }
+    source_netloc = _endpoint_netloc(config.OSS_ACCESS_ENDPOINT)
+    if not source_netloc or parsed.netloc.lower() not in cdn_hosts:
+        return None
+    if parsed.netloc.lower() == source_netloc.lower():
+        return None
+    return urlunsplit((parsed.scheme, source_netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+def _should_fallback_to_oss(exc: requests.RequestException) -> bool:
+    if isinstance(exc, requests.HTTPError):
+        return exc.response is not None and exc.response.status_code >= 500
+    return isinstance(exc, (requests.ConnectionError, requests.Timeout))
+
+
+def _request_asset_with_oss_fallback(asset: dict, download_url: str) -> requests.Response:
+    try:
+        response = requests.get(download_url, timeout=(10, 120))
+        response.raise_for_status()
+        return response
+    except requests.RequestException as cdn_exc:
+        fallback_url = _oss_fallback_url(download_url)
+        if not fallback_url or not _should_fallback_to_oss(cdn_exc):
+            raise
+        logger.warning(
+            "[content][download][cdn-fallback] asset_id=%s cdn_url=%s oss_url=%s error=%s",
+            asset.get("id"),
+            download_url,
+            fallback_url,
+            cdn_exc,
+        )
+        try:
+            response = requests.get(fallback_url, timeout=(10, 120))
+            response.raise_for_status()
+            return response
+        except requests.RequestException as oss_exc:
+            raise oss_exc from cdn_exc
+
+
 def _read_asset_bytes(asset: dict) -> tuple[bytes, str] | tuple[None, str]:
     filename = _safe_download_name(asset.get("filename") or "asset", "asset")
     asset_url = str(asset.get("url") or "").strip()
@@ -338,8 +397,7 @@ def _read_asset_bytes(asset: dict) -> tuple[bytes, str] | tuple[None, str]:
     if not asset_url:
         return None, filename
 
-    response = requests.get(_public_asset_url(asset_url), timeout=120)
-    response.raise_for_status()
+    response = _request_asset_with_oss_fallback(asset, _public_asset_url(asset_url))
     return response.content, filename
 
 
@@ -1074,9 +1132,16 @@ def download_library_asset():
         return jsonify({"success": False, "error": "素材无可下载地址"}), 400
 
     try:
-        response = requests.get(_public_asset_url(asset_url), timeout=120)
-        response.raise_for_status()
+        response = _request_asset_with_oss_fallback(asset, _public_asset_url(asset_url))
     except requests.RequestException as exc:
+        logger.exception(
+            "[content][download][item-failed] user_id=%s project_id=%s asset_id=%s filename=%s url=%s",
+            user_id,
+            project_id,
+            asset.get("id"),
+            filename,
+            asset_url,
+        )
         return jsonify({"success": False, "error": f"下载失败: {exc}"}), 502
 
     mimetype = response.headers.get("Content-Type") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
