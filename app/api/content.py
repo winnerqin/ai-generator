@@ -6,6 +6,7 @@ import logging
 import mimetypes
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -1205,33 +1206,42 @@ def download_library_assets():
     archive = BytesIO()
     used_names: set[str] = set()
     failed: list[str] = []
-    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
-        for asset in assets:
-            try:
-                content, filename = _read_asset_bytes(asset)
-                if content is None:
+    flask_app = current_app._get_current_object()
+
+    def download_asset(asset):
+        with flask_app.app_context():
+            return _read_asset_bytes(asset)
+
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as zip_file:
+        with ThreadPoolExecutor(max_workers=min(3, len(assets))) as executor:
+            futures = {executor.submit(download_asset, asset): asset for asset in assets}
+            for future in as_completed(futures):
+                asset = futures[future]
+                try:
+                    content, filename = future.result()
+                    if content is None:
+                        failed_name = asset.get("filename") or str(asset.get("id") or "asset")
+                        failed.append(failed_name)
+                        logger.warning(
+                            "[content][batch-download][item-failed] user_id=%s project_id=%s asset_id=%s filename=%s reason=no_content",
+                            user_id,
+                            project_id,
+                            asset.get("id"),
+                            failed_name,
+                        )
+                        continue
+                    zip_file.writestr(_unique_zip_name(filename, used_names), content)
+                except Exception:
                     failed_name = asset.get("filename") or str(asset.get("id") or "asset")
                     failed.append(failed_name)
-                    logger.warning(
-                        "[content][batch-download][item-failed] user_id=%s project_id=%s asset_id=%s filename=%s reason=no_content",
+                    logger.exception(
+                        "[content][batch-download][item-failed] user_id=%s project_id=%s asset_id=%s filename=%s url=%s",
                         user_id,
                         project_id,
                         asset.get("id"),
                         failed_name,
+                        asset.get("url"),
                     )
-                    continue
-                zip_file.writestr(_unique_zip_name(filename, used_names), content)
-            except Exception:
-                failed_name = asset.get("filename") or str(asset.get("id") or "asset")
-                failed.append(failed_name)
-                logger.exception(
-                    "[content][batch-download][item-failed] user_id=%s project_id=%s asset_id=%s filename=%s url=%s",
-                    user_id,
-                    project_id,
-                    asset.get("id"),
-                    failed_name,
-                    asset.get("url"),
-                )
 
         if failed:
             zip_file.writestr("download_failed.txt", "\n".join(failed))
