@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import mimetypes
+import time
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -16,6 +18,7 @@ from app.decorators import handle_api_error, login_required
 from app.services import ArkAssetError, ark_asset_service, file_upload_service, oss_service
 
 content_bp = Blueprint("content", __name__)
+logger = logging.getLogger(__name__)
 
 
 def _ark_error_response(exc: ArkAssetError):
@@ -1103,13 +1106,35 @@ def download_library_assets():
     if not asset_ids:
         return jsonify({"success": False, "error": "请选择要下载的素材"}), 400
 
+    started_at = time.monotonic()
+    logger.info(
+        "[content][batch-download][start] user_id=%s project_id=%s requested_count=%d",
+        user_id,
+        project_id,
+        len(asset_ids),
+    )
+
     assets = []
     for asset_id in asset_ids:
         asset = _get_database_asset(asset_id, user_id, project_id)
         if asset and str(asset.get("url") or "").strip():
             assets.append(asset)
+        else:
+            logger.warning(
+                "[content][batch-download][item-failed] user_id=%s project_id=%s asset_id=%s reason=missing_or_no_url",
+                user_id,
+                project_id,
+                asset_id,
+            )
 
     if not assets:
+        logger.info(
+            "[content][batch-download][finish] user_id=%s project_id=%s success_count=0 failed_count=%d duration_ms=%d status=failed",
+            user_id,
+            project_id,
+            len(asset_ids),
+            round((time.monotonic() - started_at) * 1000),
+        )
         return jsonify({"success": False, "error": "所选素材没有可下载的视频"}), 400
 
     archive = BytesIO()
@@ -1120,14 +1145,44 @@ def download_library_assets():
             try:
                 content, filename = _read_asset_bytes(asset)
                 if content is None:
-                    failed.append(asset.get("filename") or str(asset.get("id") or "asset"))
+                    failed_name = asset.get("filename") or str(asset.get("id") or "asset")
+                    failed.append(failed_name)
+                    logger.warning(
+                        "[content][batch-download][item-failed] user_id=%s project_id=%s asset_id=%s filename=%s reason=no_content",
+                        user_id,
+                        project_id,
+                        asset.get("id"),
+                        failed_name,
+                    )
                     continue
                 zip_file.writestr(_unique_zip_name(filename, used_names), content)
             except Exception:
-                failed.append(asset.get("filename") or str(asset.get("id") or "asset"))
+                failed_name = asset.get("filename") or str(asset.get("id") or "asset")
+                failed.append(failed_name)
+                logger.exception(
+                    "[content][batch-download][item-failed] user_id=%s project_id=%s asset_id=%s filename=%s url=%s",
+                    user_id,
+                    project_id,
+                    asset.get("id"),
+                    failed_name,
+                    asset.get("url"),
+                )
 
         if failed:
             zip_file.writestr("download_failed.txt", "\n".join(failed))
+
+    success_count = len(used_names)
+    failed_count = len(asset_ids) - success_count
+    status = "success" if not failed_count else ("partial" if success_count else "failed")
+    logger.info(
+        "[content][batch-download][finish] user_id=%s project_id=%s success_count=%d failed_count=%d duration_ms=%d status=%s",
+        user_id,
+        project_id,
+        success_count,
+        failed_count,
+        round((time.monotonic() - started_at) * 1000),
+        status,
+    )
 
     if not used_names:
         return jsonify({"success": False, "error": "所选素材下载失败"}), 502
