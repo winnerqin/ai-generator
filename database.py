@@ -218,6 +218,22 @@ def _ensure_default_model_pricing():
             "reference_video_mode": REFERENCE_VIDEO_MODE_WITHOUT,
             "price_per_million_token_cent": 2300,
         },
+        {
+            "model_code": "doubao-seedance-2-5-260628",
+            "model_name": "Doubao-Seedance-2.5",
+            "currency_code": MODEL_CURRENCY_CNY,
+            "resolution_code": "",
+            "reference_video_mode": REFERENCE_VIDEO_MODE_WITH,
+            "price_per_million_token_cent": 4200,
+        },
+        {
+            "model_code": "doubao-seedance-2-5-260628",
+            "model_name": "Doubao-Seedance-2.5",
+            "currency_code": MODEL_CURRENCY_CNY,
+            "resolution_code": "",
+            "reference_video_mode": REFERENCE_VIDEO_MODE_WITHOUT,
+            "price_per_million_token_cent": 7000,
+        },
     ]
     for item in default_items:
         conn = connect()

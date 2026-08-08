@@ -183,6 +183,42 @@ def test_build_omni_video_payload_rejects_invalid_duration_range():
         )
 
 
+def test_build_seedance_25_payload_accepts_30_seconds_and_supported_resolution():
+    from app.services.omni_video_service import build_omni_video_payload
+
+    payload = build_omni_video_payload(
+        {
+            "model": "doubao-seedance-2-5-260628",
+            "resolution": "720p",
+            "duration": 30,
+        }
+    )
+
+    assert payload["model"] == "doubao-seedance-2-5-260628"
+    assert payload["duration"] == 30
+    assert payload["prompt"] == ""
+
+
+def test_build_seedance_25_payload_rejects_more_than_10_reference_videos():
+    import pytest
+    from app.services.omni_video_service import build_omni_video_payload
+
+    references = [
+        {"url": f"https://example.com/video-{index}.mp4", "type": "video"}
+        for index in range(11)
+    ]
+    with pytest.raises(ValueError, match="参考视频最多支持 10 个"):
+        build_omni_video_payload(
+            {
+                "model": "doubao-seedance-2-5-260628",
+                "resolution": "480p",
+                "duration": 4,
+                "reference_urls": [item["url"] for item in references],
+                "reference_assets": references,
+            }
+        )
+
+
 def test_content_library_media_returns_video_and_audio(auth_client, monkeypatch):
     import database
 
