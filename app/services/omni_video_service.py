@@ -31,6 +31,7 @@ SUPPORTED_OMNI_MODELS = {
     "doubao-seedance-2-0-260128",
     "doubao-seedance-2-0-fast-260128",
     "doubao-seedance-2-0-mini-260615",
+    "doubao-seedance-2-5-260628",
     "dreamina-seedance-2-0-260128",  # 国际版模型
 }
 SUPPORTED_OMNI_RESOLUTIONS_BY_MODEL = {
@@ -38,7 +39,10 @@ SUPPORTED_OMNI_RESOLUTIONS_BY_MODEL = {
     "dreamina-seedance-2-0-260128": {"480p", "720p", "1080p"},
     "doubao-seedance-2-0-fast-260128": {"480p", "720p"},
     "doubao-seedance-2-0-mini-260615": {"480p", "720p"},
+    "doubao-seedance-2-5-260628": {"480p", "720p"},
 }
+SEEDANCE_25_MODEL = "doubao-seedance-2-5-260628"
+SEEDANCE_25_REFERENCE_LIMITS = {"image": 30, "video": 10, "audio": 10}
 SUPPORTED_OMNI_ASPECT_RATIOS = {"16:9", "9:16", "1:1", "4:3", "3:4"}
 SUCCESS_STATUSES = {"succeeded", "success", "completed", "done", "finished"}
 TERMINAL_STATUSES = SUCCESS_STATUSES | {"failed", "cancelled", "canceled", "expired"}
@@ -300,6 +304,26 @@ def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
     if aspect_ratio not in SUPPORTED_OMNI_ASPECT_RATIOS:
         raise ValueError("不支持的视频比例")
 
+    if model == SEEDANCE_25_MODEL:
+        reference_counts = {kind: 0 for kind in SEEDANCE_25_REFERENCE_LIMITS}
+        for url in reference_urls:
+            item_type = reference_types.get(url)
+            if item_type == "virtual_avatar":
+                item_type = "image"
+            if item_type not in reference_counts:
+                content_type = _content_item_for_url(url).get("type")
+                item_type = {
+                    "image_url": "image",
+                    "video_url": "video",
+                    "audio_url": "audio",
+                }.get(content_type)
+            if item_type in reference_counts:
+                reference_counts[item_type] += 1
+        for kind, limit in SEEDANCE_25_REFERENCE_LIMITS.items():
+            if reference_counts[kind] > limit:
+                label = {"image": "参考图片", "video": "参考视频", "audio": "参考音频"}[kind]
+                raise ValueError(f"{label}最多支持 {limit} 个")
+
     frame_count: int | None = None
     if raw_frame_count not in (None, "", "null"):
         try:
@@ -314,9 +338,11 @@ def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
         try:
             duration = int(raw_duration)
         except (TypeError, ValueError) as exc:
-            raise ValueError("时长必须是 4-15 或 -1") from exc
-        if duration != -1 and not 4 <= duration <= 15:
-            raise ValueError("时长取值范围为 4-15 秒，或使用 -1")
+            max_duration = 30 if model == SEEDANCE_25_MODEL else 15
+            raise ValueError(f"时长必须是 4-{max_duration} 或 -1") from exc
+        max_duration = 30 if model == SEEDANCE_25_MODEL else 15
+        if duration != -1 and not 4 <= duration <= max_duration:
+            raise ValueError(f"时长取值范围为 4-{max_duration} 秒，或使用 -1")
 
     payload: dict[str, Any] = {
         "model": model,

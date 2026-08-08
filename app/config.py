@@ -69,12 +69,15 @@ class Config:
     ARK_BASE_URL: str = "https://ark.cn-beijing.volces.com/api/v3"
     SEEDANCE_OMNI_MODEL: str = "doubao-seedance-2-0-260128"
     SEEDANCE_OMNI_MODEL_INTERNAL: str = (
-        "doubao-seedance-2-0-260128,doubao-seedance-2-0-mini-260615"
+        "doubao-seedance-2-0-260128,doubao-seedance-2-0-mini-260615,doubao-seedance-2-5-260628"
     )
     SEEDANCE_OMNI_MODEL_EXTERNAL: str = (
-        "doubao-seedance-2-0-fast-260128,doubao-seedance-2-0-mini-260615"
+        "doubao-seedance-2-0-fast-260128,doubao-seedance-2-0-mini-260615,doubao-seedance-2-5-260628"
     )
-    SEEDANCE_OMNI_MODEL_ALIASES: str = "doubao-seedance-2-0-mini-260615=Seedance 2.0 Mini"
+    SEEDANCE_OMNI_MODEL_ALIASES: str = (
+        "doubao-seedance-2-0-mini-260615=Seedance 2.0 Mini,"
+        "doubao-seedance-2-5-260628=Doubao-Seedance-2.5"
+    )
     SEEDANCE_OMNI_CREATE_PATH: str = "/contents/generations/tasks"
     SEEDANCE_OMNI_QUERY_PATH: str = "/contents/generations/tasks/{task_id}"
     SEEDANCE_OMNI_LIST_PATH: str = "/contents/generations/tasks"
@@ -324,14 +327,22 @@ class Config:
         return [item for item in items if item]
 
     def get_omni_model_list_internal(self) -> list[str]:
-        return self._parse_csv_models(self.SEEDANCE_OMNI_MODEL_INTERNAL) or self._parse_csv_models(
+        models = self._parse_csv_models(self.SEEDANCE_OMNI_MODEL_INTERNAL) or self._parse_csv_models(
             self.SEEDANCE_OMNI_MODEL
         )
+        seedance_25_model = "doubao-seedance-2-5-260628"
+        if seedance_25_model not in models:
+            models.append(seedance_25_model)
+        return models
 
     def get_omni_model_list_external(self) -> list[str]:
-        return self._parse_csv_models(self.SEEDANCE_OMNI_MODEL_EXTERNAL) or self._parse_csv_models(
+        models = self._parse_csv_models(self.SEEDANCE_OMNI_MODEL_EXTERNAL) or self._parse_csv_models(
             self.SEEDANCE_OMNI_MODEL
         )
+        seedance_25_model = "doubao-seedance-2-5-260628"
+        if seedance_25_model not in models:
+            models.append(seedance_25_model)
+        return models
 
     def get_omni_model_alias_map(self) -> dict[str, str]:
         pairs = self._parse_csv_models(self.SEEDANCE_OMNI_MODEL_ALIASES)
@@ -347,6 +358,7 @@ class Config:
             alias = value.strip()
             if model_code and alias:
                 result[model_code] = alias
+        result.setdefault("doubao-seedance-2-5-260628", "Doubao-Seedance-2.5")
         return result
 
     def get_ark_api_key_pool(self) -> list[str]:

@@ -200,6 +200,21 @@
                                 <option value="13">13</option>
                                 <option value="14">14</option>
                                 <option value="15">15</option>
+                                <option value="16">16</option>
+                                <option value="17">17</option>
+                                <option value="18">18</option>
+                                <option value="19">19</option>
+                                <option value="20">20</option>
+                                <option value="21">21</option>
+                                <option value="22">22</option>
+                                <option value="23">23</option>
+                                <option value="24">24</option>
+                                <option value="25">25</option>
+                                <option value="26">26</option>
+                                <option value="27">27</option>
+                                <option value="28">28</option>
+                                <option value="29">29</option>
+                                <option value="30">30</option>
                             </select>
                         </div>
                         <div class="field">
@@ -245,7 +260,7 @@
                         <div style="font-weight: 600;">已选全能参考素材</div>
                         <button id="clearSelectedAssetsBtn" class="btn btn-secondary" type="button" style="padding:4px 10px; font-size:0.86rem;">清除素材</button>
                     </div>
-                    <div class="small-hint" style="margin-bottom: 10px;">图片素材最多 9 个，音/视频素材最多 3 个。</div>
+                    <div id="referenceLimitHint" class="small-hint" style="margin-bottom: 10px;">图片素材最多 9 个，音/视频素材最多 3 个。</div>
                     <div id="selectedList" class="selected-list">
                         <div class="small-hint">还没有选择参考素材。</div>
                     </div>
@@ -607,6 +622,48 @@
                 || alias === 'dreamina-seedance-2-0-260128';
         }
 
+        function isSeedance25Selected() {
+            return (document.getElementById('model').value || '') === 'doubao-seedance-2-5-260628';
+        }
+
+        function getSeedance25AssetType(asset) {
+            if (isAudioAsset(asset)) return 'audio';
+            if (isVideoAsset(asset)) return 'video';
+            return 'image';
+        }
+
+        function getAssetLimit(asset) {
+            if (isSeedance25Selected()) {
+                return ({ image: 30, video: 10, audio: 10 })[getSeedance25AssetType(asset)];
+            }
+            return pickerConfigs[getSelectionKind(asset)]?.max || 9;
+        }
+
+        function syncModelLimits() {
+            const is25 = isSeedance25Selected();
+            pickerConfigs.image_material.max = is25 ? 30 : 9;
+            pickerConfigs.virtual_avatar.max = is25 ? 30 : 9;
+            pickerConfigs.media.max = is25 ? 20 : 3;
+            pickerConfigs.image_material.hint = is25 ? '参考图片最多 30 张。' : '可从原人物/场景素材中多选，最多 9 个。';
+            pickerConfigs.virtual_avatar.hint = is25 ? '虚拟人像计入参考图片，图片合计最多 30 张。' : '虚拟人像作为图片素材，最多 9 个。';
+            pickerConfigs.media.hint = is25 ? '参考视频最多 10 个，参考音频最多 10 个。' : '可选择音频或视频素材，最多 3 个。';
+            const limitHint = document.getElementById('referenceLimitHint');
+            if (limitHint) {
+                limitHint.textContent = is25
+                    ? '参考图片最多 30 张，参考视频最多 10 个，参考音频最多 10 个。'
+                    : '图片素材最多 9 个，音/视频素材最多 3 个。';
+            }
+            document.querySelectorAll('#duration option').forEach((option) => {
+                const value = Number(option.value);
+                if (value > 15) {
+                    option.disabled = !is25;
+                    option.hidden = !is25;
+                }
+            });
+            const durationEl = document.getElementById('duration');
+            if (!is25 && Number(durationEl.value) > 15) durationEl.value = '-1';
+        }
+
         function modelAlias(model) {
             return (omniConfig.model_aliases && omniConfig.model_aliases[model]) || model || '-';
         }
@@ -644,6 +701,7 @@
         }
 
         function syncResolutionOptions() {
+            syncModelLimits();
             const model = document.getElementById('model').value || '';
             const resolutionEl = document.getElementById('resolution');
             const current = resolutionEl.value;
@@ -810,8 +868,11 @@
             }
 
             const kind = getSelectionKind(asset);
-            const max = pickerConfigs[kind]?.max || 9;
-            const currentCount = selectedAssets.filter((item) => getSelectionKind(item) === kind).length;
+            const preciseKind = getSeedance25AssetType(asset);
+            const max = getAssetLimit(asset);
+            const currentCount = isSeedance25Selected()
+                ? selectedAssets.filter((item) => preciseKind === 'audio' ? isAudioAsset(item) : (preciseKind === 'video' ? isVideoAsset(item) : (!isAudioAsset(item) && !isVideoAsset(item)))).length
+                : selectedAssets.filter((item) => getSelectionKind(item) === kind).length;
             if (currentCount >= max) {
                 alert(`最多只能选择 ${max} 个${pickerConfigs[kind]?.label || '素材'}`);
                 return;
@@ -1058,6 +1119,18 @@
                     alert(`最多只能选择 ${max} 个${pickerConfigs[currentPickerType].label}`);
                     return;
                 }
+                if (isSeedance25Selected()) {
+                    const assetType = getSeedance25AssetType(asset);
+                    const typeCount = pickerAssets.filter((item) =>
+                        tempSelectedIds.has(String(item.id)) && getSeedance25AssetType(item) === assetType
+                    ).length;
+                    const typeLimit = getAssetLimit(asset);
+                    if (typeCount >= typeLimit) {
+                        const label = ({ image: '参考图片', video: '参考视频', audio: '参考音频' })[assetType];
+                        alert(`${label}最多只能选择 ${typeLimit} 个`);
+                        return;
+                    }
+                }
                 tempSelectedIds.add(id);
             }
             updatePickerSelectionInfo();
@@ -1108,9 +1181,12 @@
                 meta: asset.meta || {},
             };
             const kind = getSelectionKind(normalized);
-            const max = pickerConfigs[kind].max;
+            const max = getAssetLimit(normalized);
             if (selectedAssets.some((item) => item.url === normalized.url)) return;
-            const currentCount = selectedAssets.filter((item) => getSelectionKind(item) === kind).length;
+            const preciseKind = getSeedance25AssetType(normalized);
+            const currentCount = isSeedance25Selected()
+                ? selectedAssets.filter((item) => getSeedance25AssetType(item) === preciseKind).length
+                : selectedAssets.filter((item) => getSelectionKind(item) === kind).length;
             if (currentCount >= max) return;
             selectedAssets.push(normalized);
         }
