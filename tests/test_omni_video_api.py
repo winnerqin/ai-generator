@@ -339,12 +339,18 @@ def test_download_omni_video_task_streams_upstream_response(auth_client, monkeyp
 
     upstream_response = FakeResponse()
     captured = {}
+    monkeypatch.setattr(omni_video_api.config, "OSS_ACCESS_ENDPOINT", "")
+    monkeypatch.setattr(
+        omni_video_api.config,
+        "OSS_ENDPOINT",
+        "shor-file.oss-cn-wulanchabu.aliyuncs.com",
+    )
     monkeypatch.setattr(
         omni_video_api.omni_video_service,
         "get_task",
         lambda user_id, project_id, task_id: {
             "task_id": task_id,
-            "video_url": "https://example.com/video.mp4",
+            "video_url": "https://short-oss.aidcstore.net/video_generator/user_1/video.mp4?version=1",
             "download_filename": "result.mp4",
         },
     )
@@ -362,6 +368,10 @@ def test_download_omni_video_task_streams_upstream_response(auth_client, monkeyp
     assert response.headers["Content-Type"] == "video/mp4"
     assert response.headers["Content-Length"] == "11"
     assert response.headers["Content-Disposition"] == "attachment; filename=result.mp4"
+    assert captured["url"] == (
+        "https://shor-file.oss-cn-wulanchabu.aliyuncs.com/"
+        "video_generator/user_1/video.mp4?version=1"
+    )
     assert captured["stream"] is True
     assert captured["timeout"] == (10, 120)
 

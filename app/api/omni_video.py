@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 import volcenginesdkbilling
@@ -20,6 +21,33 @@ from app.utils.jwt_auth import JWTAuth
 
 logger = logging.getLogger(__name__)
 omni_video_bp = Blueprint("omni_video", __name__)
+
+
+def _endpoint_netloc(endpoint: str) -> str:
+    value = str(endpoint or "").strip()
+    if not value:
+        return ""
+    return urlsplit(value if "://" in value else f"//{value}").netloc
+
+
+def _omni_video_download_url(video_url: str) -> str:
+    """Use the OSS origin for server-side downloads instead of the CDN."""
+    parsed = urlsplit(video_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return video_url
+
+    cdn_hosts = {
+        "short-oss.aidcstore.net",
+        _endpoint_netloc(config.OSS_EXTERNAL_ENDPOINT).lower(),
+    }
+    cdn_hosts.discard("")
+    if parsed.netloc.lower() not in cdn_hosts:
+        return video_url
+
+    origin_netloc = _endpoint_netloc(config.OSS_ACCESS_ENDPOINT or config.OSS_ENDPOINT)
+    if not origin_netloc:
+        return video_url
+    return urlunsplit((parsed.scheme, origin_netloc, parsed.path, parsed.query, parsed.fragment))
 
 
 def _current_user_context() -> dict[str, object]:
@@ -486,14 +514,16 @@ def download_omni_video_task(task_id: str):
         return jsonify({"success": False, "error": "当前任务暂无可下载视频"}), 400
 
     filename = task.get("download_filename") or f"{task_id}.mp4"
+    download_url = _omni_video_download_url(video_url)
     try:
-        response = requests.get(video_url, timeout=(10, 120), stream=True)
+        response = requests.get(download_url, timeout=(10, 120), stream=True)
         response.raise_for_status()
     except requests.RequestException as exc:
         logger.exception(
-            "[omni-video][download][error] task_id=%s video_url=%s error=%s",
+            "[omni-video][download][error] task_id=%s video_url=%s download_url=%s error=%s",
             task_id,
             video_url,
+            download_url,
             exc,
         )
         raise ValueError("视频下载失败，请稍后重试") from exc
