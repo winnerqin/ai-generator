@@ -290,8 +290,10 @@ CREATE TABLE IF NOT EXISTS omni_video_tasks (
     INDEX idx_omni_video_tasks_client_request (user_id, client_request_id),
     INDEX idx_omni_video_tasks_created_at (created_at),
     INDEX idx_omni_video_tasks_user_project_created (user_id, project_id, created_at DESC),
-    INDEX idx_omni_video_tasks_user_status_created (user_id, status, created_at DESC),
-    INDEX idx_omni_video_tasks_user_project_status_created (user_id, project_id, status, created_at DESC)
+      INDEX idx_omni_video_tasks_user_status_created (user_id, status, created_at DESC),
+      INDEX idx_omni_video_tasks_user_project_status_created (user_id, project_id, status, created_at DESC),
+      INDEX idx_omni_video_tasks_source_status_created (source, status, created_at DESC),
+      INDEX idx_omni_video_tasks_user_project_source_created (user_id, project_id, source, created_at DESC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS external_api_keys (

@@ -120,6 +120,7 @@ def register_blueprints(app: Flask):
         content_bp,
         image_bp,
         omni_video_bp,
+        wan_video_bp,
         projects_bp,
         script_bp,
         storyboard_bp,
@@ -148,6 +149,7 @@ def register_blueprints(app: Flask):
 
     # 全能视频
     app.register_blueprint(omni_video_bp)
+    app.register_blueprint(wan_video_bp)
 
     # 视频画质增强
     app.register_blueprint(video_enhance_bp)

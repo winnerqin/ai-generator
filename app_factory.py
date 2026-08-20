@@ -47,6 +47,7 @@ try:
         content_bp,
         image_bp,
         omni_video_bp,
+        wan_video_bp,
         projects_bp,
         script_bp,
         storyboard_bp,
@@ -321,6 +322,7 @@ def create_app(config_name: str | None = None) -> Flask:
     app.register_blueprint(admin_bp)
     app.register_blueprint(image_bp)
     app.register_blueprint(omni_video_bp)
+    app.register_blueprint(wan_video_bp)
     app.register_blueprint(video_enhance_bp)
     app.register_blueprint(batch_bp)
     app.register_blueprint(video_bp)

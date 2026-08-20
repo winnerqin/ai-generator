@@ -35,6 +35,7 @@ MENU_DEFINITIONS = [
     {"key": "video_generate", "label": "视频生成"},
     {"key": "video_tasks", "label": "视频任务"},
     {"key": "omni_video", "label": "全能视频"},
+    {"key": "wan_video", "label": "Wan 3.0 视频"},
     {"key": "omni_video_tasks", "label": "全能任务"},
     {"key": "enhance_tasks", "label": "增强任务"},
     {"key": "script_generate", "label": "剧本生成"},
@@ -66,6 +67,7 @@ DEFAULT_ROLE_DEFINITIONS = [
             "video_generate",
             "video_tasks",
             "omni_video",
+            "wan_video",
             "omni_video_tasks",
             "enhance_tasks",
             "script_generate",
@@ -85,6 +87,7 @@ DEFAULT_ROLE_DEFINITIONS = [
             "image2",
             "records",
             "omni_video",
+            "wan_video",
             "omni_video_tasks",
             "user_center",
         ],
@@ -1462,6 +1465,7 @@ def get_omni_video_tasks(
     start_date=None,
     end_date=None,
     batch_id=None,
+    source=None,
     limit=20,
     offset=0,
     include_heavy_fields=True,
@@ -1501,6 +1505,11 @@ def get_omni_video_tasks(
     if batch_id:
         query += " AND batch_id = ?"
         params.append(batch_id)
+    if source == "seedance":
+        query += " AND (source IS NULL OR source = '' OR source != 'wan_video')"
+    elif source:
+        query += " AND source = ?"
+        params.append(source)
 
     query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
@@ -1518,6 +1527,7 @@ def count_omni_video_tasks(
     start_date=None,
     end_date=None,
     batch_id=None,
+    source=None,
 ):
     conn = connect()
     cursor = conn.cursor()
@@ -1544,6 +1554,11 @@ def count_omni_video_tasks(
     if batch_id:
         query += " AND batch_id = ?"
         params.append(batch_id)
+    if source == "seedance":
+        query += " AND (source IS NULL OR source = '' OR source != 'wan_video')"
+    elif source:
+        query += " AND source = ?"
+        params.append(source)
 
     cursor.execute(query, params)
     total = cursor.fetchone()[0]

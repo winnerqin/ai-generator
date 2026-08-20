@@ -97,6 +97,14 @@
                     </select>
                 </div>
                 <div>
+                    <label for="source">来源</label>
+                    <select id="source">
+                        <option value="">全部</option>
+                        <option value="wan_video">Wan 3.0</option>
+                        <option value="seedance">Seedance / 外部任务</option>
+                    </select>
+                </div>
+                <div>
                     <label for="startDate">开始日期</label>
                     <input id="startDate" type="date">
                 </div>
@@ -303,12 +311,19 @@
             return Boolean(task && task.video_url);
         }
 
+        function taskApiBase(taskId) {
+            const task = currentItems.find((item) => item.task_id === taskId);
+            return task && task.source === 'wan_video' ? '/api/wan-video/tasks' : '/api/omni-video/tasks';
+        }
+
         function downloadTask(taskId) {
             const decodedTaskId = decodeURIComponent(taskId);
             const task = currentItems.find((item) => item.task_id === decodedTaskId);
             const filename = (task && (task.download_filename || task.filename)) || `${decodedTaskId}.mp4`;
             const link = document.createElement('a');
-            link.href = `/api/omni-video/tasks/${encodeURIComponent(decodedTaskId)}/download`;
+            link.href = task && task.source === 'wan_video' && task.video_url
+                ? task.video_url
+                : `/api/omni-video/tasks/${encodeURIComponent(decodedTaskId)}/download`;
             link.download = filename;
             document.body.appendChild(link);
             link.click();
@@ -388,6 +403,7 @@
             return {
                 search: document.getElementById('search').value.trim(),
                 status: document.getElementById('status').value,
+                source: document.getElementById('source').value,
                 start_date: document.getElementById('startDate').value,
                 end_date: document.getElementById('endDate').value,
             };
@@ -438,6 +454,7 @@
             params.set('sync_running', 'false');
             if (filters.search) params.set('search', filters.search);
             if (filters.status) params.set('status', filters.status);
+            if (filters.source) params.set('source', filters.source);
             if (filters.start_date) params.set('start_date', filters.start_date);
             if (filters.end_date) params.set('end_date', filters.end_date);
 
@@ -545,7 +562,7 @@
         async function fetchTask(taskId) {
             const decodedTaskId = decodeURIComponent(taskId);
             debugLog('detail request', { taskId: decodedTaskId });
-            const resp = await fetch(`/api/omni-video/tasks/${encodeURIComponent(decodedTaskId)}`);
+            const resp = await fetch(`${taskApiBase(decodedTaskId)}/${encodeURIComponent(decodedTaskId)}`);
             const data = await resp.json();
             debugLog('detail response', data);
             if (!resp.ok || !data.success) {
@@ -653,7 +670,7 @@
                     showToast(`当前状态为 ${task.status || '-'}，不需要刷新。`, 'warning');
                     return;
                 }
-                const resp = await fetch(`/api/omni-video/tasks/${encodeURIComponent(decodedTaskId)}/refresh`, {
+                const resp = await fetch(`${taskApiBase(decodedTaskId)}/${encodeURIComponent(decodedTaskId)}/refresh`, {
                     method: 'POST',
                 });
                 const data = await resp.json();
@@ -770,6 +787,7 @@
         function resetFilters() {
             document.getElementById('search').value = '';
             document.getElementById('status').value = '';
+            document.getElementById('source').value = '';
             document.getElementById('startDate').value = '';
             document.getElementById('endDate').value = '';
             currentPage = 1;
@@ -784,7 +802,7 @@
             debugLog('refresh pending tasks', pendingTasks.map(t => t.task_id));
             const refreshPromises = pendingTasks.map(async (task) => {
                 try {
-                    const resp = await fetch(`/api/omni-video/tasks/${encodeURIComponent(task.task_id)}/refresh`, {
+                    const resp = await fetch(`${taskApiBase(task.task_id)}/${encodeURIComponent(task.task_id)}/refresh`, {
                         method: 'POST',
                     });
                     const data = await resp.json();
@@ -857,6 +875,7 @@
             if (event.key === 'Enter') loadTasks(1);
         });
         document.getElementById('status').addEventListener('change', () => loadTasks(1));
+        document.getElementById('source').addEventListener('change', () => loadTasks(1));
         document.getElementById('startDate').addEventListener('change', () => loadTasks(1));
         document.getElementById('endDate').addEventListener('change', () => loadTasks(1));
         document.getElementById('autoRefresh').addEventListener('change', setupAutoRefresh);

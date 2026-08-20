@@ -89,6 +89,17 @@ class Config:
     ARK_INTL_BASE_URL: str = "https://ark.ap-southeast.bytepluses.com/api/v3"
     SEEDANCE_INTL_MODEL: str = "dreamina-seedance-2-0-260128"
 
+    # ==================== 阿里云百炼 / Wan 3.0 ====================
+    DASHSCOPE_API_KEY: str = ""
+    DASHSCOPE_API_KEY_POOL: str = ""
+    WAN_BASE_URL: str = "https://dashscope.aliyuncs.com"
+    WAN_VIDEO_MODEL: str = "wan3.0-video"
+    WAN_VIDEO_MODELS: str = "wan3.0-video"
+    WAN_VIDEO_CREATE_PATH: str = "/api/v1/services/aigc/video-generation/video-synthesis"
+    WAN_VIDEO_QUERY_PATH: str = "/api/v1/tasks/{task_id}"
+    WAN_VIDEO_CANCEL_PATH: str = "/api/v1/tasks/{task_id}/cancel"
+    WAN_VIDEO_PRICE_CENT_PER_SECOND: int = 0
+
     # ==================== 视频画质增强配置 ====================
     VIDEO_ENHANCE_API_KEY: str = ""
     VIDEO_ENHANCE_BASE_URL: str = "https://amk.cn-beijing.volces.com/api/v1"
@@ -222,6 +233,27 @@ class Config:
         )
         self.ARK_INTL_BASE_URL = os.environ.get("ARK_INTL_BASE_URL", self.ARK_INTL_BASE_URL)
         self.SEEDANCE_INTL_MODEL = os.environ.get("SEEDANCE_INTL_MODEL", self.SEEDANCE_INTL_MODEL)
+
+        # 阿里云百炼 / Wan 3.0
+        self.DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", self.DASHSCOPE_API_KEY)
+        self.DASHSCOPE_API_KEY_POOL = os.environ.get(
+            "DASHSCOPE_API_KEY_POOL", self.DASHSCOPE_API_KEY_POOL
+        )
+        self.WAN_BASE_URL = os.environ.get("WAN_BASE_URL", self.WAN_BASE_URL).rstrip("/")
+        self.WAN_VIDEO_MODEL = os.environ.get("WAN_VIDEO_MODEL", self.WAN_VIDEO_MODEL)
+        self.WAN_VIDEO_MODELS = os.environ.get("WAN_VIDEO_MODELS", self.WAN_VIDEO_MODELS)
+        self.WAN_VIDEO_CREATE_PATH = os.environ.get(
+            "WAN_VIDEO_CREATE_PATH", self.WAN_VIDEO_CREATE_PATH
+        )
+        self.WAN_VIDEO_QUERY_PATH = os.environ.get(
+            "WAN_VIDEO_QUERY_PATH", self.WAN_VIDEO_QUERY_PATH
+        )
+        self.WAN_VIDEO_CANCEL_PATH = os.environ.get(
+            "WAN_VIDEO_CANCEL_PATH", self.WAN_VIDEO_CANCEL_PATH
+        )
+        self.WAN_VIDEO_PRICE_CENT_PER_SECOND = int(os.environ.get(
+            "WAN_VIDEO_PRICE_CENT_PER_SECOND", self.WAN_VIDEO_PRICE_CENT_PER_SECOND
+        ))
 
         # 视频画质增强配置
         self.VIDEO_ENHANCE_API_KEY = os.environ.get(

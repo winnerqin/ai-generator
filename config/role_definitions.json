@@ -19,7 +19,8 @@
       "admin",
       "role_management",
       "stats",
-      "video_tasks"
+      "video_tasks",
+      "wan_video"
     ],
     "pricing_multiplier": 1.0,
     "built_in": true
@@ -35,6 +36,7 @@
       "video_generate",
       "video_tasks",
       "omni_video",
+      "wan_video",
       "omni_video_tasks",
       "enhance_tasks",
       "txt2csv",
@@ -52,6 +54,7 @@
       "image2",
       "records",
       "omni_video",
+      "wan_video",
       "omni_video_tasks",
       "user_center",
       "batch",

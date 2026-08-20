@@ -6,6 +6,7 @@ import threading
 import time
 
 from app.services.omni_video_service import omni_video_service
+from app.services.wan_video_service import wan_video_service
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,13 @@ def _is_enabled() -> bool:
 
 def refresh_pending_omni_video_tasks_once(batch_limit: int | None = None) -> dict[str, int]:
     limit = batch_limit if batch_limit is not None else DEFAULT_BATCH_LIMIT
-    return omni_video_service.refresh_pending_tasks(limit=limit)
+    seedance = omni_video_service.refresh_pending_tasks(limit=limit)
+    wan = wan_video_service.refresh_pending_tasks(limit=limit)
+    return {
+        "scanned": seedance.get("scanned", 0) + wan.get("checked", 0),
+        "refreshed": seedance.get("refreshed", 0) + wan.get("updated", 0),
+        "failed": seedance.get("failed", 0) + wan.get("failed", 0),
+    }
 
 
 def _run_loop(interval_seconds: int, batch_limit: int) -> None:
