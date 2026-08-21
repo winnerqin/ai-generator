@@ -80,6 +80,18 @@ def test_get_wan_config(auth_client, monkeypatch):
     assert response.get_json()["models"] == ["wan3.0-video", "wan3.0-video-fast"]
 
 
+def test_get_aliyun_balance(auth_client, monkeypatch):
+    module = importlib.import_module("app.api.wan_video")
+    monkeypatch.setattr(module.aliyun_balance_service, "query", lambda **kwargs: {
+        "available_amount": "123.45", "available_cash_amount": "120.00", "currency": "CNY",
+    })
+    monkeypatch.setattr(module, "log_balance_query", lambda **kwargs: None)
+    response = auth_client.get("/api/wan-video/balance")
+    assert response.status_code == 200
+    assert response.get_json()["available_amount"] == "123.45"
+    assert "access_key" not in str(response.get_json()).lower()
+
+
 def test_wan_page_reuses_content_library_and_oss_upload(auth_client):
     response = auth_client.get("/wan-video")
     assert response.status_code == 200
@@ -96,6 +108,8 @@ def test_wan_page_reuses_content_library_and_oss_upload(auth_client):
     assert "wan-library-toolbar" in html
     assert "<option>480P</option>" in html
     assert "<option selected>720P</option>" in html
+    assert "阿里云余额" in html
+    assert "/api/wan-video/balance" in html
     assert "data-open=" not in html
     assert "/api/omni-video/tasks" in html
     assert "first_frame" in html

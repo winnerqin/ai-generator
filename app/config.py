@@ -99,6 +99,9 @@ class Config:
     WAN_VIDEO_QUERY_PATH: str = "/api/v1/tasks/{task_id}"
     WAN_VIDEO_CANCEL_PATH: str = "/api/v1/tasks/{task_id}/cancel"
     WAN_VIDEO_PRICE_CENT_PER_SECOND: int = 0
+    ALIBABA_CLOUD_ACCESS_KEY_ID: str = ""
+    ALIBABA_CLOUD_ACCESS_KEY_SECRET: str = ""
+    ALIBABA_BSS_ENDPOINT: str = "business.aliyuncs.com"
 
     # ==================== 视频画质增强配置 ====================
     VIDEO_ENHANCE_API_KEY: str = ""
@@ -254,6 +257,15 @@ class Config:
         self.WAN_VIDEO_PRICE_CENT_PER_SECOND = int(os.environ.get(
             "WAN_VIDEO_PRICE_CENT_PER_SECOND", self.WAN_VIDEO_PRICE_CENT_PER_SECOND
         ))
+        self.ALIBABA_CLOUD_ACCESS_KEY_ID = os.environ.get(
+            "ALIBABA_CLOUD_ACCESS_KEY_ID", self.ALIBABA_CLOUD_ACCESS_KEY_ID
+        )
+        self.ALIBABA_CLOUD_ACCESS_KEY_SECRET = os.environ.get(
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET", self.ALIBABA_CLOUD_ACCESS_KEY_SECRET
+        )
+        self.ALIBABA_BSS_ENDPOINT = os.environ.get(
+            "ALIBABA_BSS_ENDPOINT", self.ALIBABA_BSS_ENDPOINT
+        )
 
         # 视频画质增强配置
         self.VIDEO_ENHANCE_API_KEY = os.environ.get(

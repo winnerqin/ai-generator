@@ -10,6 +10,8 @@ import database
 from app.config import config
 from app.decorators import handle_api_error, login_required
 from app.services.wan_video_service import SOURCE, _models, wan_video_service
+from app.services.aliyun_balance_service import aliyun_balance_service
+from app.services.operation_log_service import log_balance_query
 
 wan_video_bp = Blueprint("wan_video", __name__)
 
@@ -38,6 +40,28 @@ def get_config():
         "models": _models(), "default_model": config.WAN_VIDEO_MODEL,
         "modes": ["text_to_video", "image_to_video_first", "image_to_video_first_last", "reference_to_video"],
     })
+
+
+@wan_video_bp.route("/api/wan-video/balance")
+@login_required
+def get_aliyun_balance():
+    user_id = session.get("user_id")
+    username = session.get("username")
+    try:
+        result = aliyun_balance_service.query(
+            force=(request.args.get("refresh") or "").lower() == "true"
+        )
+        log_balance_query(
+            user_id=user_id, username=username, service_name="aliyun_bss",
+            available_balance=float(result["available_amount"]), success=True,
+        )
+        return jsonify({"success": True, **result})
+    except Exception as exc:
+        log_balance_query(
+            user_id=user_id, username=username, service_name="aliyun_bss",
+            success=False, error=str(exc),
+        )
+        return jsonify({"success": False, "error": str(exc)}), 400
 
 
 @wan_video_bp.route("/api/wan-video/tasks", methods=["POST"])
