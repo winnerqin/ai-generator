@@ -77,4 +77,6 @@ def test_dashboard_page_contains_required_sections(client, monkeypatch):
     assert "创作趋势" in html
     assert "最近作品" in html
     assert "模型稳定性" in html
+    assert '<body class="react-theme">' in html
+    assert "y-axis" in html and "bar-value" in html and "makeAxis" in html
     assert "余额" not in html and "Token" not in html and "快捷入口" not in html
