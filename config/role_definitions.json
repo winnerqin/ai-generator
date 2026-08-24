@@ -3,6 +3,7 @@
     "code": "system_admin",
     "name": "系统管理员",
     "menu_keys": [
+      "dashboard",
       "index",
       "image2",
       "batch",
@@ -19,7 +20,8 @@
       "admin",
       "role_management",
       "stats",
-      "video_tasks"
+      "video_tasks",
+      "wan_video"
     ],
     "pricing_multiplier": 1.0,
     "built_in": true
@@ -28,6 +30,7 @@
     "code": "internal_user",
     "name": "内部用户",
     "menu_keys": [
+      "dashboard",
       "index",
       "image2",
       "batch",
@@ -35,6 +38,7 @@
       "video_generate",
       "video_tasks",
       "omni_video",
+      "wan_video",
       "omni_video_tasks",
       "enhance_tasks",
       "txt2csv",
@@ -48,10 +52,12 @@
     "code": "external_user",
     "name": "外部用户",
     "menu_keys": [
+      "dashboard",
       "index",
       "image2",
       "records",
       "omni_video",
+      "wan_video",
       "omni_video_tasks",
       "user_center",
       "batch",

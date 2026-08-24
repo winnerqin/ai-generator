@@ -89,6 +89,31 @@ class Config:
     ARK_INTL_BASE_URL: str = "https://ark.ap-southeast.bytepluses.com/api/v3"
     SEEDANCE_INTL_MODEL: str = "dreamina-seedance-2-0-260128"
 
+    # ==================== 阿里云百炼 / Wan 3.0 ====================
+    DASHSCOPE_API_KEY: str = ""
+    DASHSCOPE_API_KEY_POOL: str = ""
+    WAN_BASE_URL: str = "https://dashscope.aliyuncs.com"
+    DASHSCOPE_INTL_API_KEY: str = ""
+    DASHSCOPE_INTL_API_KEY_POOL: str = ""
+    WAN_INTL_BASE_URL: str = "https://dashscope-intl.aliyuncs.com/api/v1"
+    WAN_VIDEO_MODEL: str = "wan3.0-video"
+    WAN_VIDEO_UPSTREAM_MODEL: str = "wan3.0-video"
+    WAN_VIDEO_INTL_MODEL: str = "wan3.0-video-intl"
+    WAN_VIDEO_MODELS: str = "wan3.0-video,wan3.0-video-intl"
+    WAN_VIDEO_CREATE_PATH: str = "/api/v1/services/aigc/video-generation/video-synthesis"
+    WAN_VIDEO_QUERY_PATH: str = "/api/v1/tasks/{task_id}"
+    WAN_VIDEO_CANCEL_PATH: str = "/api/v1/tasks/{task_id}/cancel"
+    WAN_VIDEO_PRICE_480P_YUAN_PER_SECOND: str = "0.3"
+    WAN_VIDEO_PRICE_720P_YUAN_PER_SECOND: str = "0.6"
+    WAN_VIDEO_PRICE_1080P_YUAN_PER_SECOND: str = "1.2"
+    WAN_VIDEO_INTL_PRICE_480P_YUAN_PER_SECOND: str = "0.495838"
+    WAN_VIDEO_INTL_PRICE_720P_YUAN_PER_SECOND: str = "1.020844"
+    WAN_VIDEO_INTL_PRICE_1080P_YUAN_PER_SECOND: str = "2.041687"
+    WAN_VIDEO_SMART_DURATION_MAX_SECONDS: int = 30
+    ALIBABA_CLOUD_ACCESS_KEY_ID: str = ""
+    ALIBABA_CLOUD_ACCESS_KEY_SECRET: str = ""
+    ALIBABA_BSS_ENDPOINT: str = "business.aliyuncs.com"
+
     # ==================== 视频画质增强配置 ====================
     VIDEO_ENHANCE_API_KEY: str = ""
     VIDEO_ENHANCE_BASE_URL: str = "https://amk.cn-beijing.volces.com/api/v1"
@@ -222,6 +247,69 @@ class Config:
         )
         self.ARK_INTL_BASE_URL = os.environ.get("ARK_INTL_BASE_URL", self.ARK_INTL_BASE_URL)
         self.SEEDANCE_INTL_MODEL = os.environ.get("SEEDANCE_INTL_MODEL", self.SEEDANCE_INTL_MODEL)
+
+        # 阿里云百炼 / Wan 3.0
+        self.DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", self.DASHSCOPE_API_KEY)
+        self.DASHSCOPE_API_KEY_POOL = os.environ.get(
+            "DASHSCOPE_API_KEY_POOL", self.DASHSCOPE_API_KEY_POOL
+        )
+        self.WAN_BASE_URL = os.environ.get("WAN_BASE_URL", self.WAN_BASE_URL).rstrip("/")
+        self.DASHSCOPE_INTL_API_KEY = os.environ.get(
+            "DASHSCOPE_INTL_API_KEY", self.DASHSCOPE_INTL_API_KEY
+        )
+        self.DASHSCOPE_INTL_API_KEY_POOL = os.environ.get(
+            "DASHSCOPE_INTL_API_KEY_POOL", self.DASHSCOPE_INTL_API_KEY_POOL
+        )
+        self.WAN_INTL_BASE_URL = os.environ.get(
+            "WAN_INTL_BASE_URL", self.WAN_INTL_BASE_URL
+        ).rstrip("/")
+        self.WAN_VIDEO_MODEL = os.environ.get("WAN_VIDEO_MODEL", self.WAN_VIDEO_MODEL)
+        self.WAN_VIDEO_UPSTREAM_MODEL = os.environ.get(
+            "WAN_VIDEO_UPSTREAM_MODEL", self.WAN_VIDEO_UPSTREAM_MODEL
+        )
+        self.WAN_VIDEO_INTL_MODEL = os.environ.get(
+            "WAN_VIDEO_INTL_MODEL", self.WAN_VIDEO_INTL_MODEL
+        )
+        self.WAN_VIDEO_MODELS = os.environ.get("WAN_VIDEO_MODELS", self.WAN_VIDEO_MODELS)
+        self.WAN_VIDEO_CREATE_PATH = os.environ.get(
+            "WAN_VIDEO_CREATE_PATH", self.WAN_VIDEO_CREATE_PATH
+        )
+        self.WAN_VIDEO_QUERY_PATH = os.environ.get(
+            "WAN_VIDEO_QUERY_PATH", self.WAN_VIDEO_QUERY_PATH
+        )
+        self.WAN_VIDEO_CANCEL_PATH = os.environ.get(
+            "WAN_VIDEO_CANCEL_PATH", self.WAN_VIDEO_CANCEL_PATH
+        )
+        self.WAN_VIDEO_PRICE_480P_YUAN_PER_SECOND = os.environ.get(
+            "WAN_VIDEO_PRICE_480P_YUAN_PER_SECOND", self.WAN_VIDEO_PRICE_480P_YUAN_PER_SECOND
+        )
+        self.WAN_VIDEO_PRICE_720P_YUAN_PER_SECOND = os.environ.get(
+            "WAN_VIDEO_PRICE_720P_YUAN_PER_SECOND", self.WAN_VIDEO_PRICE_720P_YUAN_PER_SECOND
+        )
+        self.WAN_VIDEO_PRICE_1080P_YUAN_PER_SECOND = os.environ.get(
+            "WAN_VIDEO_PRICE_1080P_YUAN_PER_SECOND", self.WAN_VIDEO_PRICE_1080P_YUAN_PER_SECOND
+        )
+        self.WAN_VIDEO_INTL_PRICE_480P_YUAN_PER_SECOND = os.environ.get(
+            "WAN_VIDEO_INTL_PRICE_480P_YUAN_PER_SECOND", self.WAN_VIDEO_INTL_PRICE_480P_YUAN_PER_SECOND
+        )
+        self.WAN_VIDEO_INTL_PRICE_720P_YUAN_PER_SECOND = os.environ.get(
+            "WAN_VIDEO_INTL_PRICE_720P_YUAN_PER_SECOND", self.WAN_VIDEO_INTL_PRICE_720P_YUAN_PER_SECOND
+        )
+        self.WAN_VIDEO_INTL_PRICE_1080P_YUAN_PER_SECOND = os.environ.get(
+            "WAN_VIDEO_INTL_PRICE_1080P_YUAN_PER_SECOND", self.WAN_VIDEO_INTL_PRICE_1080P_YUAN_PER_SECOND
+        )
+        self.WAN_VIDEO_SMART_DURATION_MAX_SECONDS = int(os.environ.get(
+            "WAN_VIDEO_SMART_DURATION_MAX_SECONDS", self.WAN_VIDEO_SMART_DURATION_MAX_SECONDS
+        ))
+        self.ALIBABA_CLOUD_ACCESS_KEY_ID = os.environ.get(
+            "ALIBABA_CLOUD_ACCESS_KEY_ID", self.ALIBABA_CLOUD_ACCESS_KEY_ID
+        )
+        self.ALIBABA_CLOUD_ACCESS_KEY_SECRET = os.environ.get(
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET", self.ALIBABA_CLOUD_ACCESS_KEY_SECRET
+        )
+        self.ALIBABA_BSS_ENDPOINT = os.environ.get(
+            "ALIBABA_BSS_ENDPOINT", self.ALIBABA_BSS_ENDPOINT
+        )
 
         # 视频画质增强配置
         self.VIDEO_ENHANCE_API_KEY = os.environ.get(

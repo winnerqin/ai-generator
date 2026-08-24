@@ -17,12 +17,14 @@ from app.api.batch import batch_bp
 
 # 内容管理
 from app.api.content import content_bp
+from app.api.dashboard import dashboard_bp
 
 # 图片生成
 from app.api.image import image_bp
 
 # 全能视频
 from app.api.omni_video import omni_video_bp
+from app.api.wan_video import wan_video_bp
 
 # 项目管理
 from app.api.projects import projects_bp
@@ -48,11 +50,13 @@ __all__ = [
     "admin_bp",
     "image_bp",
     "omni_video_bp",
+    "wan_video_bp",
     "batch_bp",
     "video_bp",
     "script_bp",
     "storyboard_bp",
     "tools_bp",
     "content_bp",
+    "dashboard_bp",
     "video_enhance_bp",
 ]

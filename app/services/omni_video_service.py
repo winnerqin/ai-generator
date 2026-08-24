@@ -709,6 +709,30 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
         )
     if (
         amount_cent is None
+        and task.get("source") == "wan_video"
+        and token_usage not in (None, "")
+        and task.get("user_id")
+    ):
+        try:
+            resolution = str(task.get("resolution") or "720P").strip().upper()
+            prefix = (
+                "WAN_VIDEO_INTL_PRICE"
+                if str(task.get("model") or "") == config.WAN_VIDEO_INTL_MODEL
+                else "WAN_VIDEO_PRICE"
+            )
+            unit_price = Decimal(str(getattr(
+                config, f"{prefix}_{resolution}_YUAN_PER_SECOND", 0
+            ) or 0)) * Decimal("100")
+            user = database.get_user_by_id(task.get("user_id"))
+            if unit_price > 0 and user:
+                amount_cent = _to_cent(
+                    Decimal(str(token_usage)) * Decimal(unit_price) * _effective_multiplier(user)
+                )
+        except Exception:
+            amount_cent = None
+    if (
+        amount_cent is None
+        and task.get("source") != "wan_video"
         and token_usage not in (None, "")
         and task.get("model")
         and task.get("user_id")
@@ -1230,6 +1254,7 @@ class OmniVideoService:
         start_date: str | None = None,
         end_date: str | None = None,
         batch_id: str | None = None,
+        source: str | None = None,
         page: int = 1,
         page_size: int = 20,
         sync_running: bool = False,
@@ -1243,6 +1268,7 @@ class OmniVideoService:
             start_date=start_date,
             end_date=end_date,
             batch_id=batch_id,
+            source=source,
             limit=page_size,
             offset=offset,
             include_heavy_fields=False,
@@ -1255,12 +1281,17 @@ class OmniVideoService:
             start_date=start_date,
             end_date=end_date,
             batch_id=batch_id,
+            source=source,
         )
         ledger_amounts = database.get_ledger_debit_amounts_cent(
             user_id,
             "omni_video",
             [item.get("task_id") for item in items],
         )
+        wan_ledger_amounts = database.get_ledger_debit_amounts_cent(
+            user_id, "wan_video", [item.get("task_id") for item in items]
+        )
+        ledger_amounts.update(wan_ledger_amounts)
         for item in items:
             item["_ledger_amount_cent"] = ledger_amounts.get(str(item.get("task_id") or ""))
 
@@ -1303,6 +1334,7 @@ class OmniVideoService:
 
     def refresh_pending_tasks(self, limit: int = 200) -> dict[str, int]:
         items = database.get_omni_video_tasks_by_statuses(["queued", "running"], limit=limit)
+        items = [item for item in items if item.get("source") != "wan_video"]
         refreshed = 0
         failed = 0
         for item in items:

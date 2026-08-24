@@ -262,6 +262,7 @@ def list_omni_video_tasks():
     start_date = request.args.get("start_date") or None
     end_date = request.args.get("end_date") or None
     batch_id = request.args.get("batch_id") or None
+    source = request.args.get("source") or None
     sync_running = (request.args.get("sync_running", "false") or "false").lower() == "true"
     logger.info(
         "[omni-video][list][request] user_id=%s project_id=%s page=%s page_size=%s status=%s search=%s start_date=%s end_date=%s sync_running=%s",
@@ -284,6 +285,7 @@ def list_omni_video_tasks():
         start_date=start_date,
         end_date=end_date,
         batch_id=batch_id,
+        source=source,
         page=page,
         page_size=page_size,
         sync_running=sync_running,
