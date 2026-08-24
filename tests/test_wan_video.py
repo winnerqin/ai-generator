@@ -1,4 +1,5 @@
 import importlib
+from decimal import Decimal
 
 import pytest
 
@@ -14,20 +15,41 @@ def test_build_text_to_video_payload():
     assert canonical["mode"] == "text_to_video"
 
 
+def test_build_international_payload_uses_same_upstream_model(monkeypatch):
+    module = importlib.import_module("app.services.wan_video_service")
+    monkeypatch.setattr(module.config, "WAN_VIDEO_MODELS", "wan3.0-video")
+    monkeypatch.setattr(module.config, "WAN_VIDEO_INTL_MODEL", "wan3.0-video-intl")
+    monkeypatch.setattr(module.config, "WAN_VIDEO_UPSTREAM_MODEL", "wan3.0-video")
+    payload, canonical = module.build_wan_video_payload({
+        "mode": "text_to_video", "model": "wan3.0-video-intl",
+        "prompt": "Singapore", "resolution": "480P", "duration": 5,
+    })
+    assert payload["model"] == "wan3.0-video"
+    assert canonical["model"] == "wan3.0-video-intl"
+    assert module._region_for_model(canonical["model"]) == "intl"
+
+
+def test_international_price_keeps_sub_cent_precision(monkeypatch):
+    module = importlib.import_module("app.services.wan_video_service")
+    monkeypatch.setattr(module.config, "WAN_VIDEO_INTL_MODEL", "wan3.0-video-intl")
+    monkeypatch.setattr(module.config, "WAN_VIDEO_INTL_PRICE_480P_YUAN_PER_SECOND", "0.495838")
+    assert module._price_cent_per_second("480P", "wan3.0-video-intl") == Decimal("49.583800")
+
+
 @pytest.mark.parametrize(("resolution", "setting", "expected"), [
-    ("480P", "WAN_VIDEO_PRICE_480P_CENT_PER_SECOND", 30),
-    ("720p", "WAN_VIDEO_PRICE_720P_CENT_PER_SECOND", 60),
-    ("1080P", "WAN_VIDEO_PRICE_1080P_CENT_PER_SECOND", 120),
+    ("480P", "WAN_VIDEO_PRICE_480P_YUAN_PER_SECOND", "0.3"),
+    ("720p", "WAN_VIDEO_PRICE_720P_YUAN_PER_SECOND", "0.6"),
+    ("1080P", "WAN_VIDEO_PRICE_1080P_YUAN_PER_SECOND", "1.2"),
 ])
 def test_wan_price_is_selected_by_resolution(monkeypatch, resolution, setting, expected):
     module = importlib.import_module("app.services.wan_video_service")
     monkeypatch.setattr(module.config, setting, expected)
-    assert module._price_cent_per_second(resolution) == expected
+    assert module._price_cent_per_second(resolution) == Decimal(expected) * Decimal("100")
 
 
 def test_wan_balance_check_uses_resolution_price(monkeypatch):
     module = importlib.import_module("app.services.wan_video_service")
-    monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_1080P_CENT_PER_SECOND", 120)
+    monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_1080P_YUAN_PER_SECOND", "1.2")
     monkeypatch.setattr(module.database, "get_user_by_id", lambda _user_id: {
         "role_code": module.database.ROLE_EXTERNAL_USER,
         "pricing_multiplier": 1,
@@ -40,7 +62,7 @@ def test_wan_balance_check_uses_resolution_price(monkeypatch):
 
 def test_smart_duration_reserves_configured_maximum(monkeypatch):
     module = importlib.import_module("app.services.wan_video_service")
-    monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_720P_CENT_PER_SECOND", 60)
+    monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_720P_YUAN_PER_SECOND", "0.6")
     monkeypatch.setattr(module.config, "WAN_VIDEO_SMART_DURATION_MAX_SECONDS", 30)
     monkeypatch.setattr(module.database, "get_user_by_id", lambda _user_id: {
         "role_code": module.database.ROLE_EXTERNAL_USER,
@@ -69,7 +91,7 @@ def test_smart_duration_payload_and_actual_usage_billing():
 
 def test_smart_duration_without_usage_is_pending(monkeypatch):
     module = importlib.import_module("app.services.wan_video_service")
-    monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_480P_CENT_PER_SECOND", 30)
+    monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_480P_YUAN_PER_SECOND", "0.3")
     monkeypatch.setattr(module.database, "has_ledger_entry", lambda *args: False)
     monkeypatch.setattr(module.database, "get_user_by_id", lambda _user_id: {
         "role_code": module.database.ROLE_EXTERNAL_USER, "pricing_multiplier": 1,
@@ -97,7 +119,7 @@ def test_invalid_wan_duration_is_rejected(duration):
 
 def test_wan_settlement_records_resolution_price(monkeypatch):
     module = importlib.import_module("app.services.wan_video_service")
-    monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_480P_CENT_PER_SECOND", 30)
+    monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_480P_YUAN_PER_SECOND", "0.3")
     monkeypatch.setattr(module.database, "has_ledger_entry", lambda *args: False)
     monkeypatch.setattr(module.database, "get_user_by_id", lambda _user_id: {
         "role_code": module.database.ROLE_EXTERNAL_USER, "pricing_multiplier": 1,
@@ -112,7 +134,7 @@ def test_wan_settlement_records_resolution_price(monkeypatch):
     })
     assert captured["amount_cent"] == 150
     assert captured["snapshot_json"]["resolution"] == "480P"
-    assert captured["snapshot_json"]["price_cent_per_second"] == 30
+    assert Decimal(captured["snapshot_json"]["price_cent_per_second"]) == Decimal("30")
 
 
 def test_build_first_last_frame_payload():
@@ -178,6 +200,29 @@ def test_client_does_not_send_async_header_when_querying(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer sk-test"
 
 
+def test_client_routes_international_calls_to_singapore(monkeypatch):
+    module = importlib.import_module("app.services.wan_video_client")
+    monkeypatch.setattr(module.config, "DASHSCOPE_INTL_API_KEY", "sk-intl")
+    monkeypatch.setattr(module.config, "DASHSCOPE_INTL_API_KEY_POOL", "")
+    monkeypatch.setattr(module.config, "WAN_INTL_BASE_URL", "https://dashscope-intl.aliyuncs.com/api/v1")
+
+    class Response:
+        ok = True
+        def json(self): return {"output": {"task_id": "intl-task"}}
+
+    captured = {}
+    monkeypatch.setattr(module.requests, "post",
+                        lambda url, **kwargs: captured.update(url=url, **kwargs) or Response())
+    module.wan_video_client.create_task(
+        {"model": "wan3.0-video"}, route_key="intl", region="intl"
+    )
+    assert captured["url"] == (
+        "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis"
+    )
+    assert captured["headers"]["Authorization"] == "Bearer sk-intl"
+    assert captured["headers"]["X-DashScope-Async"] == "enable"
+
+
 def test_create_wan_video_api(auth_client, monkeypatch):
     module = importlib.import_module("app.api.wan_video")
     monkeypatch.setattr(module.database, "get_omni_video_task_by_client_request_id", lambda *a, **k: None)
@@ -195,9 +240,12 @@ def test_create_wan_video_api(auth_client, monkeypatch):
 def test_get_wan_config(auth_client, monkeypatch):
     module = importlib.import_module("app.api.wan_video")
     monkeypatch.setattr(module.config, "WAN_VIDEO_MODELS", "wan3.0-video,wan3.0-video-fast")
+    monkeypatch.setattr(module.config, "WAN_VIDEO_INTL_MODEL", "wan3.0-video-intl")
     response = auth_client.get("/api/wan-video/config")
     assert response.status_code == 200
-    assert response.get_json()["models"] == ["wan3.0-video", "wan3.0-video-fast"]
+    data = response.get_json()
+    assert data["models"] == ["wan3.0-video", "wan3.0-video-fast", "wan3.0-video-intl"]
+    assert data["model_aliases"]["wan3.0-video-intl"] == "WAN3.0-video国际版"
 
 
 def test_get_aliyun_balance(auth_client, monkeypatch):
@@ -250,7 +298,7 @@ def test_wan_page_reuses_content_library_and_oss_upload(auth_client):
 
 def test_omni_task_decorator_estimates_wan_amount_from_resolution(monkeypatch):
     module = importlib.import_module("app.services.omni_video_service")
-    monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_480P_CENT_PER_SECOND", 60)
+    monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_480P_YUAN_PER_SECOND", "0.6")
     monkeypatch.setattr(module.database, "get_ledger_debit_amount_cent", lambda *args: None)
     monkeypatch.setattr(module.database, "get_user_by_id", lambda _user_id: {
         "role_code": "system_admin", "pricing_multiplier": 1,

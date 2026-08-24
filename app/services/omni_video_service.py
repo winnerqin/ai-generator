@@ -715,9 +715,14 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
     ):
         try:
             resolution = str(task.get("resolution") or "720P").strip().upper()
-            unit_price = int(getattr(
-                config, f"WAN_VIDEO_PRICE_{resolution}_CENT_PER_SECOND", 0
-            ) or 0)
+            prefix = (
+                "WAN_VIDEO_INTL_PRICE"
+                if str(task.get("model") or "") == config.WAN_VIDEO_INTL_MODEL
+                else "WAN_VIDEO_PRICE"
+            )
+            unit_price = Decimal(str(getattr(
+                config, f"{prefix}_{resolution}_YUAN_PER_SECOND", 0
+            ) or 0)) * Decimal("100")
             user = database.get_user_by_id(task.get("user_id"))
             if unit_price > 0 and user:
                 amount_cent = _to_cent(

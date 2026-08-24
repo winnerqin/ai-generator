@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, render_template, request, session
 import database
 from app.config import config
 from app.decorators import handle_api_error, login_required
-from app.services.wan_video_service import SOURCE, _models, wan_video_service
+from app.services.wan_video_service import SOURCE, _default_model, _models, wan_video_service
 from app.services.aliyun_balance_service import aliyun_balance_service
 from app.services.operation_log_service import log_balance_query
 
@@ -36,8 +36,17 @@ def page():
 @login_required
 def get_config():
     return jsonify({
-        "success": True, "configured": wan_video_service is not None and bool(config.DASHSCOPE_API_KEY or config.DASHSCOPE_API_KEY_POOL),
-        "models": _models(), "default_model": config.WAN_VIDEO_MODEL,
+        "success": True,
+        "configured": bool(
+            config.DASHSCOPE_API_KEY or config.DASHSCOPE_API_KEY_POOL
+            or config.DASHSCOPE_INTL_API_KEY or config.DASHSCOPE_INTL_API_KEY_POOL
+        ),
+        "models": _models(), "default_model": _default_model(),
+        "model_aliases": {
+            model: ("WAN3.0-video国际版" if model == config.WAN_VIDEO_INTL_MODEL
+                    else "WAN3.0-video国内版")
+            for model in _models()
+        },
         "modes": ["text_to_video", "image_to_video_first", "image_to_video_first_last", "reference_to_video"],
     })
 

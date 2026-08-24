@@ -27,15 +27,28 @@ logger = logging.getLogger(__name__)
 
 
 def _models() -> list[str]:
-    return [item.strip() for item in config.WAN_VIDEO_MODELS.split(",") if item.strip()]
+    models = [item.strip() for item in config.WAN_VIDEO_MODELS.split(",") if item.strip()]
+    if config.WAN_VIDEO_INTL_MODEL and config.WAN_VIDEO_INTL_MODEL not in models:
+        models.append(config.WAN_VIDEO_INTL_MODEL)
+    return models
 
 
-def _price_cent_per_second(resolution: Any) -> int:
+def _region_for_model(model: Any) -> str:
+    return "intl" if str(model or "").strip() == config.WAN_VIDEO_INTL_MODEL else "cn"
+
+
+def _default_model() -> str:
+    models = _models()
+    return config.WAN_VIDEO_MODEL if config.WAN_VIDEO_MODEL in models else models[0]
+
+
+def _price_cent_per_second(resolution: Any, model: Any = None) -> Decimal:
     normalized = str(resolution or "720p").strip().lower()
     if normalized not in SUPPORTED_RESOLUTIONS:
         raise ValueError("Wan 3.0 分辨率必须是 480P、720P 或 1080P。")
-    setting = f"WAN_VIDEO_PRICE_{normalized.upper()}_CENT_PER_SECOND"
-    price = int(getattr(config, setting, 0) or 0)
+    prefix = "WAN_VIDEO_INTL_PRICE" if _region_for_model(model) == "intl" else "WAN_VIDEO_PRICE"
+    setting = f"{prefix}_{normalized.upper()}_YUAN_PER_SECOND"
+    price = Decimal(str(getattr(config, setting, 0) or 0)) * Decimal("100")
     if price <= 0:
         raise ValueError(f"Wan 3.0 尚未配置 {normalized.upper()} 按秒计费单价。")
     return price
@@ -84,7 +97,7 @@ def build_wan_video_payload(data: dict[str, Any]) -> tuple[dict[str, Any], dict[
     prompt = str(data.get("prompt") or "").strip()
     if not prompt:
         raise ValueError("提示词不能为空。")
-    model = str(data.get("model") or config.WAN_VIDEO_MODEL).strip()
+    model = str(data.get("model") or _default_model()).strip()
     if model not in _models():
         raise ValueError("不支持的 Wan 模型。")
     resolution = str(data.get("resolution") or "720P").strip().upper()
@@ -133,7 +146,8 @@ def build_wan_video_payload(data: dict[str, Any]) -> tuple[dict[str, Any], dict[
         upstream_input["media"] = [
             {"type": role_to_type[item["role"]], "url": item["url"]} for item in normalized
         ]
-    upstream = {"model": model, "input": upstream_input, "parameters": parameters}
+    upstream_model = config.WAN_VIDEO_UPSTREAM_MODEL if _region_for_model(model) == "intl" else model
+    upstream = {"model": upstream_model, "input": upstream_input, "parameters": parameters}
     parameters["resolution"] = resolution
     parameters["duration"] = duration
     canonical = {**data, "mode": mode, "model": model, "prompt": prompt,
@@ -150,11 +164,12 @@ class WanVideoService:
         user_multiplier = Decimal(str(user.get("pricing_multiplier") or 1))
         return user_multiplier if user_multiplier > 0 else role_multiplier
 
-    def _ensure_balance(self, user_id: int, duration: Any, resolution: Any) -> None:
+    def _ensure_balance(self, user_id: int, duration: Any, resolution: Any,
+                        model: Any = None) -> None:
         user = database.get_user_by_id(user_id) or {}
         if user.get("role_code") != database.ROLE_EXTERNAL_USER:
             return
-        unit_price = _price_cent_per_second(resolution)
+        unit_price = _price_cent_per_second(resolution, model)
         requested_seconds = _duration(duration)
         seconds = (int(config.WAN_VIDEO_SMART_DURATION_MAX_SECONDS or 30)
                    if requested_seconds == -1 else requested_seconds)
@@ -175,7 +190,7 @@ class WanVideoService:
         if user.get("role_code") != database.ROLE_EXTERNAL_USER:
             return "skipped"
         try:
-            unit_price = _price_cent_per_second(task.get("resolution"))
+            unit_price = _price_cent_per_second(task.get("resolution"), task.get("model"))
         except ValueError:
             return "pending"
         seconds = _billable_seconds(task)
@@ -187,10 +202,14 @@ class WanVideoService:
             user_id=task["user_id"], entry_type="debit", amount_cent=fee,
             biz_type=SOURCE, biz_id=task["task_id"], model_code=task.get("model"),
             tokens_raw=seconds, tokens_billed=seconds,
-            unit_price_cent_per_ktoken=unit_price * 1000, multiplier=float(multiplier),
+            unit_price_cent_per_ktoken=int((unit_price * Decimal("1000")).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )), multiplier=float(multiplier),
             snapshot_json={"billing_unit": "video_second", "billable_seconds": seconds,
                            "resolution": str(task.get("resolution") or "720P").upper(),
-                           "price_cent_per_second": unit_price, "pricing_multiplier": float(multiplier)},
+                           "region": _region_for_model(task.get("model")),
+                           "price_cent_per_second": str(unit_price),
+                           "pricing_multiplier": float(multiplier)},
         )
         return "settled"
 
@@ -234,12 +253,15 @@ class WanVideoService:
                 )
 
     def create_task(self, data: dict[str, Any], *, user_id: int, project_id: int | None) -> dict[str, Any]:
-        if not wan_video_client.is_configured():
+        requested_model = str(data.get("model") or _default_model()).strip()
+        region = _region_for_model(requested_model)
+        if not wan_video_client.is_configured(region):
             raise ValueError("Wan 3.0 服务尚未配置。")
         upstream, canonical = build_wan_video_payload(data)
-        self._ensure_balance(user_id, canonical.get("duration"), canonical.get("resolution"))
+        self._ensure_balance(user_id, canonical.get("duration"), canonical.get("resolution"),
+                             canonical.get("model"))
         route_key = str(data.get("client_request_id") or uuid.uuid4().hex)
-        response, slot = wan_video_client.create_task(upstream, route_key=route_key)
+        response, slot = wan_video_client.create_task(upstream, route_key=route_key, region=region)
         output = response.get("output") or {}
         task_id = output.get("task_id") or response.get("task_id")
         if not task_id:
@@ -256,14 +278,16 @@ class WanVideoService:
             "aspect_ratio": canonical.get("ratio"), "seed": canonical.get("seed"),
             "filename": canonical.get("filename"), "client_request_id": data.get("client_request_id"),
             "batch_id": data.get("batch_id"), "callback_url": data.get("callback_url"),
-            "external_meta_json": {"upstream_slot": slot},
+            "external_meta_json": {"upstream_slot": slot, "upstream_region": region},
         }
         database.save_omni_video_task(task)
         return database.get_omni_video_task(task_id, user_id=user_id)
 
     def refresh_task(self, task: dict[str, Any]) -> dict[str, Any]:
         slot = int((task.get("external_meta_json") or {}).get("upstream_slot") or 0)
-        response = wan_video_client.get_task(task["task_id"], slot=slot)
+        region = str((task.get("external_meta_json") or {}).get("upstream_region") or
+                     _region_for_model(task.get("model")))
+        response = wan_video_client.get_task(task["task_id"], slot=slot, region=region)
         output = response.get("output") or {}
         status = STATUS_MAP.get(str(output.get("task_status") or response.get("status") or "").upper(), "running")
         results = output.get("results") or []
@@ -304,7 +328,9 @@ class WanVideoService:
         if task.get("status") in TERMINAL:
             return task
         slot = int((task.get("external_meta_json") or {}).get("upstream_slot") or 0)
-        response = wan_video_client.cancel_task(task["task_id"], slot=slot)
+        region = str((task.get("external_meta_json") or {}).get("upstream_region") or
+                     _region_for_model(task.get("model")))
+        response = wan_video_client.cancel_task(task["task_id"], slot=slot, region=region)
         updated = {**task, "status": "cancelled", "raw_response_json": response}
         database.save_omni_video_task(updated)
         return database.get_omni_video_task(task["task_id"], user_id=task.get("user_id"))
