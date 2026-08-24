@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from flask import Flask, abort, g, render_template, request, send_file, session
+from flask import Flask, abort, g, redirect, render_template, request, send_file, session, url_for
 from flask.json.provider import DefaultJSONProvider
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -45,6 +45,7 @@ try:
         auth_bp,
         batch_bp,
         content_bp,
+        dashboard_bp,
         image_bp,
         omni_video_bp,
         wan_video_bp,
@@ -330,6 +331,7 @@ def create_app(config_name: str | None = None) -> Flask:
     app.register_blueprint(storyboard_bp)
     app.register_blueprint(tools_bp)
     app.register_blueprint(content_bp)
+    app.register_blueprint(dashboard_bp)
 
     register_error_handlers(app)
     register_context_processors(app)
@@ -388,6 +390,11 @@ def register_remaining_routes(app: Flask) -> None:
     @app.route("/")
     @login_required
     def index():
+        return redirect(url_for("dashboard.dashboard_page"))
+
+    @app.route("/image-generate")
+    @login_required
+    def image_generate():
         return render_template("index.html", user=_current_user_context())
 
     @app.route("/uploads/<path:relative_path>")

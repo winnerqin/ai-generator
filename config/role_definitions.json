@@ -3,6 +3,7 @@
     "code": "system_admin",
     "name": "系统管理员",
     "menu_keys": [
+      "dashboard",
       "index",
       "image2",
       "batch",
@@ -29,6 +30,7 @@
     "code": "internal_user",
     "name": "内部用户",
     "menu_keys": [
+      "dashboard",
       "index",
       "image2",
       "batch",
@@ -50,6 +52,7 @@
     "code": "external_user",
     "name": "外部用户",
     "menu_keys": [
+      "dashboard",
       "index",
       "image2",
       "records",

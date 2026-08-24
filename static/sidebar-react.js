@@ -1,5 +1,6 @@
 (function () {
     const ALL_MENU_KEYS = [
+        'dashboard',
         'index',
         'image2',
         'batch',
@@ -76,8 +77,9 @@
         const displayUsername = props.username || context.username || 'user';
         const [menuKeys, setMenuKeys] = React.useState(initialMenuKeys);
         const items = [
+            { key: 'dashboard', href: '/dashboard', icon: '◫', label: '首页概览' },
             { type: 'group', key: 'group_production', label: '内容生产' },
-            { key: 'index', href: '/', icon: '🎨', label: '单图生成' },
+            { key: 'index', href: '/image-generate', icon: '🎨', label: '单图生成' },
             { key: 'image2', href: '/image2', icon: '🖌️', label: 'Image2 生图' },
             { key: 'batch', href: '/batch', icon: '📦', label: '批量生成' },
             { key: 'records', href: '/records', icon: '🖼️', label: '生图任务' },
@@ -113,7 +115,7 @@
         }, []);
 
         const visibleItems = menuKeys
-            ? items.filter((item) => item.type || menuKeys.includes(item.key))
+            ? items.filter((item) => item.key === 'dashboard' || item.type || menuKeys.includes(item.key))
             : [];
 
         return React.createElement(

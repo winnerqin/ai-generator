@@ -28,6 +28,7 @@ STATUS_ACTIVE = "active"
 STATUS_DISABLED = "disabled"
 
 MENU_DEFINITIONS = [
+    {"key": "dashboard", "label": "首页概览"},
     {"key": "index", "label": "单图生成"},
     {"key": "image2", "label": "Image2 生图"},
     {"key": "batch", "label": "批量生成"},
@@ -60,6 +61,7 @@ DEFAULT_ROLE_DEFINITIONS = [
         "code": ROLE_INTERNAL_USER,
         "name": "内部用户",
         "menu_keys": [
+            "dashboard",
             "index",
             "image2",
             "batch",
@@ -83,6 +85,7 @@ DEFAULT_ROLE_DEFINITIONS = [
         "code": ROLE_EXTERNAL_USER,
         "name": "外部用户",
         "menu_keys": [
+            "dashboard",
             "index",
             "image2",
             "records",
@@ -3853,6 +3856,173 @@ def get_storyboard_record(user_id, project_id, record_id):
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def get_dashboard_data(
+    *, user_id=None, project_id=None, start_at=None, end_at=None,
+    include_admin=False, stale_minutes=30,
+):
+    """Return role-scoped dashboard aggregates without exposing billing data."""
+    connection = connect()
+    cursor = connection.cursor()
+
+    def scope(alias="", range_start=None, range_end=None):
+        prefix = f"{alias}." if alias else ""
+        clauses = [f"{prefix}created_at >= ?", f"{prefix}created_at < ?"]
+        params = [range_start or start_at, range_end or end_at]
+        if user_id is not None:
+            clauses.append(f"{prefix}user_id = ?")
+            params.append(user_id)
+        if project_id is not None:
+            clauses.append(f"{prefix}project_id = ?")
+            params.append(project_id)
+        return " AND ".join(clauses), params
+
+    task_parts = []
+    task_params = []
+    task_specs = [
+        ("generation_records", "image", "CAST(id AS CHAR)", "created_at", "NULL", "NULL", "filename", "image_path"),
+        ("video_tasks", "video", "task_id", "updated_at", "NULL", "error_message", "NULL", "video_url"),
+        ("omni_video_tasks", "omni_video", "task_id", "updated_at", "model", "fail_reason", "filename", "video_url"),
+        ("video_enhance_tasks", "enhance", "task_id", "updated_at", "tool_version", "fail_reason", "output_filename", "video_url"),
+    ]
+    for table, kind, task_id, updated_at, model, error, filename, asset_url in task_specs:
+        where, params = scope()
+        type_expr = "CASE WHEN source = 'wan_video' THEN 'wan_video' ELSE 'omni_video' END" if table == "omni_video_tasks" else f"'{kind}'"
+        task_parts.append(
+            f"SELECT {type_expr} AS task_type, {task_id} AS task_id, user_id, project_id, status, created_at, "
+            f"{updated_at} AS updated_at, {model} AS model, {error} AS error_message, {filename} AS filename, "
+            f"{asset_url} AS asset_url FROM {table} WHERE {where}"
+        )
+        task_params.extend(params)
+    union_sql = " UNION ALL ".join(task_parts)
+    normalized = """
+        CASE
+          WHEN LOWER(status) IN ('success','succeeded','completed','done','finished') THEN 'succeeded'
+          WHEN LOWER(status) IN ('failed','error','expired') THEN 'failed'
+          WHEN LOWER(status) IN ('cancelled','canceled') THEN 'cancelled'
+          WHEN LOWER(status) IN ('running','processing','in_progress') THEN 'running'
+          ELSE 'waiting'
+        END
+    """
+    cursor.execute(
+        f"SELECT task_type, {normalized} AS normalized_status, COUNT(*) AS count "
+        f"FROM ({union_sql}) d GROUP BY task_type, normalized_status",
+        tuple(task_params),
+    )
+    task_status = {}
+    summary = {"total": 0, "today": 0, "running": 0, "failed": 0, "completed_30d": 0, "success_rate": 0}
+    for row in cursor.fetchall():
+        kind = row["task_type"]
+        status = row["normalized_status"]
+        count = int(row["count"] or 0)
+        task_status.setdefault(kind, {"waiting": 0, "running": 0, "succeeded": 0, "failed": 0, "cancelled": 0})[status] = count
+        summary["total"] += count
+        if status == "running":
+            summary["running"] += count
+        if status == "failed":
+            summary["failed"] += count
+    succeeded = sum(item["succeeded"] for item in task_status.values())
+    terminal = succeeded + summary["failed"]
+    summary["success_rate"] = round(succeeded * 100 / terminal, 1) if terminal else 0
+
+    cursor.execute(
+        f"SELECT DATE(created_at) AS date, task_type, {normalized} AS normalized_status, COUNT(*) AS count "
+        f"FROM ({union_sql}) d GROUP BY DATE(created_at), task_type, normalized_status ORDER BY date",
+        tuple(task_params),
+    )
+    trend_map = {}
+    for row in cursor.fetchall():
+        day = str(row["date"])
+        item = trend_map.setdefault(day, {"date": day, "total": 0, "succeeded": 0, "failed": 0, "active_users": 0})
+        count = int(row["count"] or 0)
+        item["total"] += count
+        if row["normalized_status"] in ("succeeded", "failed"):
+            item[row["normalized_status"]] += count
+        item[row["task_type"]] = item.get(row["task_type"], 0) + count
+    trends = list(trend_map.values())
+
+    today_where, today_params = scope()
+    today_where += " AND DATE(created_at) = CURDATE()"
+    today_parts = [f"SELECT user_id FROM {table} WHERE {today_where}" for table, *_ in task_specs]
+    cursor.execute(f"SELECT COUNT(*) AS count FROM ({' UNION ALL '.join(today_parts)}) x", tuple(today_params * len(task_specs)))
+    summary["today"] = int(cursor.fetchone()["count"] or 0)
+    completed_parts = []
+    completed_params = []
+    for table, kind, task_id, updated_at, model, error, filename, asset_url in task_specs:
+        where, params = scope(range_start=datetime.now() - timedelta(days=30), range_end=datetime.now() + timedelta(days=1))
+        completed_parts.append(f"SELECT status FROM {table} WHERE {where}")
+        completed_params.extend(params)
+    completed_sql = f"SELECT COUNT(*) AS count FROM ({' UNION ALL '.join(completed_parts)}) d WHERE {normalized} = 'succeeded'"
+    cursor.execute(completed_sql, tuple(completed_params))
+    summary["completed_30d"] = int(cursor.fetchone()["count"] or 0)
+
+    cursor.execute(
+        f"SELECT task_type, task_id, status, created_at, updated_at, model, error_message, filename "
+        f"FROM ({union_sql}) d WHERE {normalized} = 'failed' OR "
+        f"({normalized} IN ('waiting','running') AND updated_at < DATE_SUB(NOW(), INTERVAL ? MINUTE)) "
+        f"ORDER BY created_at DESC LIMIT 12",
+        tuple(task_params + [int(stale_minutes)]),
+    )
+    attention_tasks = [dict(row) for row in cursor.fetchall()]
+
+    asset_parts = []
+    asset_params = []
+    for table, kind in (("image_library", "image"), ("video_library", "video")):
+        where, params = scope()
+        asset_parts.append(f"SELECT '{kind}' AS type, id, filename, url, created_at FROM {table} WHERE {where}")
+        asset_params.extend(params)
+    cursor.execute(f"SELECT * FROM ({' UNION ALL '.join(asset_parts)}) a ORDER BY created_at DESC LIMIT 12", tuple(asset_params))
+    recent_assets = [dict(row) for row in cursor.fetchall()]
+
+    result = {
+        "summary": summary,
+        "task_status": task_status,
+        "trends": trends,
+        "recent_assets": recent_assets,
+        "attention_tasks": attention_tasks,
+    }
+    if include_admin:
+        cursor.execute(
+            f"SELECT COALESCE(NULLIF(model,''),'未标注') AS model, COUNT(*) AS calls, "
+            f"SUM({normalized} = 'succeeded') AS succeeded, SUM({normalized} = 'failed') AS failed, "
+            f"ROUND(AVG(TIMESTAMPDIFF(SECOND, created_at, updated_at))) AS avg_seconds "
+            f"FROM ({union_sql}) d GROUP BY model ORDER BY calls DESC LIMIT 10",
+            tuple(task_params),
+        )
+        models = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            terminal_count = int(item.get("succeeded") or 0) + int(item.get("failed") or 0)
+            item["success_rate"] = round(int(item.get("succeeded") or 0) * 100 / terminal_count, 1) if terminal_count else 0
+            models.append(item)
+        cursor.execute(
+            f"SELECT u.id, u.username, COUNT(d.task_id) AS task_count, MAX(d.created_at) AS last_active "
+            f"FROM users u LEFT JOIN ({union_sql}) d ON d.user_id = u.id "
+            f"GROUP BY u.id, u.username ORDER BY task_count DESC LIMIT 10",
+            tuple(task_params),
+        )
+        active_users = [dict(row) for row in cursor.fetchall()]
+        cursor.execute(
+            f"SELECT COALESCE(NULLIF(error_message,''),'未提供错误信息') AS error, task_type, COUNT(*) AS count "
+            f"FROM ({union_sql}) d WHERE {normalized} = 'failed' "
+            f"GROUP BY error, task_type ORDER BY count DESC LIMIT 8",
+            tuple(task_params),
+        )
+        frequent_errors = [dict(row) for row in cursor.fetchall()]
+        cursor.execute("SELECT COUNT(*) AS count FROM users WHERE created_at >= ? AND created_at < ?", (start_at, end_at))
+        new_users = int(cursor.fetchone()["count"] or 0)
+        result["admin_insights"] = {
+            "models": models,
+            "active_users": active_users,
+            "frequent_errors": frequent_errors,
+            "new_users": new_users,
+            "active_user_count": sum(1 for item in active_users if int(item.get("task_count") or 0) > 0),
+            "stale_tasks": sum(1 for item in attention_tasks if str(item.get("status", "")).lower() not in ("failed", "error", "expired")),
+        }
+    cursor.close()
+    connection.close()
+    return result
 
 
 def get_stats_overview():

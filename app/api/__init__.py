@@ -17,6 +17,7 @@ from app.api.batch import batch_bp
 
 # 内容管理
 from app.api.content import content_bp
+from app.api.dashboard import dashboard_bp
 
 # 图片生成
 from app.api.image import image_bp
@@ -56,5 +57,6 @@ __all__ = [
     "storyboard_bp",
     "tools_bp",
     "content_bp",
+    "dashboard_bp",
     "video_enhance_bp",
 ]
