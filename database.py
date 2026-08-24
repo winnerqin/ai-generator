@@ -148,7 +148,9 @@ def _ensure_model_pricing_columns():
     cursor = conn.cursor()
     try:
         cursor.execute("SHOW COLUMNS FROM model_pricing")
-        existing = {str(row["Field"]).lower() for row in cursor.fetchall()}
+        column_rows = cursor.fetchall()
+        columns = {str(row["Field"]).lower(): dict(row) for row in column_rows}
+        existing = set(columns)
         alters = []
         if "currency_code" not in existing:
             alters.append(
@@ -167,13 +169,20 @@ def _ensure_model_pricing_columns():
                 cursor.execute(sql)
             except Exception:
                 pass
-        # Ensure column length is enough for value "without_video_ref".
-        try:
-            cursor.execute(
-                "ALTER TABLE model_pricing MODIFY COLUMN reference_video_mode VARCHAR(32) NOT NULL DEFAULT 'any'"
-            )
-        except Exception:
-            pass
+        # Avoid taking a metadata write lock on every application startup.
+        # Only migrate when the deployed definition is actually incompatible.
+        reference_column = columns.get("reference_video_mode")
+        if reference_column:
+            column_type = str(reference_column.get("Type") or "").lower().replace(" ", "")
+            is_nullable = str(reference_column.get("Null") or "").upper() == "YES"
+            default_value = str(reference_column.get("Default") or "").lower()
+            if column_type != "varchar(32)" or is_nullable or default_value != "any":
+                try:
+                    cursor.execute(
+                        "ALTER TABLE model_pricing MODIFY COLUMN reference_video_mode VARCHAR(32) NOT NULL DEFAULT 'any'"
+                    )
+                except Exception:
+                    pass
         # Drop legacy unique index on model_code so one model can have multiple pricing rules.
         try:
             cursor.execute("SHOW INDEX FROM model_pricing")

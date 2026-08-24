@@ -294,7 +294,7 @@
         }
 
         function renderTokenUsage(task) {
-            if (task.token_usage != null && task.token_usage !== '') return task.token_usage;
+            if (task.token_usage != null && task.token_usage !== '') return task.source === 'wan_video' ? `${task.token_usage} 秒` : task.token_usage;
             const usage = task.usage_json || {};
             return usage.total_tokens ?? '-';
         }

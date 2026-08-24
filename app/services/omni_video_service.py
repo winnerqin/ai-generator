@@ -709,6 +709,25 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
         )
     if (
         amount_cent is None
+        and task.get("source") == "wan_video"
+        and token_usage not in (None, "")
+        and task.get("user_id")
+    ):
+        try:
+            resolution = str(task.get("resolution") or "720P").strip().upper()
+            unit_price = int(getattr(
+                config, f"WAN_VIDEO_PRICE_{resolution}_CENT_PER_SECOND", 0
+            ) or 0)
+            user = database.get_user_by_id(task.get("user_id"))
+            if unit_price > 0 and user:
+                amount_cent = _to_cent(
+                    Decimal(str(token_usage)) * Decimal(unit_price) * _effective_multiplier(user)
+                )
+        except Exception:
+            amount_cent = None
+    if (
+        amount_cent is None
+        and task.get("source") != "wan_video"
         and token_usage not in (None, "")
         and task.get("model")
         and task.get("user_id")

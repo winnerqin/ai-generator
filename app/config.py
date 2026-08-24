@@ -98,7 +98,10 @@ class Config:
     WAN_VIDEO_CREATE_PATH: str = "/api/v1/services/aigc/video-generation/video-synthesis"
     WAN_VIDEO_QUERY_PATH: str = "/api/v1/tasks/{task_id}"
     WAN_VIDEO_CANCEL_PATH: str = "/api/v1/tasks/{task_id}/cancel"
-    WAN_VIDEO_PRICE_CENT_PER_SECOND: int = 0
+    WAN_VIDEO_PRICE_480P_CENT_PER_SECOND: int = 30
+    WAN_VIDEO_PRICE_720P_CENT_PER_SECOND: int = 60
+    WAN_VIDEO_PRICE_1080P_CENT_PER_SECOND: int = 120
+    WAN_VIDEO_SMART_DURATION_MAX_SECONDS: int = 30
     ALIBABA_CLOUD_ACCESS_KEY_ID: str = ""
     ALIBABA_CLOUD_ACCESS_KEY_SECRET: str = ""
     ALIBABA_BSS_ENDPOINT: str = "business.aliyuncs.com"
@@ -254,8 +257,17 @@ class Config:
         self.WAN_VIDEO_CANCEL_PATH = os.environ.get(
             "WAN_VIDEO_CANCEL_PATH", self.WAN_VIDEO_CANCEL_PATH
         )
-        self.WAN_VIDEO_PRICE_CENT_PER_SECOND = int(os.environ.get(
-            "WAN_VIDEO_PRICE_CENT_PER_SECOND", self.WAN_VIDEO_PRICE_CENT_PER_SECOND
+        self.WAN_VIDEO_PRICE_480P_CENT_PER_SECOND = int(os.environ.get(
+            "WAN_VIDEO_PRICE_480P_CENT_PER_SECOND", self.WAN_VIDEO_PRICE_480P_CENT_PER_SECOND
+        ))
+        self.WAN_VIDEO_PRICE_720P_CENT_PER_SECOND = int(os.environ.get(
+            "WAN_VIDEO_PRICE_720P_CENT_PER_SECOND", self.WAN_VIDEO_PRICE_720P_CENT_PER_SECOND
+        ))
+        self.WAN_VIDEO_PRICE_1080P_CENT_PER_SECOND = int(os.environ.get(
+            "WAN_VIDEO_PRICE_1080P_CENT_PER_SECOND", self.WAN_VIDEO_PRICE_1080P_CENT_PER_SECOND
+        ))
+        self.WAN_VIDEO_SMART_DURATION_MAX_SECONDS = int(os.environ.get(
+            "WAN_VIDEO_SMART_DURATION_MAX_SECONDS", self.WAN_VIDEO_SMART_DURATION_MAX_SECONDS
         ))
         self.ALIBABA_CLOUD_ACCESS_KEY_ID = os.environ.get(
             "ALIBABA_CLOUD_ACCESS_KEY_ID", self.ALIBABA_CLOUD_ACCESS_KEY_ID

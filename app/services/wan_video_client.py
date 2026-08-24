@@ -29,14 +29,16 @@ class WanVideoClient:
     def is_configured(self) -> bool:
         return bool(self._pool() and config.WAN_BASE_URL and config.WAN_VIDEO_MODEL)
 
-    def _headers(self, slot: int) -> dict[str, str]:
+    def _headers(self, slot: int, *, asynchronous: bool = False) -> dict[str, str]:
         pool = self._pool()
         key = pool[slot % len(pool)] if pool else ""
-        return {
+        headers = {
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
-            "X-DashScope-Async": "enable",
         }
+        if asynchronous:
+            headers["X-DashScope-Async"] = "enable"
+        return headers
 
     @staticmethod
     def _body(response: requests.Response) -> dict[str, Any]:
@@ -53,7 +55,7 @@ class WanVideoClient:
         slot = self.select_slot(route_key)
         response = requests.post(
             f"{config.WAN_BASE_URL}{config.WAN_VIDEO_CREATE_PATH}",
-            headers=self._headers(slot), json=payload, timeout=(10, 60),
+            headers=self._headers(slot, asynchronous=True), json=payload, timeout=(10, 60),
         )
         return self._body(response), slot
 
