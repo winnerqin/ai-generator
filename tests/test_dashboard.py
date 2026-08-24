@@ -1,6 +1,7 @@
 from datetime import datetime
 
 import database
+from app.api import dashboard as dashboard_module
 
 
 def _login(client, *, admin=False):
@@ -32,6 +33,7 @@ def test_root_redirects_to_dashboard_and_image_has_new_route(client, monkeypatch
 
 
 def test_dashboard_scopes_regular_user_to_authorized_project(client, monkeypatch):
+    dashboard_module._dashboard_cache.clear()
     _login(client)
     monkeypatch.setattr(database, "get_user_by_id", lambda _id: {"role_code": "internal_user"})
     monkeypatch.setattr(database, "has_project_access", lambda user_id, project_id: (user_id, project_id) == (7, 3))
@@ -52,6 +54,7 @@ def test_dashboard_rejects_unauthorized_project(client, monkeypatch):
 
 
 def test_admin_global_dashboard_is_unscoped(client, monkeypatch):
+    dashboard_module._dashboard_cache.clear()
     _login(client, admin=True)
     monkeypatch.setattr(database, "get_user_by_id", lambda _id: {"role_code": "system_admin"})
     captured = {}
@@ -67,6 +70,23 @@ def test_custom_dashboard_period_validation(client, monkeypatch):
     monkeypatch.setattr(database, "get_user_by_id", lambda _id: {"role_code": "internal_user"})
     response = client.get("/api/dashboard?period=custom&start_date=bad&end_date=2026-08-24")
     assert response.status_code == 400
+
+
+def test_dashboard_uses_ten_minute_cache_and_manual_refresh_bypasses_it(client, monkeypatch):
+    dashboard_module._dashboard_cache.clear()
+    _login(client)
+    monkeypatch.setattr(database, "get_user_by_id", lambda _id: {"role_code": "internal_user"})
+    calls = []
+    monkeypatch.setattr(database, "get_dashboard_data", lambda **kwargs: calls.append(kwargs) or _payload())
+
+    first = client.get("/api/dashboard?period=7d")
+    second = client.get("/api/dashboard?period=7d")
+    refreshed = client.get("/api/dashboard?period=7d&refresh=1")
+
+    assert len(calls) == 2
+    assert first.get_json()["context"]["cache_ttl_seconds"] == 600
+    assert second.get_json()["context"]["cache_hit"] is True
+    assert refreshed.get_json()["context"]["cache_hit"] is False
 
 
 def test_dashboard_page_contains_required_sections(client, monkeypatch):
