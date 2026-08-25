@@ -1600,6 +1600,35 @@ def get_omni_video_tasks_by_statuses(statuses, limit=200):
     return [_decode_omni_video_task(row) for row in rows]
 
 
+def get_unsettled_successful_wan_tasks(limit=200):
+    """Return successful Wan tasks that have neither a debit nor cost settlement."""
+    conn = connect()
+    cursor = conn.cursor()
+    _ensure_omni_video_task_schema(cursor)
+    cursor.execute(
+        """
+        SELECT t.*
+        FROM omni_video_tasks t
+        WHERE t.source = 'wan_video'
+          AND t.status = 'succeeded'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM account_ledger l
+              WHERE l.user_id = t.user_id
+                AND l.biz_type = 'wan_video'
+                AND l.biz_id = t.task_id
+                AND l.entry_type IN ('debit', 'cost')
+          )
+        ORDER BY t.created_at ASC
+        LIMIT ?
+        """,
+        (int(limit or 200),),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_decode_omni_video_task(row) for row in rows]
+
+
 def delete_omni_video_task(task_id, user_id=None, project_id=None):
     conn = connect()
     cursor = conn.cursor()

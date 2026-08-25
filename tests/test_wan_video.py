@@ -107,6 +107,25 @@ def test_non_external_wan_records_cost_without_balance_deduction(monkeypatch, ro
     assert captured["snapshot_json"]["deducted_from_balance"] is False
 
 
+def test_wan_worker_backfills_successful_unsettled_cost(monkeypatch):
+    module = importlib.import_module("app.services.wan_video_service")
+    task = {
+        "status": "succeeded", "user_id": 6, "task_id": "wan-old-internal",
+        "source": "wan_video", "model": "wan3.0-video",
+        "resolution": "720P", "duration": 8,
+    }
+    monkeypatch.setattr(module.database, "get_omni_video_tasks_by_statuses",
+                        lambda *args, **kwargs: [])
+    monkeypatch.setattr(module.database, "get_unsettled_successful_wan_tasks",
+                        lambda *args, **kwargs: [task])
+    settled = []
+    monkeypatch.setattr(module.wan_video_service, "_settle",
+                        lambda item: settled.append(item["task_id"]) or "settled")
+    result = module.wan_video_service.refresh_pending_tasks(limit=20)
+    assert settled == ["wan-old-internal"]
+    assert result == {"checked": 1, "updated": 0, "settled": 1, "failed": 0}
+
+
 def test_smart_duration_reserves_configured_maximum(monkeypatch):
     module = importlib.import_module("app.services.wan_video_service")
     monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_720P_YUAN_PER_SECOND", "0.6")

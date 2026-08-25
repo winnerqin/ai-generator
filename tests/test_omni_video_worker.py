@@ -9,6 +9,11 @@ def test_refresh_pending_omni_video_tasks_once(monkeypatch):
         lambda limit: captured.update({"limit": limit})
         or {"scanned": 1, "refreshed": 1, "failed": 0},
     )
+    monkeypatch.setattr(
+        omni_video_worker.wan_video_service,
+        "refresh_pending_tasks",
+        lambda limit: {"checked": 0, "updated": 0, "settled": 0, "failed": 0},
+    )
 
     result = omni_video_worker.refresh_pending_omni_video_tasks_once(batch_limit=25)
 

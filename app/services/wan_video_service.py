@@ -315,12 +315,22 @@ class WanVideoService:
     def refresh_pending_tasks(self, limit: int = 200) -> dict[str, int]:
         tasks = database.get_omni_video_tasks_by_statuses(["queued", "running"], limit=limit)
         tasks = [task for task in tasks if task.get("source") == SOURCE]
-        result = {"checked": len(tasks), "updated": 0, "failed": 0}
+        unsettled = database.get_unsettled_successful_wan_tasks(limit=limit)
+        result = {"checked": len(tasks) + len(unsettled), "updated": 0,
+                  "settled": 0, "failed": 0}
         for task in tasks:
             try:
                 self.refresh_task(task)
                 result["updated"] += 1
             except Exception:
+                result["failed"] += 1
+        for task in unsettled:
+            try:
+                if self._settle(task) == "settled":
+                    result["settled"] += 1
+            except Exception:
+                logger.exception("Wan historical cost settlement failed: task_id=%s",
+                                 task.get("task_id"))
                 result["failed"] += 1
         return result
 
