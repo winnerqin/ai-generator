@@ -323,9 +323,7 @@
             const task = currentItems.find((item) => item.task_id === decodedTaskId);
             const filename = (task && (task.download_filename || task.filename)) || `${decodedTaskId}.mp4`;
             const link = document.createElement('a');
-            link.href = task && task.source === 'wan_video' && task.video_url
-                ? task.video_url
-                : `/api/omni-video/tasks/${encodeURIComponent(decodedTaskId)}/download`;
+            link.href = `/api/omni-video/tasks/${encodeURIComponent(decodedTaskId)}/download`;
             link.download = filename;
             document.body.appendChild(link);
             link.click();
@@ -713,6 +711,34 @@
             };
         }
 
+        function taskToWanPrefill(task) {
+            const payload = task.input_payload_json || {};
+            const mode = payload.mode || task.mode || 'reference_to_video';
+            let media = Array.isArray(payload.media) ? payload.media.filter((item) => item && item.url) : [];
+            if (!media.length) {
+                const urls = Array.isArray(task.reference_urls_json) ? task.reference_urls_json.filter(Boolean) : [];
+                media = urls.map((url, index) => ({
+                    url,
+                    role: mode === 'image_to_video_first_last'
+                        ? (index === 0 ? 'first_frame' : 'last_frame')
+                        : (mode === 'image_to_video_first' ? 'first_frame' : 'reference_image'),
+                }));
+            }
+            return {
+                mode,
+                model: payload.model || task.model || 'wan3.0-video',
+                prompt: payload.prompt || task.prompt || '',
+                filename: payload.filename ?? task.filename ?? '',
+                resolution: payload.resolution || task.resolution || '720P',
+                ratio: payload.ratio || payload.aspect_ratio || task.aspect_ratio || '16:9',
+                duration: payload.duration ?? task.duration ?? -1,
+                seed: payload.seed ?? task.seed ?? '',
+                prompt_extend: payload.prompt_extend !== false,
+                watermark: payload.watermark === true,
+                media,
+            };
+        }
+
         function hasPrefillData(task) {
             if (!task || typeof task !== 'object') return false;
             const payload = task.input_payload_json;
@@ -730,6 +756,11 @@
                     task = await fetchTask(taskId);
                 }
 
+                if (task.source === 'wan_video') {
+                    localStorage.setItem('wanVideoRegenerateData', JSON.stringify(taskToWanPrefill(task)));
+                    window.location.href = '/wan-video';
+                    return;
+                }
                 localStorage.setItem('omniVideoRegenerateData', JSON.stringify(taskToPrefill(task)));
                 window.location.href = '/omni-video';
             }).catch((error) => {

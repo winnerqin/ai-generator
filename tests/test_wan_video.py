@@ -358,6 +358,8 @@ def test_wan_page_reuses_content_library_and_oss_upload(auth_client):
     assert "wan-video-generation-settings-v1" in html
     assert "persistGenerationSettings()" in html
     assert "restoreGenerationSettings()" in html
+    assert "wanVideoRegenerateData" in html
+    assert "restoreWanRegenerateData()" in html
     assert "data-open=" not in html
     assert "/api/omni-video/tasks" in html
     assert "first_frame" in html
@@ -365,7 +367,19 @@ def test_wan_page_reuses_content_library_and_oss_upload(auth_client):
     assert "reference_video" in html
 
 
-def test_omni_task_decorator_estimates_wan_amount_from_resolution(monkeypatch):
+def test_wan_tasks_regenerate_back_to_wan_page(auth_client):
+    response = auth_client.get("/omni-video-tasks?source=wan_video")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "task.source === 'wan_video'" in html
+    assert "taskToWanPrefill(task)" in html
+    assert "localStorage.setItem('wanVideoRegenerateData'" in html
+    assert "window.location.href = '/wan-video'" in html
+    assert "`/api/omni-video/tasks/${encodeURIComponent(decodedTaskId)}/download`" in html
+    assert "task.source === 'wan_video' && task.video_url" not in html
+
+
+def test_wan_decorator_hides_amount_until_ledger_settlement(monkeypatch):
     module = importlib.import_module("app.services.omni_video_service")
     monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_480P_YUAN_PER_SECOND", "0.6")
     monkeypatch.setattr(module.database, "get_ledger_debit_amount_cent", lambda *args: None)
@@ -378,10 +392,23 @@ def test_omni_task_decorator_estimates_wan_amount_from_resolution(monkeypatch):
         "model": "wan3.0-video", "status": "succeeded", "resolution": "480P",
         "duration": 5, "token_usage": 5, "usage_json": {"duration": 5},
     })
-    assert decorated["amount_cent"] == 300
-    assert decorated["amount_yuan"] == 3
+    assert decorated["amount_cent"] is None
+    assert decorated["amount_yuan"] is None
     assert decorated["billing_seconds"] == 5
     assert decorated["token_usage"] is None
+
+
+@pytest.mark.parametrize("status", ["queued", "running", "failed", "cancelled"])
+def test_wan_decorator_hides_amount_for_non_success_status(monkeypatch, status):
+    module = importlib.import_module("app.services.omni_video_service")
+    monkeypatch.setattr(module.database, "get_ledger_debit_amount_cent", lambda *args: 270)
+    decorated = module._decorate_task({
+        "task_id": f"wan-{status}", "user_id": 1, "source": "wan_video",
+        "model": "wan3.0-video", "status": status, "resolution": "480P",
+        "duration": 6, "usage_json": {"output_video_duration": 6},
+    })
+    assert decorated["amount_cent"] is None
+    assert decorated["amount_yuan"] is None
 
 
 def test_wan_decorator_reads_wan_ledger_and_uses_output_duration(monkeypatch):

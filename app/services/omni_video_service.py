@@ -720,9 +720,13 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
     task["token_usage"] = None if is_wan else token_usage
     task["usage_json"] = usage if isinstance(usage, dict) else {}
 
-    # 金额：优先展示已入账金额；未入账则按 token*模型价格*倍率 估算
+    # Wan only displays an actual settled ledger debit after success. Other
+    # statuses (including succeeded-but-not-settled) deliberately show no amount.
     amount_cent = None
-    if "_ledger_amount_cent" in task:
+    wan_succeeded = str(task.get("status") or "").lower() in SUCCESS_STATUSES
+    if is_wan and not wan_succeeded:
+        amount_cent = None
+    elif "_ledger_amount_cent" in task:
         amount_cent = task.get("_ledger_amount_cent")
     elif task.get("task_id") and task.get("user_id"):
         amount_cent = database.get_ledger_debit_amount_cent(
@@ -730,34 +734,6 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
             "wan_video" if is_wan else "omni_video",
             task.get("task_id"),
         )
-    if (
-        amount_cent is None
-        and is_wan
-        and billing_seconds not in (None, "")
-        and task.get("user_id")
-    ):
-        try:
-            resolution = str(task.get("resolution") or "720P").strip().upper()
-            prefix = (
-                "WAN_VIDEO_INTL_PRICE"
-                if str(task.get("model") or "") == config.WAN_VIDEO_INTL_MODEL
-                else "WAN_VIDEO_PRICE"
-            )
-            unit_price = Decimal(str(getattr(
-                config, f"{prefix}_{resolution}_YUAN_PER_SECOND", 0
-            ) or 0)) * Decimal("100")
-            user = database.get_user_by_id(task.get("user_id"))
-            if unit_price > 0 and user:
-                multiplier = (
-                    Decimal(str(database.get_role_pricing_multiplier(database.ROLE_EXTERNAL_USER) or 1))
-                    if user.get("role_code") == database.ROLE_EXTERNAL_USER
-                    else _effective_multiplier(user)
-                )
-                amount_cent = _to_cent(
-                    Decimal(str(billing_seconds)) * Decimal(unit_price) * multiplier
-                )
-        except Exception:
-            amount_cent = None
     if (
         amount_cent is None
         and not is_wan
