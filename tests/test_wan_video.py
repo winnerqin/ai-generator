@@ -105,6 +105,8 @@ def test_non_external_wan_records_cost_without_balance_deduction(monkeypatch, ro
     assert captured["amount_cent"] == 480
     assert captured["multiplier"] == 1.0
     assert captured["snapshot_json"]["deducted_from_balance"] is False
+
+
 def test_wan_worker_backfills_successful_unsettled_cost(monkeypatch):
     module = importlib.import_module("app.services.wan_video_service")
     task = {
