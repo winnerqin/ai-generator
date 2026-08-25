@@ -720,7 +720,7 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
     task["token_usage"] = None if is_wan else token_usage
     task["usage_json"] = usage if isinstance(usage, dict) else {}
 
-    # Wan only displays an actual settled ledger debit after success. Other
+    # Wan only displays an actual settled debit/cost ledger entry after success. Other
     # statuses (including succeeded-but-not-settled) deliberately show no amount.
     amount_cent = None
     wan_succeeded = str(task.get("status") or "").lower() in SUCCESS_STATUSES
@@ -729,7 +729,11 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
     elif "_ledger_amount_cent" in task:
         amount_cent = task.get("_ledger_amount_cent")
     elif task.get("task_id") and task.get("user_id"):
-        amount_cent = database.get_ledger_debit_amount_cent(
+        amount_reader = (
+            database.get_ledger_settled_amount_cent
+            if is_wan else database.get_ledger_debit_amount_cent
+        )
+        amount_cent = amount_reader(
             task.get("user_id"),
             "wan_video" if is_wan else "omni_video",
             task.get("task_id"),
@@ -1292,7 +1296,7 @@ class OmniVideoService:
             "omni_video",
             [item.get("task_id") for item in items],
         )
-        wan_ledger_amounts = database.get_ledger_debit_amounts_cent(
+        wan_ledger_amounts = database.get_ledger_settled_amounts_cent(
             user_id, "wan_video", [item.get("task_id") for item in items]
         )
         ledger_amounts.update(wan_ledger_amounts)

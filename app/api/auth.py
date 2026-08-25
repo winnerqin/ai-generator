@@ -572,7 +572,7 @@ def get_user_consumption_records():
     items = _attach_consumption_display_fields(items)
     total = database.count_account_ledger(
         user_id=session.get("user_id"),
-        entry_type="debit",
+        entry_types=("debit", "cost"),
         biz_types=("omni_video", "wan_video"),
     )
     return ApiResponse.paginated(items, total, page, page_size)
