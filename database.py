@@ -2492,7 +2492,7 @@ def get_user_consumption_records(user_id, limit=100, offset=0, biz_type=None, bi
             f"""
             SELECT *
             FROM account_ledger
-            WHERE user_id = ? AND entry_type = 'debit' AND biz_type IN ({placeholders})
+            WHERE user_id = ? AND entry_type IN ('debit', 'cost') AND biz_type IN ({placeholders})
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
         """,
@@ -2503,7 +2503,7 @@ def get_user_consumption_records(user_id, limit=100, offset=0, biz_type=None, bi
             """
             SELECT *
             FROM account_ledger
-            WHERE user_id = ? AND entry_type = 'debit' AND biz_type = ?
+            WHERE user_id = ? AND entry_type IN ('debit', 'cost') AND biz_type = ?
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
         """,
@@ -2514,7 +2514,7 @@ def get_user_consumption_records(user_id, limit=100, offset=0, biz_type=None, bi
             """
             SELECT *
             FROM account_ledger
-            WHERE user_id = ? AND entry_type = 'debit'
+            WHERE user_id = ? AND entry_type IN ('debit', 'cost')
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
         """,
@@ -2541,7 +2541,9 @@ def get_account_ledger(user_id=None, limit=100, offset=0):
     return [dict(r) for r in rows]
 
 
-def count_account_ledger(user_id=None, entry_type=None, biz_type=None, biz_types=None):
+def count_account_ledger(
+    user_id=None, entry_type=None, biz_type=None, biz_types=None, entry_types=None
+):
     conn = connect()
     cursor = conn.cursor()
     query = "SELECT COUNT(*) FROM account_ledger WHERE 1=1"
@@ -2549,7 +2551,14 @@ def count_account_ledger(user_id=None, entry_type=None, biz_type=None, biz_types
     if user_id is not None:
         query += " AND user_id = ?"
         params.append(user_id)
-    if entry_type:
+    cleaned_entry_types = [
+        str(value).strip() for value in (entry_types or []) if str(value).strip()
+    ]
+    if cleaned_entry_types:
+        placeholders = ", ".join(["?"] * len(cleaned_entry_types))
+        query += f" AND entry_type IN ({placeholders})"
+        params.extend(cleaned_entry_types)
+    elif entry_type:
         query += " AND entry_type = ?"
         params.append(entry_type)
     cleaned_types = [str(value).strip() for value in (biz_types or []) if str(value).strip()]
@@ -2624,6 +2633,53 @@ def get_ledger_debit_amounts_cent(user_id, biz_type, biz_ids):
     }
 
 
+def get_ledger_settled_amount_cent(user_id, biz_type, biz_id):
+    """Return an actual settled debit or non-balance cost amount."""
+    conn = connect()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT amount_cent
+        FROM account_ledger
+        WHERE user_id = ? AND entry_type IN ('debit', 'cost')
+          AND biz_type = ? AND biz_id = ?
+        ORDER BY CASE entry_type WHEN 'debit' THEN 0 ELSE 1 END
+        LIMIT 1
+    """,
+        (user_id, biz_type, biz_id),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return int(row[0]) if row and row[0] is not None else None
+
+
+def get_ledger_settled_amounts_cent(user_id, biz_type, biz_ids):
+    """Return actual settled debit/cost amounts keyed by business id."""
+    cleaned_ids = [str(biz_id).strip() for biz_id in (biz_ids or []) if str(biz_id).strip()]
+    if not cleaned_ids:
+        return {}
+    conn = connect()
+    cursor = conn.cursor()
+    placeholders = ", ".join(["?"] * len(cleaned_ids))
+    cursor.execute(
+        f"""
+        SELECT biz_id, MAX(amount_cent) AS amount_cent
+        FROM account_ledger
+        WHERE user_id = ? AND entry_type IN ('debit', 'cost')
+          AND biz_type = ? AND biz_id IN ({placeholders})
+        GROUP BY biz_id
+        """,
+        (user_id, biz_type, *cleaned_ids),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return {
+        str(row["biz_id"]): int(row["amount_cent"])
+        for row in rows
+        if row["biz_id"] is not None and row["amount_cent"] is not None
+    }
+
+
 def create_account_ledger_entry(
     user_id,
     entry_type,
@@ -2647,7 +2703,12 @@ def create_account_ledger_entry(
             raise ValueError("用户不存在")
         before = int(row[0] or 0)
         delta = int(amount_cent)
-        after = before + delta if entry_type == "credit" else before - abs(delta)
+        if entry_type == "credit":
+            after = before + delta
+        elif entry_type == "cost":
+            after = before
+        else:
+            after = before - abs(delta)
         if after < 0:
             raise ValueError("余额不足")
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

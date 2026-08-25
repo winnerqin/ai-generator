@@ -81,6 +81,30 @@ def test_external_wan_billing_uses_role_multiplier(monkeypatch):
     })
     assert captured["amount_cent"] == 270
     assert captured["multiplier"] == 1.5
+    assert captured["entry_type"] == "debit"
+    assert captured["snapshot_json"]["deducted_from_balance"] is True
+
+
+@pytest.mark.parametrize("role_code", ["internal_user", "system_admin"])
+def test_non_external_wan_records_cost_without_balance_deduction(monkeypatch, role_code):
+    module = importlib.import_module("app.services.wan_video_service")
+    monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_720P_YUAN_PER_SECOND", "0.6")
+    monkeypatch.setattr(module.database, "has_ledger_entry", lambda *args: False)
+    monkeypatch.setattr(module.database, "get_user_by_id", lambda _user_id: {
+        "role_code": role_code, "pricing_multiplier": 2,
+    })
+    captured = {}
+    monkeypatch.setattr(module.database, "create_account_ledger_entry",
+                        lambda **kwargs: captured.update(kwargs))
+    status = module.wan_video_service._settle({
+        "status": "succeeded", "user_id": 1, "task_id": f"wan-{role_code}",
+        "model": "wan3.0-video", "resolution": "720P", "duration": 8,
+    })
+    assert status == "settled"
+    assert captured["entry_type"] == "cost"
+    assert captured["amount_cent"] == 480
+    assert captured["multiplier"] == 1.0
+    assert captured["snapshot_json"]["deducted_from_balance"] is False
 
 
 def test_smart_duration_reserves_configured_maximum(monkeypatch):
@@ -382,7 +406,7 @@ def test_wan_tasks_regenerate_back_to_wan_page(auth_client):
 def test_wan_decorator_hides_amount_until_ledger_settlement(monkeypatch):
     module = importlib.import_module("app.services.omni_video_service")
     monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_480P_YUAN_PER_SECOND", "0.6")
-    monkeypatch.setattr(module.database, "get_ledger_debit_amount_cent", lambda *args: None)
+    monkeypatch.setattr(module.database, "get_ledger_settled_amount_cent", lambda *args: None)
     monkeypatch.setattr(module.database, "get_user_by_id", lambda _user_id: {
         "role_code": "system_admin", "pricing_multiplier": 1,
     })
@@ -401,7 +425,7 @@ def test_wan_decorator_hides_amount_until_ledger_settlement(monkeypatch):
 @pytest.mark.parametrize("status", ["queued", "running", "failed", "cancelled"])
 def test_wan_decorator_hides_amount_for_non_success_status(monkeypatch, status):
     module = importlib.import_module("app.services.omni_video_service")
-    monkeypatch.setattr(module.database, "get_ledger_debit_amount_cent", lambda *args: 270)
+    monkeypatch.setattr(module.database, "get_ledger_settled_amount_cent", lambda *args: 270)
     decorated = module._decorate_task({
         "task_id": f"wan-{status}", "user_id": 1, "source": "wan_video",
         "model": "wan3.0-video", "status": status, "resolution": "480P",
@@ -415,7 +439,7 @@ def test_wan_decorator_reads_wan_ledger_and_uses_output_duration(monkeypatch):
     module = importlib.import_module("app.services.omni_video_service")
     captured = {}
     monkeypatch.setattr(
-        module.database, "get_ledger_debit_amount_cent",
+        module.database, "get_ledger_settled_amount_cent",
         lambda user_id, biz_type, biz_id: captured.update(
             user_id=user_id, biz_type=biz_type, biz_id=biz_id
         ) or 180,

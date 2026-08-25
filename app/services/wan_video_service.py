@@ -179,11 +179,10 @@ class WanVideoService:
     def _settle(self, task: dict[str, Any]) -> str:
         if task.get("status") != "succeeded" or not task.get("user_id"):
             return "skipped"
-        if database.has_ledger_entry(task["user_id"], "debit", SOURCE, task["task_id"]):
+        if any(database.has_ledger_entry(task["user_id"], entry_type, SOURCE, task["task_id"])
+               for entry_type in ("debit", "cost")):
             return "settled"
         user = database.get_user_by_id(task["user_id"]) or {}
-        if user.get("role_code") != database.ROLE_EXTERNAL_USER:
-            return "skipped"
         try:
             unit_price = _price_cent_per_second(task.get("resolution"), task.get("model"))
         except ValueError:
@@ -191,10 +190,12 @@ class WanVideoService:
         seconds = _billable_seconds(task)
         if seconds is None:
             return "pending"
-        multiplier = self._multiplier(user)
+        is_external = user.get("role_code") == database.ROLE_EXTERNAL_USER
+        multiplier = self._multiplier(user) if is_external else Decimal("1")
         fee = int((Decimal(unit_price * seconds) * multiplier).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
         database.create_account_ledger_entry(
-            user_id=task["user_id"], entry_type="debit", amount_cent=fee,
+            user_id=task["user_id"], entry_type="debit" if is_external else "cost",
+            amount_cent=fee,
             biz_type=SOURCE, biz_id=task["task_id"], model_code=task.get("model"),
             tokens_raw=seconds, tokens_billed=seconds,
             unit_price_cent_per_ktoken=int((unit_price * Decimal("1000")).quantize(
@@ -204,7 +205,8 @@ class WanVideoService:
                            "resolution": str(task.get("resolution") or "720P").upper(),
                            "region": _region_for_model(task.get("model")),
                            "price_cent_per_second": str(unit_price),
-                           "pricing_multiplier": float(multiplier)},
+                           "pricing_multiplier": float(multiplier),
+                           "deducted_from_balance": is_external},
         )
         return "settled"
 
