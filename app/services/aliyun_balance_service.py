@@ -4,9 +4,18 @@ from __future__ import annotations
 
 import threading
 import time
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.config import config
+
+
+def _normalize_amount(value: Any) -> str:
+    text = str(value or "0.00").strip().replace(",", "")
+    try:
+        return format(Decimal(text), "f")
+    except InvalidOperation as exc:
+        raise ValueError(f"阿里云余额金额格式无效：{value}") from exc
 
 
 class AliyunBalanceService:
@@ -55,8 +64,10 @@ class AliyunBalanceService:
             if data is None:
                 raise ValueError("阿里云余额响应缺少 Data。")
             result = {
-                "available_amount": str(getattr(data, "available_amount", "0.00") or "0.00"),
-                "available_cash_amount": str(
+                "available_amount": _normalize_amount(
+                    getattr(data, "available_amount", "0.00") or "0.00"
+                ),
+                "available_cash_amount": _normalize_amount(
                     getattr(data, "available_cash_amount", "0.00") or "0.00"
                 ),
                 "currency": str(getattr(data, "currency", "CNY") or "CNY"),
