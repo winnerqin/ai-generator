@@ -289,6 +289,9 @@ def test_wan_page_reuses_content_library_and_oss_upload(auth_client):
     assert "lightboxDelete" not in html
     assert "lightboxClear" not in html
     assert "/api/wan-video/balance" in html
+    assert "wan-video-generation-settings-v1" in html
+    assert "persistGenerationSettings()" in html
+    assert "restoreGenerationSettings()" in html
     assert "data-open=" not in html
     assert "/api/omni-video/tasks" in html
     assert "first_frame" in html
