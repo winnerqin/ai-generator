@@ -1,4 +1,5 @@
 import importlib
+import json
 from decimal import Decimal
 
 import pytest
@@ -60,6 +61,28 @@ def test_wan_balance_check_uses_resolution_price(monkeypatch):
         module.wan_video_service._ensure_balance(1, 5, "1080P")
 
 
+def test_external_wan_billing_uses_role_multiplier(monkeypatch):
+    module = importlib.import_module("app.services.wan_video_service")
+    monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_480P_YUAN_PER_SECOND", "0.3")
+    monkeypatch.setattr(module.database, "has_ledger_entry", lambda *args: False)
+    monkeypatch.setattr(module.database, "get_user_by_id", lambda _user_id: {
+        "role_code": module.database.ROLE_EXTERNAL_USER,
+        "pricing_multiplier": 1,
+    })
+    monkeypatch.setattr(module.database, "get_role_pricing_multiplier", lambda _role: 1.5)
+    captured = {}
+    monkeypatch.setattr(
+        module.database, "create_account_ledger_entry",
+        lambda **kwargs: captured.update(kwargs),
+    )
+    module.wan_video_service._settle({
+        "status": "succeeded", "user_id": 1, "task_id": "wan-external-1",
+        "model": "wan3.0-video", "resolution": "480P", "duration": 6,
+    })
+    assert captured["amount_cent"] == 270
+    assert captured["multiplier"] == 1.5
+
+
 def test_smart_duration_reserves_configured_maximum(monkeypatch):
     module = importlib.import_module("app.services.wan_video_service")
     monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_720P_YUAN_PER_SECOND", "0.6")
@@ -86,7 +109,31 @@ def test_smart_duration_payload_and_actual_usage_billing():
         "duration": -1,
         "usage_json": {"duration": 12, "input_video_duration": 3,
                        "output_video_duration": 9},
-    }) == 12
+    }) == 9
+
+
+def test_successful_smart_duration_refresh_persists_actual_output_seconds(monkeypatch):
+    module = importlib.import_module("app.services.wan_video_service")
+    stored = {}
+    monkeypatch.setattr(module.wan_video_client, "get_task", lambda *args, **kwargs: {
+        "output": {"task_status": "SUCCEEDED", "video_url": "https://a/result.mp4"},
+        "usage": {
+            "duration": 12.12, "input_video_duration": 6.06,
+            "output_video_duration": 6.06,
+        },
+    })
+    monkeypatch.setattr(module.database, "save_omni_video_task", lambda task: stored.update(task))
+    monkeypatch.setattr(module.database, "get_omni_video_task", lambda *args, **kwargs: dict(stored))
+    monkeypatch.setattr(module.wan_video_service, "_settle", lambda _task: "settled")
+    monkeypatch.setattr(module.wan_video_service, "_ensure_library", lambda _task: None)
+    result = module.wan_video_service.refresh_task({
+        "task_id": "wan-smart-refresh", "user_id": 1, "status": "running",
+        "source": "wan_video", "model": "wan3.0-video", "duration": -1,
+        "input_payload_json": {"duration": -1}, "external_meta_json": {},
+    })
+    assert result["duration"] == 6
+    assert result["token_usage"] is None
+    assert result["input_payload_json"]["duration"] == -1
 
 
 def test_smart_duration_without_usage_is_pending(monkeypatch):
@@ -257,7 +304,25 @@ def test_get_aliyun_balance(auth_client, monkeypatch):
     response = auth_client.get("/api/wan-video/balance")
     assert response.status_code == 200
     assert response.get_json()["available_amount"] == "123.45"
+    assert response.get_json()["balance_type"] == "system"
     assert "access_key" not in str(response.get_json()).lower()
+
+
+def test_external_user_gets_own_balance_without_querying_aliyun(auth_client, monkeypatch):
+    module = importlib.import_module("app.api.wan_video")
+    with auth_client.session_transaction() as sess:
+        sess["role_code"] = module.database.ROLE_EXTERNAL_USER
+    monkeypatch.setattr(module.database, "get_user_by_id", lambda _user_id: {
+        "id": 1, "role_code": module.database.ROLE_EXTERNAL_USER, "balance_cent": 12345,
+    })
+    monkeypatch.setattr(
+        module.aliyun_balance_service, "query",
+        lambda **kwargs: pytest.fail("外部用户不应查询阿里云账户余额"),
+    )
+    response = auth_client.get("/api/wan-video/balance")
+    assert response.status_code == 200
+    assert response.get_json()["balance_type"] == "user"
+    assert response.get_json()["available_amount"] == "123.45"
 
 
 def test_wan_page_reuses_content_library_and_oss_upload(auth_client):
@@ -276,7 +341,8 @@ def test_wan_page_reuses_content_library_and_oss_upload(auth_client):
     assert "wan-library-toolbar" in html
     assert "<option>480P</option>" in html
     assert "<option selected>720P</option>" in html
-    assert "阿里云余额" in html
+    assert 'id="balanceLabel"' in html
+    assert "我的余额" in html
     assert '<option value="-1" selected>智能时长</option>' in html
     assert "-1 为智能时长；固定时长支持 2–30 秒" not in html
     assert '<option value="wan3.0-video" selected>wan3.0-video</option>' in html
@@ -314,6 +380,48 @@ def test_omni_task_decorator_estimates_wan_amount_from_resolution(monkeypatch):
     })
     assert decorated["amount_cent"] == 300
     assert decorated["amount_yuan"] == 3
+    assert decorated["billing_seconds"] == 5
+    assert decorated["token_usage"] is None
+
+
+def test_wan_decorator_reads_wan_ledger_and_uses_output_duration(monkeypatch):
+    module = importlib.import_module("app.services.omni_video_service")
+    captured = {}
+    monkeypatch.setattr(
+        module.database, "get_ledger_debit_amount_cent",
+        lambda user_id, biz_type, biz_id: captured.update(
+            user_id=user_id, biz_type=biz_type, biz_id=biz_id
+        ) or 180,
+    )
+    decorated = module._decorate_task({
+        "task_id": "wan-reference", "user_id": 13, "source": "wan_video",
+        "model": "wan3.0-video", "status": "succeeded", "resolution": "480P",
+        "duration": -1, "token_usage": 12,
+        "usage_json": {
+            "duration": 12.12, "input_video_duration": 6.06,
+            "output_video_duration": 6.06,
+        },
+    })
+    assert captured["biz_type"] == "wan_video"
+    assert decorated["billing_seconds"] == 6
+    assert decorated["token_usage"] is None
+    assert decorated["amount_yuan"] == 1.8
+
+
+def test_wan_consumption_record_displays_seconds_and_per_second_price(monkeypatch):
+    module = importlib.import_module("app.api.auth")
+    monkeypatch.setattr(module, "_pricing_by_model_code", lambda: {})
+    records = module._attach_consumption_display_fields([{
+        "biz_type": "wan_video", "model_code": "wan3.0-video",
+        "tokens_raw": 6, "tokens_billed": 6, "amount_cent": 270,
+        "snapshot_json": json.dumps({
+            "billing_unit": "video_second", "billable_seconds": 6,
+            "price_cent_per_second": "30.0", "pricing_multiplier": 1.5,
+        }),
+    }])
+    assert records[0]["display_usage"] == "6 秒"
+    assert records[0]["display_unit_price"] == "0.3 元/秒"
+    assert records[0]["display_tokens"] is None
 
 
 def test_wan_library_keeps_upstream_video_when_oss_backfill_fails(monkeypatch):
