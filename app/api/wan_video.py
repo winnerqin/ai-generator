@@ -56,6 +56,19 @@ def get_config():
 def get_aliyun_balance():
     user_id = session.get("user_id")
     username = session.get("username")
+    role_code = session.get("role_code")
+    if role_code == database.ROLE_EXTERNAL_USER:
+        user = database.get_user_by_id(user_id) or {}
+        balance_cent = int(user.get("balance_cent") or 0)
+        balance_yuan = f"{balance_cent / 100:.2f}"
+        return jsonify({
+            "success": True,
+            "role_code": role_code,
+            "balance_type": "user",
+            "available_amount": balance_yuan,
+            "available_cash_amount": balance_yuan,
+            "currency": database.MODEL_CURRENCY_CNY,
+        })
     try:
         result = aliyun_balance_service.query(
             force=(request.args.get("refresh") or "").lower() == "true"
@@ -64,7 +77,10 @@ def get_aliyun_balance():
             user_id=user_id, username=username, service_name="aliyun_bss",
             available_balance=float(result["available_amount"]), success=True,
         )
-        return jsonify({"success": True, **result})
+        return jsonify({
+            "success": True, "role_code": role_code,
+            "balance_type": "system", **result,
+        })
     except Exception as exc:
         log_balance_query(
             user_id=user_id, username=username, service_name="aliyun_bss",

@@ -2482,10 +2482,23 @@ def get_min_enabled_model_price_per_million_cent():
     return min_value
 
 
-def get_user_consumption_records(user_id, limit=100, offset=0, biz_type=None):
+def get_user_consumption_records(user_id, limit=100, offset=0, biz_type=None, biz_types=None):
     conn = connect()
     cursor = conn.cursor()
-    if biz_type:
+    cleaned_types = [str(value).strip() for value in (biz_types or []) if str(value).strip()]
+    if cleaned_types:
+        placeholders = ", ".join(["?"] * len(cleaned_types))
+        cursor.execute(
+            f"""
+            SELECT *
+            FROM account_ledger
+            WHERE user_id = ? AND entry_type = 'debit' AND biz_type IN ({placeholders})
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """,
+            (user_id, *cleaned_types, limit, offset),
+        )
+    elif biz_type:
         cursor.execute(
             """
             SELECT *
@@ -2528,7 +2541,7 @@ def get_account_ledger(user_id=None, limit=100, offset=0):
     return [dict(r) for r in rows]
 
 
-def count_account_ledger(user_id=None, entry_type=None, biz_type=None):
+def count_account_ledger(user_id=None, entry_type=None, biz_type=None, biz_types=None):
     conn = connect()
     cursor = conn.cursor()
     query = "SELECT COUNT(*) FROM account_ledger WHERE 1=1"
@@ -2539,7 +2552,12 @@ def count_account_ledger(user_id=None, entry_type=None, biz_type=None):
     if entry_type:
         query += " AND entry_type = ?"
         params.append(entry_type)
-    if biz_type:
+    cleaned_types = [str(value).strip() for value in (biz_types or []) if str(value).strip()]
+    if cleaned_types:
+        placeholders = ", ".join(["?"] * len(cleaned_types))
+        query += f" AND biz_type IN ({placeholders})"
+        params.extend(cleaned_types)
+    elif biz_type:
         query += " AND biz_type = ?"
         params.append(biz_type)
     cursor.execute(query, params)

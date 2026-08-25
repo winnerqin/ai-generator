@@ -66,7 +66,9 @@ def _duration(value: Any) -> int:
 
 def _billable_seconds(task: dict[str, Any]) -> int | None:
     usage = task.get("usage_json") or {}
-    for key in ("duration", "video_duration"):
+    # Reference-to-video responses may report duration as input + output time.
+    # Wan is priced by generated output video seconds, so prefer output duration.
+    for key in ("output_video_duration", "video_duration", "duration"):
         value = usage.get(key)
         if value not in (None, ""):
             try:
@@ -75,15 +77,6 @@ def _billable_seconds(task: dict[str, Any]) -> int | None:
                 continue
             if seconds > 0:
                 return seconds
-    input_seconds = usage.get("input_video_duration")
-    output_seconds = usage.get("output_video_duration")
-    if input_seconds not in (None, "") and output_seconds not in (None, ""):
-        try:
-            total = Decimal(str(input_seconds)) + Decimal(str(output_seconds))
-            seconds = int(total.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-        except (ValueError, TypeError, ArithmeticError):
-            return None
-        return seconds if seconds > 0 else None
     requested = task.get("duration")
     if requested not in (None, "", -1, "-1"):
         return _duration(requested)
@@ -161,6 +154,8 @@ class WanVideoService:
         role_multiplier = Decimal(str(database.get_role_pricing_multiplier(
             user.get("role_code") or database.ROLE_EXTERNAL_USER
         ) or 1))
+        if user.get("role_code") == database.ROLE_EXTERNAL_USER:
+            return role_multiplier
         user_multiplier = Decimal(str(user.get("pricing_multiplier") or 1))
         return user_multiplier if user_multiplier > 0 else role_multiplier
 
@@ -298,8 +293,11 @@ class WanVideoService:
                    "fail_reason": output.get("message") or response.get("message")}
         usage = response.get("usage") or output.get("usage") or {}
         updated["usage_json"] = usage
-        updated["token_usage"] = (_billable_seconds(updated)
-                                  if status == "succeeded" else None)
+        actual_seconds = _billable_seconds(updated) if status == "succeeded" else None
+        if actual_seconds is not None:
+            updated["duration"] = actual_seconds
+        # Wan usage is measured in generated seconds, not tokens.
+        updated["token_usage"] = None
         database.save_omni_video_task(updated)
         saved = database.get_omni_video_task(task["task_id"], user_id=task.get("user_id"))
         billing_status = self._settle(saved)

@@ -288,13 +288,15 @@
         }
 
         function renderDuration(task) {
+            if (task.source === 'wan_video' && task.billing_seconds != null && task.billing_seconds !== '') return `${task.billing_seconds}`;
             if (task.duration === -1) return '-1';
             if (task.duration == null || task.duration === '') return '-';
             return `${task.duration}`;
         }
 
         function renderTokenUsage(task) {
-            if (task.token_usage != null && task.token_usage !== '') return task.source === 'wan_video' ? `${task.token_usage} 秒` : task.token_usage;
+            if (task.source === 'wan_video') return '-';
+            if (task.token_usage != null && task.token_usage !== '') return task.token_usage;
             const usage = task.usage_json || {};
             return usage.total_tokens ?? '-';
         }
@@ -536,7 +538,7 @@
                         <div><strong>时长：</strong>${escapeHtml(renderDuration(task))} 秒</div>
                         <div><strong>Seed：</strong>${escapeHtml(task.seed ?? '-')}</div>
                         <div><strong>生成声音：</strong>${escapeHtml(String(requestPayload.generate_audio ?? true))}</div>
-                        <div><strong>Token 用量：</strong>${escapeHtml(renderTokenUsage(task))}</div>
+                        ${task.source === 'wan_video' ? '' : `<div><strong>Token 用量：</strong>${escapeHtml(renderTokenUsage(task))}</div>`}
                         <div><strong>创建时间：</strong>${escapeHtml(task.created_at || '-')}</div>
                         <div><strong>更新时间：</strong>${escapeHtml(task.updated_at || '-')}</div>
                         <div><strong>失败原因：</strong>${escapeHtml(task.fail_reason || '-')}</div>

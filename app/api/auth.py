@@ -339,13 +339,23 @@ def _pricing_by_model_code():
 def _attach_consumption_display_fields(items):
     pricing_map = _pricing_by_model_code()
     for item in items:
+        try:
+            snapshot = json.loads(item.get("snapshot_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            snapshot = {}
+        if item.get("biz_type") == "wan_video":
+            seconds = snapshot.get("billable_seconds")
+            price_cent = snapshot.get("price_cent_per_second")
+            item["display_usage"] = f"{seconds} 秒" if seconds not in (None, "") else "-"
+            if price_cent not in (None, ""):
+                item["display_unit_price"] = f"{Decimal(str(price_cent)) / Decimal('100'):.6f}".rstrip("0").rstrip(".") + " 元/秒"
+            else:
+                item["display_unit_price"] = "-"
+            item["display_tokens"] = None
+            continue
         item["display_tokens"] = _display_tokens_for_ledger_item(item)
         pricing = pricing_map.get(item.get("model_code"))
         if not pricing and item.get("snapshot_json"):
-            try:
-                snapshot = json.loads(item.get("snapshot_json") or "{}")
-            except (TypeError, json.JSONDecodeError):
-                snapshot = {}
             if snapshot.get("price_per_million_token_cent"):
                 pricing = {
                     "currency_code": snapshot.get("currency_code") or database.MODEL_CURRENCY_CNY,
@@ -557,12 +567,12 @@ def get_user_consumption_records():
         session.get("user_id"),
         limit=page_size,
         offset=offset,
-        biz_type="omni_video",
+        biz_types=("omni_video", "wan_video"),
     )
     items = _attach_consumption_display_fields(items)
     total = database.count_account_ledger(
         user_id=session.get("user_id"),
         entry_type="debit",
-        biz_type="omni_video",
+        biz_types=("omni_video", "wan_video"),
     )
     return ApiResponse.paginated(items, total, page, page_size)

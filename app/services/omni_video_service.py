@@ -656,6 +656,26 @@ def _task_record_from_remote(
     }
 
 
+def _wan_output_seconds(task: dict[str, Any]) -> int | None:
+    usage = task.get("usage_json") or {}
+    for key in ("output_video_duration", "video_duration", "duration"):
+        value = usage.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            seconds = int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        except (ValueError, TypeError, ArithmeticError):
+            continue
+        if seconds > 0:
+            return seconds
+    requested = task.get("duration")
+    try:
+        seconds = int(requested)
+    except (ValueError, TypeError):
+        return None
+    return seconds if seconds > 0 else None
+
+
 def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
     local_payload = task.get("input_payload_json") or {}
     raw_response = task.get("raw_response_json") or {}
@@ -691,10 +711,13 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
         else None
     )
 
+    is_wan = task.get("source") == "wan_video"
     token_usage = task.get("token_usage")
     if token_usage in (None, ""):
         token_usage = _normalize_token_usage(raw_response)
-    task["token_usage"] = token_usage
+    billing_seconds = _wan_output_seconds(task) if is_wan else None
+    task["billing_seconds"] = billing_seconds
+    task["token_usage"] = None if is_wan else token_usage
     task["usage_json"] = usage if isinstance(usage, dict) else {}
 
     # 金额：优先展示已入账金额；未入账则按 token*模型价格*倍率 估算
@@ -704,13 +727,13 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
     elif task.get("task_id") and task.get("user_id"):
         amount_cent = database.get_ledger_debit_amount_cent(
             task.get("user_id"),
-            "omni_video",
+            "wan_video" if is_wan else "omni_video",
             task.get("task_id"),
         )
     if (
         amount_cent is None
-        and task.get("source") == "wan_video"
-        and token_usage not in (None, "")
+        and is_wan
+        and billing_seconds not in (None, "")
         and task.get("user_id")
     ):
         try:
@@ -725,14 +748,19 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
             ) or 0)) * Decimal("100")
             user = database.get_user_by_id(task.get("user_id"))
             if unit_price > 0 and user:
+                multiplier = (
+                    Decimal(str(database.get_role_pricing_multiplier(database.ROLE_EXTERNAL_USER) or 1))
+                    if user.get("role_code") == database.ROLE_EXTERNAL_USER
+                    else _effective_multiplier(user)
+                )
                 amount_cent = _to_cent(
-                    Decimal(str(token_usage)) * Decimal(unit_price) * _effective_multiplier(user)
+                    Decimal(str(billing_seconds)) * Decimal(unit_price) * multiplier
                 )
         except Exception:
             amount_cent = None
     if (
         amount_cent is None
-        and task.get("source") != "wan_video"
+        and not is_wan
         and token_usage not in (None, "")
         and task.get("model")
         and task.get("user_id")

@@ -138,8 +138,8 @@
                             <th>时间</th>
                             <th>模型</th>
                             <th>任务ID</th>
-                            <th>Token(千)</th>
-                            <th>模型价格</th>
+                            <th>用量</th>
+                            <th>单价</th>
                             <th>金额(元)</th>
                         </tr>
                     </thead>
@@ -505,13 +505,15 @@
             empty.style.display = 'none';
             data.data.items.forEach((item) => {
                 const tokenK = (Number(item.display_tokens || item.tokens_billed || item.tokens_raw || 0) / 1000).toFixed(1);
+                const usageText = item.display_usage || `${tokenK} 千Token`;
+                const unitPriceText = item.display_unit_price || formatModelPrice(item.model_price);
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>${escapeHtml(item.created_at || '-')}</td>
                     <td>${escapeHtml(item.model_code || '-')}</td>
                     <td>${escapeHtml(item.biz_id || '-')}</td>
-                    <td>${tokenK}</td>
-                    <td>${escapeHtml(formatModelPrice(item.model_price))}</td>
+                    <td>${escapeHtml(usageText)}</td>
+                    <td>${escapeHtml(unitPriceText)}</td>
                     <td>${centToYuan(item.amount_cent)}</td>
                 `;
                 body.appendChild(tr);
