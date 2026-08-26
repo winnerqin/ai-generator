@@ -96,6 +96,7 @@ class Config:
     DASHSCOPE_INTL_API_KEY: str = ""
     DASHSCOPE_INTL_API_KEY_POOL: str = ""
     WAN_INTL_BASE_URL: str = "https://dashscope-intl.aliyuncs.com/api/v1"
+    WAN_VIDEO_INTL_DISABLE_DATA_INSPECTION: bool = False
     WAN_VIDEO_MODEL: str = "wan3.0-video"
     WAN_VIDEO_UPSTREAM_MODEL: str = "wan3.0-video"
     WAN_VIDEO_INTL_MODEL: str = "wan3.0-video-intl"
@@ -263,6 +264,9 @@ class Config:
         self.WAN_INTL_BASE_URL = os.environ.get(
             "WAN_INTL_BASE_URL", self.WAN_INTL_BASE_URL
         ).rstrip("/")
+        self.WAN_VIDEO_INTL_DISABLE_DATA_INSPECTION = os.environ.get(
+            "WAN_VIDEO_INTL_DISABLE_DATA_INSPECTION", "false"
+        ).strip().lower() in ("1", "true", "yes", "on")
         self.WAN_VIDEO_MODEL = os.environ.get("WAN_VIDEO_MODEL", self.WAN_VIDEO_MODEL)
         self.WAN_VIDEO_UPSTREAM_MODEL = os.environ.get(
             "WAN_VIDEO_UPSTREAM_MODEL", self.WAN_VIDEO_UPSTREAM_MODEL

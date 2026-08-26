@@ -87,20 +87,22 @@ def test_list_omni_video_tasks_supports_batch_id(auth_client, monkeypatch):
     assert captured["batch_id"] == "batch-001"
 
 
-def test_system_admin_can_list_all_or_selected_users_omni_tasks(auth_client, monkeypatch):
+def test_system_admin_defaults_to_mine_and_can_switch_to_all_omni_tasks(auth_client, monkeypatch):
     from app.api import omni_video as omni_video_api
 
     with auth_client.session_transaction() as sess:
         sess["username"] = "system_admin"
         sess["role_code"] = "system_admin"
+        sess["current_project_id"] = 7
     scopes = []
     monkeypatch.setattr(
         omni_video_api.omni_video_service, "list_tasks",
         lambda user_id, project_id, **kwargs: scopes.append((user_id, project_id)) or ([], 0),
     )
     assert auth_client.get("/api/omni-video/tasks").status_code == 200
-    assert auth_client.get("/api/omni-video/tasks?user_id=13").status_code == 200
-    assert scopes == [(None, None), (13, None)]
+    assert auth_client.get("/api/omni-video/tasks?scope=all").status_code == 200
+    assert auth_client.get("/api/omni-video/tasks?scope=all&user_id=13").status_code == 200
+    assert scopes == [(1, 7), (None, None), (13, None)]
 
 
 def test_regular_user_cannot_list_another_users_omni_tasks(auth_client, monkeypatch):

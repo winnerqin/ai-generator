@@ -269,6 +269,7 @@ def test_client_sends_dashscope_async_header(monkeypatch):
     assert slot == 0
     assert captured["headers"]["X-DashScope-Async"] == "enable"
     assert captured["headers"]["Authorization"] == "Bearer sk-test"
+    assert "X-DashScope-DataInspection" not in captured["headers"]
 
 
 def test_client_does_not_send_async_header_when_querying(monkeypatch):
@@ -295,6 +296,7 @@ def test_client_routes_international_calls_to_singapore(monkeypatch):
     monkeypatch.setattr(module.config, "DASHSCOPE_INTL_API_KEY", "sk-intl")
     monkeypatch.setattr(module.config, "DASHSCOPE_INTL_API_KEY_POOL", "")
     monkeypatch.setattr(module.config, "WAN_INTL_BASE_URL", "https://dashscope-intl.aliyuncs.com/api/v1")
+    monkeypatch.setattr(module.config, "WAN_VIDEO_INTL_DISABLE_DATA_INSPECTION", True)
 
     class Response:
         ok = True
@@ -311,6 +313,26 @@ def test_client_routes_international_calls_to_singapore(monkeypatch):
     )
     assert captured["headers"]["Authorization"] == "Bearer sk-intl"
     assert captured["headers"]["X-DashScope-Async"] == "enable"
+    assert captured["headers"]["X-DashScope-DataInspection"] == (
+        '{"input":"disable","output":"disable"}'
+    )
+
+
+def test_international_query_does_not_send_data_inspection_header(monkeypatch):
+    module = importlib.import_module("app.services.wan_video_client")
+    monkeypatch.setattr(module.config, "DASHSCOPE_INTL_API_KEY", "sk-intl")
+    monkeypatch.setattr(module.config, "DASHSCOPE_INTL_API_KEY_POOL", "")
+    monkeypatch.setattr(module.config, "WAN_VIDEO_INTL_DISABLE_DATA_INSPECTION", True)
+
+    class Response:
+        ok = True
+        def json(self): return {"output": {"task_status": "RUNNING"}}
+
+    captured = {}
+    monkeypatch.setattr(module.requests, "get",
+                        lambda url, **kwargs: captured.update(url=url, **kwargs) or Response())
+    module.wan_video_client.get_task("intl-task", region="intl")
+    assert "X-DashScope-DataInspection" not in captured["headers"]
 
 
 def test_create_wan_video_api(auth_client, monkeypatch):

@@ -35,7 +35,8 @@ class WanVideoClient:
         return bool(self._pool(region) and base_url and config.WAN_VIDEO_UPSTREAM_MODEL)
 
     def _headers(self, slot: int, *, region: str = "cn",
-                 asynchronous: bool = False) -> dict[str, str]:
+                 asynchronous: bool = False,
+                 disable_data_inspection: bool = False) -> dict[str, str]:
         pool = self._pool(region)
         key = pool[slot % len(pool)] if pool else ""
         headers = {
@@ -44,6 +45,8 @@ class WanVideoClient:
         }
         if asynchronous:
             headers["X-DashScope-Async"] = "enable"
+        if region == "intl" and disable_data_inspection:
+            headers["X-DashScope-DataInspection"] = '{"input":"disable","output":"disable"}'
         return headers
 
     @staticmethod
@@ -70,7 +73,10 @@ class WanVideoClient:
         slot = self.select_slot(route_key, region=region)
         response = requests.post(
             self._url(config.WAN_VIDEO_CREATE_PATH, region),
-            headers=self._headers(slot, region=region, asynchronous=True),
+            headers=self._headers(
+                slot, region=region, asynchronous=True,
+                disable_data_inspection=config.WAN_VIDEO_INTL_DISABLE_DATA_INSPECTION,
+            ),
             json=payload, timeout=(10, 60),
         )
         return self._body(response), slot

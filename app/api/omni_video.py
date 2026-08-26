@@ -68,7 +68,9 @@ def _is_system_admin() -> bool:
 def _task_list_scope() -> tuple[int | None, int | None]:
     if not _is_system_admin():
         return session.get("user_id"), session.get("current_project_id")
-    return request.args.get("user_id", type=int), None
+    if (request.args.get("scope") or "mine").strip().lower() == "all":
+        return request.args.get("user_id", type=int), None
+    return session.get("user_id"), session.get("current_project_id")
 
 
 def _safe_log_payload(payload):

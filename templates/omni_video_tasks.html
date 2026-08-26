@@ -18,6 +18,12 @@
         .filters input, .filters select { width: 100%; box-sizing: border-box; }
         .filters input[type="date"] { max-width: 150px; }
         .inline-options { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .scope-tabs { display: inline-flex; gap: 10px; margin-bottom: 18px; padding: 6px; border-radius: 14px; background: rgba(7,12,24,0.58); border: 1px solid rgba(112,130,210,0.2); }
+        .scope-tab { min-width: 132px; padding: 11px 24px; border-radius: 10px; font-size: 1rem; font-weight: 600; letter-spacing: 0; color: #8994ba; background: transparent; border-color: transparent; opacity: 0.82; transition: all 0.18s ease; }
+        .scope-tab:hover { opacity: 1; color: #dce3ff; background: rgba(255,255,255,0.05); }
+        .scope-tab.active { color: #fff; font-weight: 800; letter-spacing: 0.04em; opacity: 1; transform: translateY(-1px) scale(1.02); }
+        #myTasksTab.active { background: linear-gradient(135deg, #3378f6, #4f9cff); border-color: rgba(112,174,255,0.9); box-shadow: 0 7px 20px rgba(45,116,246,0.3); }
+        #allTasksTab.active { background: linear-gradient(135deg, #7357df, #9b6cf0); border-color: rgba(175,133,255,0.9); box-shadow: 0 7px 20px rgba(126,83,224,0.32); }
         .task-table-wrap { overflow-x: auto; overflow-y: hidden; padding-bottom: 8px; -webkit-overflow-scrolling: touch; }
         .task-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; min-width: 1280px; }
         .task-table th, .task-table td { padding: 10px 12px; border-bottom: 1px solid rgba(86,111,255,0.18); text-align: left; vertical-align: top; }
@@ -79,13 +85,19 @@
         <div class="page-subtitle">支持按日期范围筛选、分页查看、每 5 分钟自动刷新未完成任务，并在弹窗中直接预览生成视频。</div>
 
         <div class="panel">
+            {% if user.role_code == 'system_admin' or user.username == 'system_admin' %}
+            <div class="scope-tabs" role="tablist" aria-label="任务范围">
+                <button id="myTasksTab" class="btn scope-tab active" type="button" role="tab" aria-selected="true">我的任务</button>
+                <button id="allTasksTab" class="btn scope-tab" type="button" role="tab" aria-selected="false">全部任务</button>
+            </div>
+            {% endif %}
             <div class="filters">
                 <div>
                     <label for="search">搜索任务</label>
                     <input id="search" type="text" placeholder="按任务 ID、提示词或文件名搜索">
                 </div>
                 {% if user.role_code == 'system_admin' or user.username == 'system_admin' %}
-                <div>
+                <div id="adminUserFilterWrap" style="display:none;">
                     <label for="adminUserFilter">用户</label>
                     <select id="adminUserFilter"><option value="">全部用户</option></select>
                 </div>
@@ -415,6 +427,7 @@
                 start_date: document.getElementById('startDate').value,
                 end_date: document.getElementById('endDate').value,
                 user_id: document.getElementById('adminUserFilter')?.value || '',
+                scope: window.adminTaskScope || 'mine',
             };
         }
 
@@ -468,6 +481,7 @@
             if (filters.start_date) params.set('start_date', filters.start_date);
             if (filters.end_date) params.set('end_date', filters.end_date);
             if (filters.user_id) params.set('user_id', filters.user_id);
+            if (filters.scope) params.set('scope', filters.scope);
 
             debugLog('list request', { ...filters, page: currentPage, page_size: PAGE_SIZE });
             const tbody = document.getElementById('taskRows');
@@ -835,6 +849,7 @@
             document.getElementById('startDate').value = '';
             document.getElementById('endDate').value = '';
             if (document.getElementById('adminUserFilter')) document.getElementById('adminUserFilter').value = '';
+            setAdminTaskScope('mine', false);
             currentPage = 1;
             return loadTasks(1);
         }
@@ -975,6 +990,23 @@
                 ).join('');
             }
         }
+
+        function setAdminTaskScope(scope, reload = true) {
+            if (!document.getElementById('myTasksTab')) return;
+            window.adminTaskScope = scope === 'all' ? 'all' : 'mine';
+            const isAll = window.adminTaskScope === 'all';
+            document.getElementById('myTasksTab').classList.toggle('active', !isAll);
+            document.getElementById('allTasksTab').classList.toggle('active', isAll);
+            document.getElementById('myTasksTab').setAttribute('aria-selected', String(!isAll));
+            document.getElementById('allTasksTab').setAttribute('aria-selected', String(isAll));
+            document.getElementById('adminUserFilterWrap').style.display = isAll ? '' : 'none';
+            if (!isAll) document.getElementById('adminUserFilter').value = '';
+            if (reload) loadTasks(1);
+        }
+
+        window.adminTaskScope = 'mine';
+        document.getElementById('myTasksTab')?.addEventListener('click', () => setAdminTaskScope('mine'));
+        document.getElementById('allTasksTab')?.addEventListener('click', () => setAdminTaskScope('all'));
 
         Promise.all([loadOmniConfig(), loadAdminUsers()]).then(() => {
             loadTasks(1);
