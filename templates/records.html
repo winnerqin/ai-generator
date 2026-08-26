@@ -90,6 +90,8 @@
             const [total, setTotal] = useState(0);
             const [offset, setOffset] = useState(0);
             const [search, setSearch] = useState('');
+            const [users, setUsers] = useState([]);
+            const [selectedUserId, setSelectedUserId] = useState('');
             const [loading, setLoading] = useState(false);
             const [selected, setSelected] = useState([]);
             const [modalRecord, setModalRecord] = useState(null);
@@ -97,6 +99,7 @@
             const [previewRefUrl, setPreviewRefUrl] = useState(null);
             const [actionLoading, setActionLoading] = useState({});
             const touchStartX = useRef(0);
+            const isAdmin = Boolean(window.__APP_CONTEXT__?.is_system_admin);
 
             const isBusy = (key) => Boolean(actionLoading[key]);
             const runWithBusy = async (key, action) => {
@@ -154,13 +157,22 @@
                         setCurrentProjectId(String(data.current_project_id || ''));
                     }
                 });
+                if (isAdmin) {
+                    fetch('/api/admin/users').then(res => res.json()).then(data => {
+                        if (data.success) setUsers(data.users || []);
+                    });
+                }
             }, []);
 
             const loadRecords = async (reset = false) => {
                 setLoading(true);
                 try {
                     const newOffset = reset ? 0 : offset;
-                    const resp = await fetch(`/api/records?limit=24&offset=${newOffset}&search=${encodeURIComponent(search)}`);
+                    const params = new URLSearchParams({
+                        limit: '24', offset: String(newOffset), search: search,
+                    });
+                    if (isAdmin && selectedUserId) params.set('user_id', selectedUserId);
+                    const resp = await fetch(`/api/records?${params.toString()}`);
                     const data = await resp.json();
                     if (data.success) {
                         setTotal(data.total || 0);
@@ -295,11 +307,22 @@
                                 <div className="row space">
                                     <div className="row">
                                         <input
-                                            placeholder="搜索提示词"
+                                            placeholder="搜索提示词、文件名或用户名"
                                             value={search}
                                             onChange={(e) => setSearch(e.target.value)}
                                         />
+                                        {isAdmin && (
+                                            <select value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)}>
+                                                <option value="">全部用户</option>
+                                                {users.map(user => <option key={user.id} value={String(user.id)}>{user.username} (#{user.id})</option>)}
+                                            </select>
+                                        )}
                                         <button className="btn btn-secondary" disabled={loading || isBusy('search')} onClick={() => runWithBusy('search', async () => { setRecords([]); setOffset(0); await loadRecords(true); })}>{isBusy('search') ? '搜索中...' : '搜索'}</button>
+                                        <button className="btn btn-secondary" onClick={() => {
+                                            const params = new URLSearchParams({ search });
+                                            if (isAdmin && selectedUserId) params.set('user_id', selectedUserId);
+                                            window.location.href = `/api/records/export?${params.toString()}`;
+                                        }}>导出 CSV</button>
                                         <div className="view-toggle" style={{ marginLeft: '12px' }}>
                                             <button
                                                 className={viewMode === 'table' ? 'active' : ''}
@@ -331,6 +354,7 @@
                                                 <th style={{ width: '44px' }}><input type="checkbox" checked={selected.length === records.length && records.length > 0} onChange={(e) => { if (e.target.checked) setSelected(records.map(r => r.id)); else setSelected([]); }} /></th>
                                                 <th className="thumb-cell">缩略图</th>
                                                 <th style={{ width: '80px' }}>ID</th>
+                                                <th>用户</th>
                                                 <th>文件名</th>
                                                 <th className="prompt-cell">提示词</th>
                                                 <th>比例</th>
@@ -349,6 +373,7 @@
                                                         <img src={record.image_path} alt="" onClick={() => setModalRecord(record)} title="点击查看" />
                                                     </td>
                                                     <td>#{record.id}</td>
+                                                    <td>{record.username || `#${record.user_id}`}</td>
                                                     <td>{record.filename || '-'}</td>
                                                     <td className="prompt-cell" title={record.prompt || ''}>{record.prompt || '-'}</td>
                                                     <td>{record.aspect_ratio || '-'}</td>
@@ -395,6 +420,7 @@
                                                 <img src={record.image_path} alt={record.filename || 'image'} />
                                                 <div className="result-info">
                                                     <div>#{record.id} · {record.filename || '-'}</div>
+                                                    {isAdmin && <div className="small-hint">用户：{record.username || `#${record.user_id}`}</div>}
                                                     <div className="small-hint">{record.prompt || '-'}</div>
                                                 </div>
                                             </div>

@@ -1,3 +1,15 @@
+def test_omni_effective_multiplier_uses_role_not_user(monkeypatch):
+    import importlib
+    from decimal import Decimal
+
+    module = importlib.import_module("app.services.omni_video_service")
+    monkeypatch.setattr(module.database, "get_role_pricing_multiplier", lambda _role: 1.5)
+    assert module._effective_multiplier({
+        "role_code": module.database.ROLE_EXTERNAL_USER,
+        "pricing_multiplier": 9,
+    }) == Decimal("1.5")
+
+
 def test_get_task_auto_saves_completed_video_to_library(monkeypatch):
     import importlib
 

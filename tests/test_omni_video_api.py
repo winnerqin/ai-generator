@@ -87,6 +87,54 @@ def test_list_omni_video_tasks_supports_batch_id(auth_client, monkeypatch):
     assert captured["batch_id"] == "batch-001"
 
 
+def test_system_admin_can_list_all_or_selected_users_omni_tasks(auth_client, monkeypatch):
+    from app.api import omni_video as omni_video_api
+
+    with auth_client.session_transaction() as sess:
+        sess["username"] = "system_admin"
+        sess["role_code"] = "system_admin"
+    scopes = []
+    monkeypatch.setattr(
+        omni_video_api.omni_video_service, "list_tasks",
+        lambda user_id, project_id, **kwargs: scopes.append((user_id, project_id)) or ([], 0),
+    )
+    assert auth_client.get("/api/omni-video/tasks").status_code == 200
+    assert auth_client.get("/api/omni-video/tasks?user_id=13").status_code == 200
+    assert scopes == [(None, None), (13, None)]
+
+
+def test_regular_user_cannot_list_another_users_omni_tasks(auth_client, monkeypatch):
+    from app.api import omni_video as omni_video_api
+
+    captured = {}
+    monkeypatch.setattr(omni_video_api.database, "get_user_by_id",
+                        lambda user_id: {"id": user_id, "role_code": "external_user"})
+    monkeypatch.setattr(
+        omni_video_api.omni_video_service, "list_tasks",
+        lambda user_id, project_id, **kwargs:
+            captured.update(user_id=user_id) or ([], 0),
+    )
+    response = auth_client.get("/api/omni-video/tasks?user_id=999")
+    assert response.status_code == 200
+    assert captured["user_id"] == 1
+
+
+def test_omni_export_reads_all_filtered_pages(auth_client, monkeypatch):
+    from app.api import omni_video as omni_video_api
+
+    pages = []
+    def fake_list(user_id, project_id, **kwargs):
+        pages.append((kwargs["page"], kwargs["search"]))
+        return ([{"task_id": f"task-{kwargs['page']}"}], 2)
+
+    monkeypatch.setattr(omni_video_api.omni_video_service, "list_tasks", fake_list)
+    response = auth_client.get("/api/omni-video/tasks/export?search=demo")
+    assert response.status_code == 200
+    assert pages == [(1, "demo"), (2, "demo")]
+    assert "task-1" in response.get_data(as_text=True)
+    assert "task-2" in response.get_data(as_text=True)
+
+
 def test_external_batch_create_with_api_key(auth_client, monkeypatch):
     from app.api import omni_video as omni_video_api
 

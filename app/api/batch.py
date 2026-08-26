@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request, session
+import csv
+import io
+
+from flask import Blueprint, Response, jsonify, request, session
 
 import database
 from app.decorators import handle_api_error, login_required
@@ -11,12 +14,25 @@ from app.utils import ApiResponse
 batch_bp = Blueprint("batch", __name__)
 
 
+def _is_system_admin() -> bool:
+    return (session.get("role_code") == database.ROLE_SYSTEM_ADMIN
+            or session.get("username") == "system_admin")
+
+
+def _record_query_scope():
+    if not _is_system_admin():
+        return session.get("user_id"), session.get("current_project_id")
+    requested = request.args.get("user_id", type=int)
+    return requested, None
+
+
 @batch_bp.route("/batch")
 @login_required
 def batch_page():
     from flask import render_template
 
-    user = {"username": session.get("username", "")}
+    user = {"username": session.get("username", ""), "id": session.get("user_id"),
+            "role_code": session.get("role_code")}
     return render_template("batch.html", user=user)
 
 
@@ -25,7 +41,8 @@ def batch_page():
 def records_page():
     from flask import render_template
 
-    user = {"username": session.get("username", "")}
+    user = {"username": session.get("username", ""), "id": session.get("user_id"),
+            "role_code": session.get("role_code")}
     return render_template("records.html", user=user)
 
 
@@ -76,31 +93,23 @@ def get_batch_progress(batch_id: str):
 def get_records():
     """Return generation records in the legacy flat payload expected by the UI."""
 
-    user_id = session.get("user_id")
-    project_id = session.get("current_project_id")
+    user_id, project_id = _record_query_scope()
 
     limit = request.args.get("limit", type=int)
     offset = request.args.get("offset", type=int)
     page = request.args.get("page", 1, type=int)
     page_size = request.args.get("page_size", 20, type=int)
-    search = (request.args.get("search") or "").strip().lower()
+    search = (request.args.get("search") or "").strip()
 
     if limit is None:
         limit = page_size
     if offset is None:
         offset = max(page - 1, 0) * limit
 
-    records = database.get_all_records(user_id, project_id, limit=limit, offset=offset)
-    total = database.get_total_count(user_id, project_id)
-
-    if search:
-        filtered = []
-        for record in records:
-            prompt = (record.get("prompt") or "").lower()
-            filename = (record.get("filename") or "").lower()
-            if search in prompt or search in filename:
-                filtered.append(record)
-        records = filtered
+    records = database.get_all_records(
+        user_id, project_id, limit=limit, offset=offset, search=search
+    )
+    total = database.get_total_count(user_id, project_id, search=search)
 
     response_payload = {
         "success": True,
@@ -116,6 +125,35 @@ def get_records():
         },
     }
     return jsonify(response_payload)
+
+
+@batch_bp.route("/api/records/export", methods=["GET"])
+@login_required
+def export_records():
+    user_id, project_id = _record_query_scope()
+    search = (request.args.get("search") or "").strip()
+    total = database.get_total_count(user_id, project_id, search=search)
+    records = []
+    chunk_size = 1000
+    for offset in range(0, total, chunk_size):
+        records.extend(database.get_all_records(
+            user_id, project_id, limit=chunk_size, offset=offset, search=search
+        ))
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["记录ID", "用户ID", "用户名", "提示词", "文件名", "模型", "分辨率",
+                     "画面比例", "状态", "创建时间", "图片地址"])
+    for item in records:
+        writer.writerow([
+            item.get("id"), item.get("user_id"), item.get("username"), item.get("prompt"),
+            item.get("filename"), item.get("model"), item.get("resolution"),
+            item.get("aspect_ratio"), item.get("status"), item.get("created_at"),
+            item.get("image_path"),
+        ])
+    return Response(
+        "\ufeff" + output.getvalue(), mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=image_generation_records.csv"},
+    )
 
 
 @batch_bp.route("/api/records/<int:record_id>", methods=["DELETE"])

@@ -1487,43 +1487,48 @@ def get_omni_video_tasks(
     _ensure_omni_video_task_schema(cursor)
 
     if include_heavy_fields:
-        select_fields = "*"
+        select_fields = "t.*"
     else:
-        select_fields = (
+        select_fields = ", ".join(
+            f"t.{field.strip()}" for field in (
             "id, user_id, task_id, project_id, created_at, updated_at, status, model, mode, prompt, "
             "fail_reason, video_url, cover_url, first_frame_url, last_frame_url, "
             "duration, frame_count, resolution, aspect_ratio, filename, seed, token_usage, "
             "batch_id, client_request_id, source, callback_url"
+            ).split(",")
         )
 
-    query = f"SELECT {select_fields} FROM omni_video_tasks WHERE user_id = ?"
-    params = [user_id]
+    query = f"SELECT {select_fields}, u.username FROM omni_video_tasks t LEFT JOIN users u ON u.id = t.user_id WHERE 1=1"
+    params = []
+    if user_id is not None:
+        query += " AND t.user_id = ?"
+        params.append(user_id)
     if project_id is not None:
-        query += " AND project_id = ?"
+        query += " AND t.project_id = ?"
         params.append(project_id)
     if status:
-        query += " AND status = ?"
+        query += " AND t.status = ?"
         params.append(status)
     if search:
-        query += " AND (task_id LIKE ? OR prompt LIKE ? OR filename LIKE ?)"
+        query += " AND (t.task_id LIKE ? OR t.prompt LIKE ? OR t.filename LIKE ? OR u.username LIKE ?)"
         like = f"%{search}%"
-        params.extend([like, like, like])
+        params.extend([like, like, like, like])
     if start_date:
-        query += " AND created_at >= ?"
+        query += " AND t.created_at >= ?"
         params.append(f"{start_date} 00:00:00")
     if end_date:
-        query += " AND created_at < DATE_ADD(?, INTERVAL 1 DAY)"
+        query += " AND t.created_at < DATE_ADD(?, INTERVAL 1 DAY)"
         params.append(end_date)
     if batch_id:
-        query += " AND batch_id = ?"
+        query += " AND t.batch_id = ?"
         params.append(batch_id)
     if source == "seedance":
-        query += " AND (source IS NULL OR source = '' OR source != 'wan_video')"
+        query += " AND (t.source IS NULL OR t.source = '' OR t.source != 'wan_video')"
     elif source:
-        query += " AND source = ?"
+        query += " AND t.source = ?"
         params.append(source)
 
-    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    query += " ORDER BY t.created_at DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
     cursor.execute(query, params)
     rows = cursor.fetchall()
@@ -1545,31 +1550,34 @@ def count_omni_video_tasks(
     cursor = conn.cursor()
     _ensure_omni_video_task_schema(cursor)
 
-    query = "SELECT COUNT(*) FROM omni_video_tasks WHERE user_id = ?"
-    params = [user_id]
+    query = "SELECT COUNT(*) FROM omni_video_tasks t LEFT JOIN users u ON u.id = t.user_id WHERE 1=1"
+    params = []
+    if user_id is not None:
+        query += " AND t.user_id = ?"
+        params.append(user_id)
     if project_id is not None:
-        query += " AND project_id = ?"
+        query += " AND t.project_id = ?"
         params.append(project_id)
     if status:
-        query += " AND status = ?"
+        query += " AND t.status = ?"
         params.append(status)
     if search:
-        query += " AND (task_id LIKE ? OR prompt LIKE ? OR filename LIKE ?)"
+        query += " AND (t.task_id LIKE ? OR t.prompt LIKE ? OR t.filename LIKE ? OR u.username LIKE ?)"
         like = f"%{search}%"
-        params.extend([like, like, like])
+        params.extend([like, like, like, like])
     if start_date:
-        query += " AND created_at >= ?"
+        query += " AND t.created_at >= ?"
         params.append(f"{start_date} 00:00:00")
     if end_date:
-        query += " AND created_at < DATE_ADD(?, INTERVAL 1 DAY)"
+        query += " AND t.created_at < DATE_ADD(?, INTERVAL 1 DAY)"
         params.append(end_date)
     if batch_id:
-        query += " AND batch_id = ?"
+        query += " AND t.batch_id = ?"
         params.append(batch_id)
     if source == "seedance":
-        query += " AND (source IS NULL OR source = '' OR source != 'wan_video')"
+        query += " AND (t.source IS NULL OR t.source = '' OR t.source != 'wan_video')"
     elif source:
-        query += " AND source = ?"
+        query += " AND t.source = ?"
         params.append(source)
 
     cursor.execute(query, params)
@@ -1943,30 +1951,26 @@ def delete_audio_asset(asset_id, user_id=None, project_id=None):
     conn.close()
 
 
-def get_all_records(user_id, project_id=None, limit=100, offset=0):
-    """获取指定用户的所有记录"""
+def get_all_records(user_id, project_id=None, limit=100, offset=0, search=None):
+    """获取生成记录；user_id=None 时供系统管理员查询所有用户。"""
     conn = connect()
     cursor = conn.cursor()
-    if project_id is None:
-        cursor.execute(
-            """
-            SELECT * FROM generation_records
-            WHERE user_id = ?
-            ORDER BY created_at DESC
-            LIMIT ? OFFSET ?
-        """,
-            (user_id, limit, offset),
-        )
-    else:
-        cursor.execute(
-            """
-            SELECT * FROM generation_records
-            WHERE user_id = ? AND project_id = ?
-            ORDER BY created_at DESC
-            LIMIT ? OFFSET ?
-        """,
-            (user_id, project_id, limit, offset),
-        )
+    query = """SELECT r.*, u.username FROM generation_records r
+               LEFT JOIN users u ON u.id = r.user_id WHERE 1=1"""
+    params = []
+    if user_id is not None:
+        query += " AND r.user_id = ?"
+        params.append(user_id)
+    if project_id is not None:
+        query += " AND r.project_id = ?"
+        params.append(project_id)
+    if search:
+        query += " AND (r.prompt LIKE ? OR r.filename LIKE ? OR u.username LIKE ?)"
+        like = f"%{search}%"
+        params.extend([like, like, like])
+    query += " ORDER BY r.created_at DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    cursor.execute(query, params)
 
     rows = cursor.fetchall()
     records = []
@@ -2056,17 +2060,24 @@ def delete_record(record_id, user_id=None, project_id=None):
     conn.close()
 
 
-def get_total_count(user_id, project_id=None):
-    """获取指定用户的总记录数"""
+def get_total_count(user_id, project_id=None, search=None):
+    """获取生成记录数；user_id=None 时统计全部用户。"""
     conn = connect()
     cursor = conn.cursor()
-    if project_id is None:
-        cursor.execute("SELECT COUNT(*) FROM generation_records WHERE user_id = ?", (user_id,))
-    else:
-        cursor.execute(
-            "SELECT COUNT(*) FROM generation_records WHERE user_id = ? AND project_id = ?",
-            (user_id, project_id),
-        )
+    query = """SELECT COUNT(*) FROM generation_records r
+               LEFT JOIN users u ON u.id = r.user_id WHERE 1=1"""
+    params = []
+    if user_id is not None:
+        query += " AND r.user_id = ?"
+        params.append(user_id)
+    if project_id is not None:
+        query += " AND r.project_id = ?"
+        params.append(project_id)
+    if search:
+        query += " AND (r.prompt LIKE ? OR r.filename LIKE ? OR u.username LIKE ?)"
+        like = f"%{search}%"
+        params.extend([like, like, like])
+    cursor.execute(query, params)
     count = cursor.fetchone()[0]
     conn.close()
     return count
