@@ -17,9 +17,7 @@ def _to_cent(value: Decimal) -> int:
 
 def _effective_multiplier(user: dict) -> Decimal:
     role_code = user.get("role_code") or database.ROLE_EXTERNAL_USER
-    role_multiplier = Decimal(str(database.get_role_pricing_multiplier(role_code) or 1))
-    user_multiplier = Decimal(str(user.get("pricing_multiplier") or 1))
-    return user_multiplier if user_multiplier > 0 else role_multiplier
+    return Decimal(str(database.get_role_pricing_multiplier(role_code) or 1))
 
 
 def _multiplied_tokens(tokens_raw: int, multiplier: Decimal) -> int:

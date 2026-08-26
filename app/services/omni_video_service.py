@@ -106,9 +106,7 @@ def _pricing_to_cny_cent(price_per_million_token_cent: int, currency_code: str) 
 
 def _effective_multiplier(user: dict) -> Decimal:
     role_code = user.get("role_code") or database.ROLE_EXTERNAL_USER
-    role_multiplier = Decimal(str(database.get_role_pricing_multiplier(role_code) or 1))
-    user_multiplier = Decimal(str(user.get("pricing_multiplier") or 1))
-    return user_multiplier if user_multiplier > 0 else role_multiplier
+    return Decimal(str(database.get_role_pricing_multiplier(role_code) or 1))
 
 
 def _multiplied_tokens(tokens_raw: int, multiplier: Decimal) -> int:
@@ -1291,17 +1289,24 @@ class OmniVideoService:
             batch_id=batch_id,
             source=source,
         )
-        ledger_amounts = database.get_ledger_debit_amounts_cent(
-            user_id,
-            "omni_video",
-            [item.get("task_id") for item in items],
-        )
-        wan_ledger_amounts = database.get_ledger_settled_amounts_cent(
-            user_id, "wan_video", [item.get("task_id") for item in items]
-        )
-        ledger_amounts.update(wan_ledger_amounts)
-        for item in items:
-            item["_ledger_amount_cent"] = ledger_amounts.get(str(item.get("task_id") or ""))
+        if user_id is None:
+            for item in items:
+                biz_type = "wan_video" if item.get("source") == "wan_video" else "omni_video"
+                reader = (database.get_ledger_settled_amount_cent if biz_type == "wan_video"
+                          else database.get_ledger_debit_amount_cent)
+                item["_ledger_amount_cent"] = reader(
+                    item.get("user_id"), biz_type, item.get("task_id")
+                )
+        else:
+            ledger_amounts = database.get_ledger_debit_amounts_cent(
+                user_id, "omni_video", [item.get("task_id") for item in items]
+            )
+            wan_ledger_amounts = database.get_ledger_settled_amounts_cent(
+                user_id, "wan_video", [item.get("task_id") for item in items]
+            )
+            ledger_amounts.update(wan_ledger_amounts)
+            for item in items:
+                item["_ledger_amount_cent"] = ledger_amounts.get(str(item.get("task_id") or ""))
 
         # Keep list API fast: avoid remote polling and OSS backfill by default.
         # Detail/refresh endpoints remain the explicit sync path.

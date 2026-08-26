@@ -14,7 +14,7 @@
         .page-title { font-size: 1.6rem; font-weight: 700; margin-bottom: 8px; }
         .page-subtitle { color: #aeb8d9; margin-bottom: 18px; }
         .panel { border-radius: 16px; padding: 18px; margin-bottom: 16px; }
-        .filters { display: grid; grid-template-columns: 1.2fr 0.8fr 0.72fr 0.72fr auto auto auto; gap: 12px; align-items: end; }
+        .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; align-items: end; }
         .filters input, .filters select { width: 100%; box-sizing: border-box; }
         .filters input[type="date"] { max-width: 150px; }
         .inline-options { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -84,6 +84,12 @@
                     <label for="search">搜索任务</label>
                     <input id="search" type="text" placeholder="按任务 ID、提示词或文件名搜索">
                 </div>
+                {% if user.role_code == 'system_admin' or user.username == 'system_admin' %}
+                <div>
+                    <label for="adminUserFilter">用户</label>
+                    <select id="adminUserFilter"><option value="">全部用户</option></select>
+                </div>
+                {% endif %}
                 <div>
                     <label for="status">状态</label>
                     <select id="status">
@@ -114,6 +120,7 @@
                 </div>
                 <button id="reloadBtn" class="btn btn-primary">查询任务</button>
                 <button id="resetBtn" class="btn btn-secondary">重置</button>
+                <button id="exportBtn" class="btn btn-secondary">导出 CSV</button>
                 <a class="btn btn-secondary" href="/omni-video">创建新任务</a>
             </div>
             <div class="inline-options" style="margin-top: 12px;">
@@ -133,6 +140,7 @@
                     <tr>
                         <th class="select-cell"><input id="selectAllTasks" class="task-check" type="checkbox" aria-label="全选任务"></th>
                         <th>任务 ID</th>
+                        <th>用户</th>
                         <th>状态</th>
                         <th>模型</th>
                         <th>分辨率</th>
@@ -148,7 +156,7 @@
                     </tr>
                 </thead>
                 <tbody id="taskRows">
-                    <tr><td colspan="14">加载中...</td></tr>
+                    <tr><td colspan="15">加载中...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -406,6 +414,7 @@
                 source: document.getElementById('source').value,
                 start_date: document.getElementById('startDate').value,
                 end_date: document.getElementById('endDate').value,
+                user_id: document.getElementById('adminUserFilter')?.value || '',
             };
         }
 
@@ -415,6 +424,7 @@
                 <tr>
                     <td class="select-cell"><input class="task-check task-row-check" type="checkbox" data-task-id="${escapeHtml(task.task_id || '')}" ${selectedTaskIds.has(task.task_id) ? 'checked' : ''} onchange="toggleTaskSelection(this.dataset.taskId, this.checked)" aria-label="选择任务 ${escapeHtml(task.task_id || '')}"></td>
                     <td>${escapeHtml(task.task_id || '-')}</td>
+                    <td>${escapeHtml(task.username || task.user_id || '-')}</td>
                     <td><span class="status-pill">${escapeHtml(task.status || '-')}</span></td>
                     <td>${escapeHtml(modelAlias(task.model || '-'))}</td>
                     <td>${escapeHtml(task.resolution || '-')}</td>
@@ -457,10 +467,11 @@
             if (filters.source) params.set('source', filters.source);
             if (filters.start_date) params.set('start_date', filters.start_date);
             if (filters.end_date) params.set('end_date', filters.end_date);
+            if (filters.user_id) params.set('user_id', filters.user_id);
 
             debugLog('list request', { ...filters, page: currentPage, page_size: PAGE_SIZE });
             const tbody = document.getElementById('taskRows');
-            tbody.innerHTML = '<tr><td colspan="14">加载中...</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="15">加载中...</td></tr>';
             let data;
             try {
                 const resp = await fetch(`/api/omni-video/tasks?${params.toString()}`);
@@ -485,7 +496,7 @@
             updateSelectionControls();
 
             if (!currentItems.length) {
-                tbody.innerHTML = '<tr><td colspan="14">暂无任务</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="15">暂无任务</td></tr>';
                 collapseDetails('当前没有可查看的任务。');
                 updateSelectionControls();
                 return;
@@ -823,6 +834,7 @@
             document.getElementById('source').value = '';
             document.getElementById('startDate').value = '';
             document.getElementById('endDate').value = '';
+            if (document.getElementById('adminUserFilter')) document.getElementById('adminUserFilter').value = '';
             currentPage = 1;
             return loadTasks(1);
         }
@@ -911,6 +923,13 @@
         document.getElementById('source').addEventListener('change', () => loadTasks(1));
         document.getElementById('startDate').addEventListener('change', () => loadTasks(1));
         document.getElementById('endDate').addEventListener('change', () => loadTasks(1));
+        document.getElementById('adminUserFilter')?.addEventListener('change', () => loadTasks(1));
+        document.getElementById('exportBtn').addEventListener('click', () => {
+            const filters = currentFilters();
+            const params = new URLSearchParams();
+            Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
+            window.location.href = `/api/omni-video/tasks/export?${params.toString()}`;
+        });
         document.getElementById('autoRefresh').addEventListener('change', setupAutoRefresh);
         document.getElementById('prevPageBtn').addEventListener('click', () => {
             if (currentPage > 1) {
@@ -945,7 +964,19 @@
         document.getElementById('submitEnhanceBtn').addEventListener('click', (event) => {
             submitEnhanceTask(event.currentTarget);
         });
-        loadOmniConfig().then(() => {
+        async function loadAdminUsers() {
+            const select = document.getElementById('adminUserFilter');
+            if (!select) return;
+            const resp = await fetch('/api/admin/users');
+            const data = await resp.json();
+            if (resp.ok && data.success) {
+                select.innerHTML = '<option value="">全部用户</option>' + (data.users || []).map(
+                    user => `<option value="${escapeHtml(user.id)}">${escapeHtml(user.username)} (#${escapeHtml(user.id)})</option>`
+                ).join('');
+            }
+        }
+
+        Promise.all([loadOmniConfig(), loadAdminUsers()]).then(() => {
             loadTasks(1);
             setupAutoRefresh();
         });

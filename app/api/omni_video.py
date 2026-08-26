@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import os
+import csv
+import io
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
 import volcenginesdkbilling
 import volcenginesdkcore
-from flask import Blueprint, jsonify, render_template, request, send_file, session
+from flask import Blueprint, Response, jsonify, render_template, request, send_file, session
 from volcenginesdkcore.rest import ApiException
 
 import database
@@ -56,6 +58,17 @@ def _current_user_context() -> dict[str, object]:
         "id": session.get("user_id"),
         "role_code": session.get("role_code"),
     }
+
+
+def _is_system_admin() -> bool:
+    return (session.get("role_code") == database.ROLE_SYSTEM_ADMIN
+            or session.get("username") == "system_admin")
+
+
+def _task_list_scope() -> tuple[int | None, int | None]:
+    if not _is_system_admin():
+        return session.get("user_id"), session.get("current_project_id")
+    return request.args.get("user_id", type=int), None
 
 
 def _safe_log_payload(payload):
@@ -253,8 +266,7 @@ def create_omni_video_task():
 @omni_video_bp.route("/api/omni-video/tasks", methods=["GET"])
 @login_required
 def list_omni_video_tasks():
-    user_id = session.get("user_id")
-    project_id = session.get("current_project_id")
+    user_id, project_id = _task_list_scope()
     page = request.args.get("page", 1, type=int)
     page_size = request.args.get("page_size", 10, type=int)
     status = request.args.get("status") or None
@@ -301,6 +313,48 @@ def list_omni_video_tasks():
             "page": page,
             "page_size": page_size,
         }
+    )
+
+
+@omni_video_bp.route("/api/omni-video/tasks/export", methods=["GET"])
+@login_required
+def export_omni_video_tasks():
+    user_id, project_id = _task_list_scope()
+    filters = {
+        "status": request.args.get("status") or None,
+        "search": request.args.get("search") or None,
+        "start_date": request.args.get("start_date") or None,
+        "end_date": request.args.get("end_date") or None,
+        "source": request.args.get("source") or None,
+    }
+    items = []
+    page = 1
+    page_size = 1000
+    while True:
+        chunk, total = omni_video_service.list_tasks(
+            user_id, project_id, **filters,
+            page=page, page_size=page_size, sync_running=False,
+        )
+        items.extend(chunk)
+        if len(items) >= total or not chunk:
+            break
+        page += 1
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["任务ID", "用户ID", "用户名", "来源", "状态", "模型", "提示词",
+                     "分辨率", "时长(秒)", "画面比例", "Token用量", "金额(元)",
+                     "文件名", "创建时间", "更新时间", "视频地址"])
+    for item in items:
+        writer.writerow([
+            item.get("task_id"), item.get("user_id"), item.get("username"), item.get("source"),
+            item.get("status"), item.get("model"), item.get("prompt"), item.get("resolution"),
+            item.get("billing_seconds") or item.get("duration"), item.get("aspect_ratio"),
+            item.get("token_usage"), item.get("amount_yuan"), item.get("filename"),
+            item.get("created_at"), item.get("updated_at"), item.get("video_url"),
+        ])
+    return Response(
+        "\ufeff" + output.getvalue(), mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=omni_video_tasks.csv"},
     )
 
 

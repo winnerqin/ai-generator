@@ -1,7 +1,7 @@
 from app.services import billing_service
 
 
-def test_settle_omni_video_charge_uses_multiplied_actual_tokens(monkeypatch):
+def test_settle_omni_video_charge_uses_role_multiplier_not_user_multiplier(monkeypatch):
     created_entries = []
 
     monkeypatch.setattr(
@@ -16,13 +16,13 @@ def test_settle_omni_video_charge_uses_multiplied_actual_tokens(monkeypatch):
             "id": user_id,
             "role_code": "external_user",
             "balance_cent": 10000,
-            "pricing_multiplier": 1.5,
+            "pricing_multiplier": 9.0,
         },
     )
     monkeypatch.setattr(
         billing_service.database,
         "get_role_pricing_multiplier",
-        lambda role_code: 1.0,
+        lambda role_code: 1.5,
     )
     monkeypatch.setattr(
         billing_service.database,
@@ -54,6 +54,7 @@ def test_settle_omni_video_charge_uses_multiplied_actual_tokens(monkeypatch):
     assert entry["tokens_raw"] == 1234
     assert entry["tokens_billed"] == 1851
     assert entry["amount_cent"] == 185
+    assert entry["multiplier"] == 1.5
 
 
 def test_settle_omni_video_charge_uses_mini_video_reference_pricing(monkeypatch):

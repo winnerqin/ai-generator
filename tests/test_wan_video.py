@@ -53,7 +53,7 @@ def test_wan_balance_check_uses_resolution_price(monkeypatch):
     monkeypatch.setattr(module.config, "WAN_VIDEO_PRICE_1080P_YUAN_PER_SECOND", "1.2")
     monkeypatch.setattr(module.database, "get_user_by_id", lambda _user_id: {
         "role_code": module.database.ROLE_EXTERNAL_USER,
-        "pricing_multiplier": 1,
+        "pricing_multiplier": 9,
         "balance_cent": 599,
     })
     monkeypatch.setattr(module.database, "get_role_pricing_multiplier", lambda _role: 1)
@@ -67,7 +67,7 @@ def test_external_wan_billing_uses_role_multiplier(monkeypatch):
     monkeypatch.setattr(module.database, "has_ledger_entry", lambda *args: False)
     monkeypatch.setattr(module.database, "get_user_by_id", lambda _user_id: {
         "role_code": module.database.ROLE_EXTERNAL_USER,
-        "pricing_multiplier": 1,
+        "pricing_multiplier": 9,
     })
     monkeypatch.setattr(module.database, "get_role_pricing_multiplier", lambda _role: 1.5)
     captured = {}

@@ -151,13 +151,9 @@ def build_wan_video_payload(data: dict[str, Any]) -> tuple[dict[str, Any], dict[
 class WanVideoService:
     @staticmethod
     def _multiplier(user: dict[str, Any]) -> Decimal:
-        role_multiplier = Decimal(str(database.get_role_pricing_multiplier(
+        return Decimal(str(database.get_role_pricing_multiplier(
             user.get("role_code") or database.ROLE_EXTERNAL_USER
         ) or 1))
-        if user.get("role_code") == database.ROLE_EXTERNAL_USER:
-            return role_multiplier
-        user_multiplier = Decimal(str(user.get("pricing_multiplier") or 1))
-        return user_multiplier if user_multiplier > 0 else role_multiplier
 
     def _ensure_balance(self, user_id: int, duration: Any, resolution: Any,
                         model: Any = None) -> None:
