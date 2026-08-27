@@ -64,7 +64,9 @@ def init_error_handlers(app: Flask):
     @app.errorhandler(413)
     def request_entity_too_large(error):
         if request.path.startswith("/api/"):
-            return ApiResponse.bad_request("请求体过大")
+            max_mb = int(app.config.get("MAX_CONTENT_LENGTH", 0) or 0) // 1024 // 1024
+            limit_hint = f"，当前上限为 {max_mb}MB" if max_mb else ""
+            return ApiResponse.error(f"上传文件过大{limit_hint}", 413)
         return "Request Entity Too Large", 413
 
 

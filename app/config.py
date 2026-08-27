@@ -14,7 +14,7 @@ class Config:
     # ==================== Flask 配置 ====================
     SECRET_KEY: str = "dev-secret-key-change-in-production"
     DEBUG: bool = False
-    MAX_CONTENT_LENGTH: int = 500 * 1024 * 1024  # 500MB
+    MAX_CONTENT_LENGTH: int = 1024 * 1024 * 1024  # 1GB
     SESSION_LIFETIME_DAYS: int = 7
 
     # ==================== 目录配置 ====================
@@ -145,7 +145,7 @@ class Config:
     ALLOWED_AUDIO_EXTENSIONS: set = {".mp3", ".wav", ".m4a", ".aac", ".ogg"}
     ALLOWED_TEXT_EXTENSIONS: set = {".txt", ".md", ".json"}
     MAX_IMAGE_SIZE: int = 10 * 1024 * 1024  # 10MB
-    MAX_VIDEO_SIZE: int = 500 * 1024 * 1024  # 500MB
+    MAX_VIDEO_SIZE: int = 1024 * 1024 * 1024  # 1GB
     MAX_AUDIO_SIZE: int = 100 * 1024 * 1024  # 100MB
     MAX_TEXT_SIZE: int = 1 * 1024 * 1024  # 1MB
 
