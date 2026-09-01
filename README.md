@@ -69,6 +69,7 @@ Copy-Item .env.example .env
 - `ARK_API_KEY`：Seedance / 方舟接口密钥
 - `ARK_API_KEY_POOL`：全能视频国内版上游 Key 池，多个 Key 用英文逗号分隔；配置后创建任务会按稳定哈希分流到不同 Key
 - `ARK_INTL_API_KEY_POOL`：全能视频国际版上游 Key 池，多个 Key 用英文逗号分隔
+- `ARK_ACCOUNT_<账号>_INTL_API_KEY` / `ARK_ACCOUNT_<账号>_INTL_API_KEY_POOL`：账号对应的 Seedance 国际版生成 Key；使用该账号的虚拟资产时，创建、查询和取消任务都会固定使用该账号的 Key
 - `PUBLIC_BASE_URL`：对外可访问的服务基础地址，支付中心回调地址会基于它生成
 - `PAYMENT_CENTER_ENABLED`：是否启用支付中心充值能力
 - `PAYMENT_CENTER_BASE_URL`、`PAYMENT_CENTER_CREATE_ORDER_PATH`：支付中心地址与创建订单路径

@@ -823,7 +823,7 @@
                 ? saved
                 : (data.default_account_id || arkAccounts[0]?.id || '');
             const select = document.getElementById('arkAccountSelect');
-            select.innerHTML = arkAccounts.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join('');
+            select.innerHTML = arkAccounts.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.edition === 'international' ? '（国际版）' : ''}</option>`).join('');
             select.value = selectedArkAccountId;
         }
 

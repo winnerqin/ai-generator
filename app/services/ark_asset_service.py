@@ -69,13 +69,13 @@ class ArkAssetService:
             ) from exc
         timeout = max(1, int(config.ARK_ASSET_TIMEOUT_SECONDS))
         service_info = ServiceInfo(
-            config.ARK_ASSET_HOST,
+            account.get("asset_host") or config.ARK_ASSET_HOST,
             {"Accept": "application/json"},
             Credentials(
                 account["ak"],
                 account["sk"],
-                config.ARK_ASSET_SERVICE,
-                config.ARK_ASSET_REGION,
+                account.get("asset_service") or config.ARK_ASSET_SERVICE,
+                account.get("asset_region") or config.ARK_ASSET_REGION,
             ),
             timeout,
             timeout,
@@ -124,7 +124,15 @@ class ArkAssetService:
         text = str(exc)
         secrets = [config.VOLCENGINE_AK, config.VOLCENGINE_SK]
         for account in config.get_ark_accounts():
-            secrets.extend((account.get("ak"), account.get("sk"), account.get("api_key")))
+            secrets.extend(
+                (
+                    account.get("ak"),
+                    account.get("sk"),
+                    account.get("api_key"),
+                    account.get("intl_api_key"),
+                    account.get("intl_api_key_pool"),
+                )
+            )
         for secret in secrets:
             if secret:
                 text = text.replace(secret, "***")
