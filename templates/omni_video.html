@@ -453,7 +453,7 @@
                 ? saved
                 : (data.default_account_id || arkAccounts[0]?.id || '');
             const select = document.getElementById('omniArkAccountSelect');
-            select.innerHTML = arkAccounts.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join('');
+            select.innerHTML = arkAccounts.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.edition === 'international' ? '（国际版）' : ''}</option>`).join('');
             select.value = selectedArkAccountId;
         }
 
@@ -1344,6 +1344,7 @@
                 aspect_ratio: document.getElementById('aspectRatio').value,
                 seed: Number(document.getElementById('seed').value || -1),
                 generate_audio: document.getElementById('generateAudio').checked,
+                ark_account_id: selectedArkAccountId || undefined,
                 reference_urls: selectedAssets.map((asset) => asset.url).filter(Boolean),
                 reference_assets: selectedAssets.filter((asset) => asset.url).map((asset) => ({
                     url: asset.url,

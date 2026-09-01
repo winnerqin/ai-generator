@@ -105,6 +105,7 @@ def test_create_task_normalizes_international_model_display_suffix(monkeypatch):
     client_module = importlib.import_module("app.services.omni_video_client")
     monkeypatch.setattr(client_module.config, "ARK_INTL_API_KEY", "intl-key")
     monkeypatch.setattr(client_module.config, "ARK_INTL_API_KEY_POOL", "intl-key")
+    monkeypatch.setattr(client_module.config, "ARK_ACCOUNT_IDS", "")
     monkeypatch.setattr(client_module.config, "ARK_INTL_BASE_URL", "https://intl.example.com")
     monkeypatch.setattr(
         client_module.config,
@@ -135,6 +136,41 @@ def test_create_task_normalizes_international_model_display_suffix(monkeypatch):
 
     assert captured["url"] == "https://intl.example.com/contents/generations/tasks"
     assert captured["payload"]["model"] == "dreamina-seedance-2-0-260128"
+
+
+def test_international_model_uses_selected_asset_account_key(monkeypatch):
+    client_module = importlib.import_module("app.services.omni_video_client")
+    monkeypatch.setattr(client_module.config, "ARK_INTL_BASE_URL", "https://intl.example.com")
+    monkeypatch.setattr(
+        client_module.config,
+        "get_ark_account_intl_api_key_pool",
+        lambda account_id=None: [f"intl-key-{account_id}"],
+    )
+    client = client_module.OmniVideoClient()
+    authorizations = []
+
+    class FakeResponse:
+        status_code = 200
+        headers = {}
+        text = "{}"
+        def raise_for_status(self): return None
+        def json(self): return {"task_id": "task-intl", "status": "queued"}
+
+    monkeypatch.setattr(
+        client_module.requests,
+        "post",
+        lambda url, headers=None, json=None, timeout=None: authorizations.append(headers["Authorization"]) or FakeResponse(),
+    )
+    monkeypatch.setattr(
+        client_module.requests,
+        "get",
+        lambda url, headers=None, timeout=None, params=None: authorizations.append(headers["Authorization"]) or FakeResponse(),
+    )
+    model = "dreamina-seedance-2-0-260128"
+    client.create_task({"model": model, "prompt": "demo"}, account_id="account_b")
+    client.get_task("task-intl", model=model, account_id="account_b")
+
+    assert authorizations == ["Bearer intl-key-account_b", "Bearer intl-key-account_b"]
 
 
 def test_create_task_timeout_raises_friendly_error(monkeypatch):

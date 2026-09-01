@@ -735,7 +735,7 @@
                         throw new Error('图片库暂不支持手动上传，请从生成结果中添加。');
                     }
 
-                    const data = await resp.json();
+                    const data = await parseApiResponse(resp, `上传失败: ${file.name}`);
                     if (!resp.ok || !data.success) {
                         throw new Error(data.error || `上传失败: ${file.name}`);
                     }
@@ -823,7 +823,7 @@
                 ? saved
                 : (data.default_account_id || arkAccounts[0]?.id || '');
             const select = document.getElementById('arkAccountSelect');
-            select.innerHTML = arkAccounts.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join('');
+            select.innerHTML = arkAccounts.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.edition === 'international' ? '（国际版）' : ''}</option>`).join('');
             select.value = selectedArkAccountId;
         }
 
@@ -846,10 +846,22 @@
         function virtualGroupId(item) { return String(field(item, 'GroupId', 'AssetGroupId', 'Id', 'group_id', 'id')); }
         function virtualAssetId(item) { return String(field(item, 'AssetId', 'Id', 'asset_id', 'id')); }
 
+        async function parseApiResponse(resp, fallback = '请求失败') {
+            const body = await resp.text();
+            try { return body ? JSON.parse(body) : {}; } catch (_) {
+                const statusMessages = {
+                    413: '上传文件超过服务器限制；请压缩视频，或检查网站反向代理的 client_max_body_size 配置。',
+                    502: '上传网关连接后端失败，请稍后重试或联系管理员。',
+                    503: '上传服务暂时不可用，请稍后重试。',
+                    504: '上传超时，请压缩视频后重试或联系管理员调高网关超时时间。',
+                };
+                throw new Error(statusMessages[resp.status] || `${fallback}（HTTP ${resp.status}，服务器返回了非 JSON 响应）`);
+            }
+        }
+
         async function jsonRequest(url, options = {}) {
             const resp = await fetch(url, options);
-            let data = {};
-            try { data = await resp.json(); } catch (_) {}
+            const data = await parseApiResponse(resp);
             if (!resp.ok || !data.success) throw new Error(data.error || `请求失败（${resp.status}）`);
             return data;
         }

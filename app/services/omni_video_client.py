@@ -58,7 +58,14 @@ class OmniVideoClient:
     def is_configured(self, model: str | None = None, account_id: str | None = None) -> bool:
         """检查是否配置了对应版本的API"""
         if model and is_intl_model(model):
-            return config.is_seedance_intl_configured()
+            try:
+                return bool(
+                    config.get_ark_account_intl_api_key_pool(account_id)
+                    and self.intl_base_url
+                    and self.intl_model
+                )
+            except ValueError:
+                return False
         try:
             return bool(
                 config.get_ark_account_api_key_pool(account_id)
@@ -72,7 +79,7 @@ class OmniVideoClient:
         self, model: str | None = None, account_id: str | None = None
     ) -> list[str]:
         if model and is_intl_model(model):
-            return self.intl_api_key_pool
+            return config.get_ark_account_intl_api_key_pool(account_id)
         return config.get_ark_account_api_key_pool(account_id)
 
     def _select_api_key(
@@ -101,7 +108,9 @@ class OmniVideoClient:
     ) -> tuple[str, str, int]:
         """根据模型返回对应的base_url、api_key 和 slot"""
         if model and is_intl_model(model):
-            api_key, selected_slot = self._select_api_key(model=model, route_key=route_key, slot=slot)
+            api_key, selected_slot = self._select_api_key(
+                model=model, route_key=route_key, slot=slot, account_id=account_id
+            )
             return self.intl_base_url, api_key, selected_slot
         api_key, selected_slot = self._select_api_key(
             model=model, route_key=route_key, slot=slot, account_id=account_id

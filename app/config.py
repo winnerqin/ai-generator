@@ -14,7 +14,7 @@ class Config:
     # ==================== Flask 配置 ====================
     SECRET_KEY: str = "dev-secret-key-change-in-production"
     DEBUG: bool = False
-    MAX_CONTENT_LENGTH: int = 500 * 1024 * 1024  # 500MB
+    MAX_CONTENT_LENGTH: int = 1024 * 1024 * 1024  # 1GB
     SESSION_LIFETIME_DAYS: int = 7
 
     # ==================== 目录配置 ====================
@@ -44,7 +44,7 @@ class Config:
     ARK_ASSET_SERVICE: str = "ark"
     ARK_ASSET_HOST: str = "open.volcengineapi.com"
     ARK_ASSET_VERSION: str = "2024-01-01"
-    ARK_ASSET_TIMEOUT_SECONDS: int = 15
+    ARK_ASSET_TIMEOUT_SECONDS: int = 60
 
     # ==================== 阿里云 OSS 配置 ====================
     OSS_ENABLED: bool = False
@@ -86,6 +86,9 @@ class Config:
     # ==================== 火山方舟国际版 / Seedance 国际版配置 ====================
     ARK_INTL_API_KEY: str = ""
     ARK_INTL_API_KEY_POOL: str = ""
+    ARK_INTL_AK: str = ""
+    ARK_INTL_SK: str = ""
+    ARK_INTL_ACCOUNT_IDS: str = ""
     ARK_INTL_BASE_URL: str = "https://ark.ap-southeast.bytepluses.com/api/v3"
     SEEDANCE_INTL_MODEL: str = "dreamina-seedance-2-0-260128"
 
@@ -145,7 +148,7 @@ class Config:
     ALLOWED_AUDIO_EXTENSIONS: set = {".mp3", ".wav", ".m4a", ".aac", ".ogg"}
     ALLOWED_TEXT_EXTENSIONS: set = {".txt", ".md", ".json"}
     MAX_IMAGE_SIZE: int = 10 * 1024 * 1024  # 10MB
-    MAX_VIDEO_SIZE: int = 500 * 1024 * 1024  # 500MB
+    MAX_VIDEO_SIZE: int = 1024 * 1024 * 1024  # 1GB
     MAX_AUDIO_SIZE: int = 100 * 1024 * 1024  # 100MB
     MAX_TEXT_SIZE: int = 1 * 1024 * 1024  # 1MB
 
@@ -245,6 +248,11 @@ class Config:
         self.ARK_INTL_API_KEY = os.environ.get("ARK_INTL_API_KEY", self.ARK_INTL_API_KEY)
         self.ARK_INTL_API_KEY_POOL = os.environ.get(
             "ARK_INTL_API_KEY_POOL", self.ARK_INTL_API_KEY_POOL
+        )
+        self.ARK_INTL_AK = os.environ.get("ARK_INTL_AK", self.ARK_INTL_AK)
+        self.ARK_INTL_SK = os.environ.get("ARK_INTL_SK", self.ARK_INTL_SK)
+        self.ARK_INTL_ACCOUNT_IDS = os.environ.get(
+            "ARK_INTL_ACCOUNT_IDS", self.ARK_INTL_ACCOUNT_IDS
         )
         self.ARK_INTL_BASE_URL = os.environ.get("ARK_INTL_BASE_URL", self.ARK_INTL_BASE_URL)
         self.SEEDANCE_INTL_MODEL = os.environ.get("SEEDANCE_INTL_MODEL", self.SEEDANCE_INTL_MODEL)
@@ -462,41 +470,90 @@ class Config:
         return f"ARK_ACCOUNT_{normalized}"
 
     def get_ark_accounts(self) -> list[dict[str, str]]:
-        """Return configured domestic Ark accounts without exposing this object externally."""
+        """Return domestic and international asset accounts without exposing secrets."""
         import os
 
         account_ids = self._parse_csv_models(self.ARK_ACCOUNT_IDS)
         if not account_ids:
-            return [
+            accounts = [
                 {
                     "id": self.ARK_DEFAULT_ACCOUNT_ID,
                     "name": os.environ.get("ARK_DEFAULT_ACCOUNT_NAME", "默认账号").strip()
                     or "默认账号",
+                    "edition": "domestic",
                     "ak": self.VOLCENGINE_AK,
                     "sk": self.VOLCENGINE_SK,
                     "api_key": self.ARK_API_KEY,
                     "api_key_pool": self.ARK_API_KEY_POOL,
+                    "intl_api_key": self.ARK_INTL_API_KEY,
+                    "intl_api_key_pool": self.ARK_INTL_API_KEY_POOL,
+                    "asset_region": self.ARK_ASSET_REGION,
+                    "asset_service": self.ARK_ASSET_SERVICE,
+                    "asset_host": self.ARK_ASSET_HOST,
                 }
             ]
+        else:
+            accounts = []
+            seen: set[str] = set()
+            for raw_id in account_ids:
+                account_id = raw_id.strip()
+                if not account_id or account_id in seen:
+                    continue
+                seen.add(account_id)
+                prefix = self._ark_account_env_prefix(account_id)
+                accounts.append(
+                    {
+                        "id": account_id,
+                        "name": os.environ.get(f"{prefix}_NAME", account_id).strip() or account_id,
+                        "edition": "domestic",
+                        "ak": os.environ.get(f"{prefix}_AK", "").strip(),
+                        "sk": os.environ.get(f"{prefix}_SK", "").strip(),
+                        "api_key": os.environ.get(f"{prefix}_API_KEY", "").strip(),
+                        "api_key_pool": os.environ.get(f"{prefix}_API_KEY_POOL", "").strip(),
+                        "intl_api_key": os.environ.get(f"{prefix}_INTL_API_KEY", "").strip(),
+                        "intl_api_key_pool": os.environ.get(f"{prefix}_INTL_API_KEY_POOL", "").strip(),
+                        "asset_region": os.environ.get(f"{prefix}_ASSET_REGION", self.ARK_ASSET_REGION).strip() or self.ARK_ASSET_REGION,
+                        "asset_service": os.environ.get(f"{prefix}_ASSET_SERVICE", self.ARK_ASSET_SERVICE).strip() or self.ARK_ASSET_SERVICE,
+                        "asset_host": os.environ.get(f"{prefix}_ASSET_HOST", self.ARK_ASSET_HOST).strip() or self.ARK_ASSET_HOST,
+                    }
+                )
 
-        accounts: list[dict[str, str]] = []
-        seen: set[str] = set()
-        for raw_id in account_ids:
-            account_id = raw_id.strip()
-            if not account_id or account_id in seen:
-                continue
-            seen.add(account_id)
-            prefix = self._ark_account_env_prefix(account_id)
-            accounts.append(
-                {
-                    "id": account_id,
-                    "name": os.environ.get(f"{prefix}_NAME", account_id).strip() or account_id,
+        intl_ids = self._parse_csv_models(self.ARK_INTL_ACCOUNT_IDS)
+        if intl_ids:
+            for raw_id in intl_ids:
+                raw_id = raw_id.strip()
+                if not raw_id:
+                    continue
+                prefix = self._ark_account_env_prefix(raw_id).replace("ARK_ACCOUNT_", "ARK_INTL_ACCOUNT_", 1)
+                accounts.append({
+                    "id": f"intl:{raw_id}",
+                    "name": os.environ.get(f"{prefix}_NAME", raw_id).strip() or raw_id,
+                    "edition": "international",
                     "ak": os.environ.get(f"{prefix}_AK", "").strip(),
                     "sk": os.environ.get(f"{prefix}_SK", "").strip(),
-                    "api_key": os.environ.get(f"{prefix}_API_KEY", "").strip(),
-                    "api_key_pool": os.environ.get(f"{prefix}_API_KEY_POOL", "").strip(),
-                }
-            )
+                    "api_key": "",
+                    "api_key_pool": "",
+                    "intl_api_key": os.environ.get(f"{prefix}_API_KEY", "").strip(),
+                    "intl_api_key_pool": os.environ.get(f"{prefix}_API_KEY_POOL", "").strip(),
+                    "asset_region": os.environ.get(f"{prefix}_ASSET_REGION", "ap-southeast-1").strip() or "ap-southeast-1",
+                    "asset_service": os.environ.get(f"{prefix}_ASSET_SERVICE", "ark").strip() or "ark",
+                    "asset_host": os.environ.get(f"{prefix}_ASSET_HOST", "open.byteplusapi.com").strip() or "open.byteplusapi.com",
+                })
+        elif self.ARK_INTL_API_KEY or self.ARK_INTL_API_KEY_POOL or self.ARK_INTL_AK or self.ARK_INTL_SK:
+            accounts.append({
+                "id": "intl:default",
+                "name": os.environ.get("ARK_INTL_ACCOUNT_NAME", "Seedance").strip() or "Seedance",
+                "edition": "international",
+                "ak": self.ARK_INTL_AK,
+                "sk": self.ARK_INTL_SK,
+                "api_key": "",
+                "api_key_pool": "",
+                "intl_api_key": self.ARK_INTL_API_KEY,
+                "intl_api_key_pool": self.ARK_INTL_API_KEY_POOL,
+                "asset_region": "ap-southeast-1",
+                "asset_service": "ark",
+                "asset_host": "open.byteplusapi.com",
+            })
         return accounts
 
     def get_ark_account(self, account_id: str | None = None) -> dict[str, str]:
@@ -519,6 +576,17 @@ class Config:
         return self._parse_csv_models(self.ARK_INTL_API_KEY_POOL) or self._parse_csv_models(
             self.ARK_INTL_API_KEY
         )
+
+    def get_ark_account_intl_api_key_pool(self, account_id: str | None = None) -> list[str]:
+        """Return the international Seedance keys belonging to an asset account."""
+        account = self.get_ark_account(account_id)
+        pool = self._parse_csv_models(account.get("intl_api_key_pool")) or self._parse_csv_models(
+            account.get("intl_api_key")
+        )
+        if pool:
+            return pool
+        # Preserve existing deployments until per-account international keys are added.
+        return self.get_ark_intl_api_key_pool()
 
     def is_video_enhance_configured(self) -> bool:
         """检查是否配置了视频画质增强接口。"""

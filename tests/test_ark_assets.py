@@ -129,6 +129,39 @@ def test_create_asset_by_file(auth_client, monkeypatch):
     assert captured["payload"]["ProjectName"] == "default"
 
 
+def test_create_asset_timeout_reconciles_committed_asset(auth_client, monkeypatch):
+    monkeypatch.setattr(
+        "app.api.content.file_upload_service.save_uploaded_file",
+        lambda *args, **kwargs: (True, "https://cdn.example.com/hero.png", None),
+    )
+    monkeypatch.setattr(
+        "app.api.content.ark_asset_service.create_asset",
+        lambda payload, account_id=None: (_ for _ in ()).throw(
+            ArkAssetError("Read timed out", status_code=502)
+        ),
+    )
+    monkeypatch.setattr(
+        "app.api.content.ark_asset_service.list_assets",
+        lambda payload, account_id=None: {
+            "Assets": [{"AssetId": "asset-1", "Name": "主角正面", "URL": "https://cdn.example.com/hero.png"}]
+        },
+    )
+
+    response = auth_client.post(
+        "/api/virtual-assets",
+        data={
+            "group_id": "group-1",
+            "name": "主角正面",
+            "asset_type": "image",
+            "file": (BytesIO(b"image"), "hero.png"),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["item"]["AssetId"] == "asset-1"
+
+
 def test_create_asset_rejects_url_only(auth_client):
     response = auth_client.post(
         "/api/virtual-assets",
@@ -198,6 +231,11 @@ def test_account_list_and_asset_query_keep_account_id(auth_client, monkeypatch):
         "get_ark_account_api_key_pool",
         lambda account_id=None: [config.get_ark_account(account_id)["api_key"]],
     )
+    monkeypatch.setattr(
+        config,
+        "get_ark_account_intl_api_key_pool",
+        lambda account_id=None: [f"intl-{account_id}"] if account_id == "account_b" else [],
+    )
     captured = {}
     monkeypatch.setattr(
         "app.api.content.ark_asset_service.list_assets",
@@ -207,10 +245,28 @@ def test_account_list_and_asset_query_keep_account_id(auth_client, monkeypatch):
     account_response = auth_client.get("/api/ark-accounts")
     assert account_response.status_code == 200
     assert account_response.get_json()["items"] == [
-        {"id": "account_a", "name": "账号A", "asset_configured": True, "generation_configured": True},
-        {"id": "account_b", "name": "账号B", "asset_configured": True, "generation_configured": True},
+        {"id": "account_a", "name": "账号A", "edition": "domestic", "asset_configured": True, "generation_configured": True, "intl_generation_configured": False},
+        {"id": "account_b", "name": "账号B", "edition": "domestic", "asset_configured": True, "generation_configured": True, "intl_generation_configured": True},
     ]
     response = auth_client.get("/api/virtual-assets?account_id=account_b")
     assert response.status_code == 200
     assert response.get_json()["account_id"] == "account_b"
     assert captured["account_id"] == "account_b"
+
+
+def test_config_exposes_international_asset_accounts(monkeypatch):
+    from app.config import config
+
+    monkeypatch.setattr(config, "ARK_ACCOUNT_IDS", "")
+    monkeypatch.setattr(config, "ARK_INTL_ACCOUNT_IDS", "byteplus_a")
+    monkeypatch.setenv("ARK_INTL_ACCOUNT_BYTEPLUS_A_NAME", "国际账号A")
+    monkeypatch.setenv("ARK_INTL_ACCOUNT_BYTEPLUS_A_AK", "intl-ak")
+    monkeypatch.setenv("ARK_INTL_ACCOUNT_BYTEPLUS_A_SK", "intl-sk")
+    monkeypatch.setenv("ARK_INTL_ACCOUNT_BYTEPLUS_A_API_KEY", "intl-api-key")
+
+    account = config.get_ark_account("intl:byteplus_a")
+
+    assert account["name"] == "国际账号A"
+    assert account["edition"] == "international"
+    assert account["asset_region"] == "ap-southeast-1"
+    assert config.get_ark_account_intl_api_key_pool(account["id"]) == ["intl-api-key"]

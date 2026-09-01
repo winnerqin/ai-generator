@@ -75,6 +75,37 @@ def _ark_items(result: dict, *keys: str) -> list[dict]:
     return []
 
 
+def _reconcile_created_asset(
+    *, account_id: str, group_id: str, name: str, source_url: str
+) -> dict | None:
+    """Find an asset whose create response timed out after the upstream committed it."""
+    payload = {
+        "Filter": {"GroupType": "AIGC", "GroupIds": [group_id], "Name": name},
+        "PageNumber": 1,
+        "PageSize": 100,
+        "ProjectName": "default",
+    }
+    for attempt in range(3):
+        if attempt:
+            time.sleep(1)
+        try:
+            result = ark_asset_service.list_assets(payload, account_id=account_id)
+        except ArkAssetError:
+            logger.warning(
+                "Ark asset reconciliation list failed: account_id=%s group_id=%s attempt=%s",
+                account_id,
+                group_id,
+                attempt + 1,
+            )
+            continue
+        for item in _ark_items(result, "Assets", "Items", "assets", "items"):
+            item_name = str(item.get("Name") or item.get("name") or "").strip()
+            item_url = str(item.get("URL") or item.get("Url") or item.get("url") or "").strip()
+            if item_name == name and (not item_url or item_url == source_url):
+                return item
+    return None
+
+
 def _validate_virtual_asset_upload(upload, asset_type: str) -> None:
     rules = {
         "Image": ({".jpg", ".jpeg", ".png", ".webp", ".gif"}, 30 * 1024 * 1024),
@@ -420,9 +451,13 @@ def ark_accounts():
                 {
                     "id": account["id"],
                     "name": account["name"],
+                    "edition": account.get("edition", "domestic"),
                     "asset_configured": bool(account["ak"] and account["sk"]),
                     "generation_configured": bool(
                         config.get_ark_account_api_key_pool(account["id"])
+                    ),
+                    "intl_generation_configured": bool(
+                        config.get_ark_account_intl_api_key_pool(account["id"])
                     ),
                 }
                 for account in accounts
@@ -526,17 +561,34 @@ def virtual_assets():
         if not source_url.startswith(("http://", "https://")):
             raise ValueError("创建虚拟资产需要先配置可公网访问的 OSS")
 
-        result = ark_asset_service.create_asset(
-            {
-                "GroupId": group_id,
-                "Name": name,
-                "Description": description,
-                "AssetType": asset_type,
-                "URL": source_url,
-                "ProjectName": "default",
-            },
-            account_id=account_id,
-        )
+        create_payload = {
+            "GroupId": group_id,
+            "Name": name,
+            "Description": description,
+            "AssetType": asset_type,
+            "URL": source_url,
+            "ProjectName": "default",
+        }
+        try:
+            result = ark_asset_service.create_asset(create_payload, account_id=account_id)
+        except ArkAssetError as exc:
+            if "timed out" not in str(exc).lower() and "timeout" not in str(exc).lower():
+                raise
+            reconciled = _reconcile_created_asset(
+                account_id=account_id,
+                group_id=group_id,
+                name=name,
+                source_url=source_url,
+            )
+            if not reconciled:
+                raise
+            logger.info(
+                "Ark CreateAsset response timed out but asset was found: account_id=%s group_id=%s name=%s",
+                account_id,
+                group_id,
+                name,
+            )
+            result = reconciled
         return jsonify({"success": True, "account_id": account_id, "item": result})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc), "code": "INVALID_ARGUMENT"}), 400
