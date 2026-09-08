@@ -8,11 +8,13 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
 import database
 from app.config import config
+from app.services.omni_video_service import is_oss_url
 from app.services.oss_service import oss_service
 from app.services.video_enhance_client import video_enhance_client, SUPPORTED_TOOL_VERSIONS, SUPPORTED_ENHANCE_RESOLUTIONS
 
@@ -404,20 +406,32 @@ class VideoEnhanceService:
         existing = database.get_video_by_task_id(user_id, task_id, project_id=project_id)
         if existing:
             existing_meta = existing.get("meta") or {}
-            # 已保存且URL有效或已标记过期，无需重复处理
-            if existing_meta.get("url_expired") or oss_service.is_available() and not video_url.startswith("https://"):
+            existing_url = existing.get("url") or ""
+            # 已保存为永久 OSS 地址或已确认过期，无需重复处理。
+            if existing_meta.get("url_expired") or is_oss_url(existing_url):
                 logger.info("[video-enhance] Video already in library: task_id=%s", task_id)
                 return
-            # 如果URL仍是临时URL且未过期，尝试迁移到OSS
-            if oss_service.is_available() and not existing_meta.get("url_expired"):
-                existing_url = existing.get("url") or ""
-                if existing_url and not existing_url.startswith("https://"):
-                    oss_url, is_expired = self._download_and_upload_to_oss(existing_url, output_filename, user_id, project_id, task_id)
-                    if oss_url:
-                        database.update_video_asset_url(existing["id"], oss_url)
-                    elif is_expired:
-                        database.update_video_asset_meta(existing["id"], {"url_expired": True})
-                        logger.info("[video-enhance] Marked video URL as expired: task_id=%s", task_id)
+            # 已有记录仍是上游地址时，自动迁移到 OSS。
+            if oss_service.is_available() and existing_url.startswith(("http://", "https://")):
+                oss_url, is_expired = self._download_and_upload_to_oss(
+                    existing_url, output_filename, user_id, project_id, task_id
+                )
+                if oss_url:
+                    database.update_video_asset_url(existing["id"], oss_url)
+                    task["video_url"] = oss_url
+                    database.save_video_enhance_task(task)
+                elif is_expired:
+                    database.update_video_asset_meta(existing["id"], {"url_expired": True})
+                    logger.error(
+                        "[video-enhance][oss-backfill][alert] source URL expired: task_id=%s",
+                        task_id,
+                    )
+                else:
+                    logger.error(
+                        "[video-enhance][oss-backfill][alert] OSS upload failed: task_id=%s url=%s",
+                        task_id,
+                        existing_url,
+                    )
             return
 
         final_url = video_url
@@ -428,6 +442,8 @@ class VideoEnhanceService:
             oss_url, is_expired = self._download_and_upload_to_oss(video_url, output_filename, user_id, project_id, task_id)
             if oss_url:
                 final_url = oss_url
+                task["video_url"] = oss_url
+                database.save_video_enhance_task(task)
             elif is_expired:
                 url_expired = True
 
@@ -453,6 +469,73 @@ class VideoEnhanceService:
             project_id=project_id,
         )
         logger.info("[video-enhance] Video saved to library: filename=%s url=%s", output_filename, final_url)
+
+    def refresh_pending_tasks(self, limit: int = 200) -> dict[str, int]:
+        """Background polling for enhance tasks, including automatic OSS persistence on success."""
+        items = database.get_video_enhance_tasks_by_statuses(["queued", "running"], limit=limit)
+        result = {"scanned": len(items), "refreshed": 0, "failed": 0}
+        for item in items:
+            try:
+                self._sync_from_remote(item)
+                result["refreshed"] += 1
+            except Exception:
+                result["failed"] += 1
+                logger.exception(
+                    "[video-enhance][worker] refresh failed: task_id=%s user_id=%s",
+                    item.get("task_id"),
+                    item.get("user_id"),
+                )
+        return result
+
+    def backfill_successful_tasks(self, limit: int = 200) -> dict[str, int]:
+        """Persist successful enhanced videos that still use an upstream HTTP URL."""
+        configured_oss_hosts = {
+            (urlparse(value if "://" in value else f"https://{value}").hostname or "").lower()
+            for value in (
+                config.OSS_ENDPOINT,
+                config.OSS_EXTERNAL_ENDPOINT,
+                config.OSS_ACCESS_ENDPOINT,
+            )
+            if value
+        }
+        items = database.get_successful_video_enhance_tasks_with_remote_urls(
+            limit=limit, excluded_hosts=configured_oss_hosts
+        )
+        result = {"scanned": len(items), "backfilled": 0, "expired": 0, "failed": 0}
+        if items and not oss_service.is_available():
+            logger.warning(
+                "[video-enhance][oss-backfill][alert] OSS unavailable; pending_tasks=%s",
+                len(items),
+            )
+            result["failed"] = len(items)
+            return result
+
+        for item in items:
+            try:
+                self._save_to_video_library(item)
+                refreshed = database.get_video_enhance_task(
+                    item.get("task_id"), item.get("user_id"), item.get("project_id")
+                )
+                if refreshed and is_oss_url(refreshed.get("video_url") or ""):
+                    result["backfilled"] += 1
+                    continue
+                asset = database.get_video_by_task_id(
+                    item.get("user_id"), item.get("task_id"), project_id=item.get("project_id")
+                )
+                if asset and (asset.get("meta") or {}).get("url_expired"):
+                    result["expired"] += 1
+                else:
+                    result["failed"] += 1
+                # Move unresolved rows to the end of the oldest-first scan.
+                database.save_video_enhance_task(item)
+            except Exception:
+                result["failed"] += 1
+                logger.exception(
+                    "[video-enhance][oss-backfill][alert] unexpected failure: task_id=%s user_id=%s",
+                    item.get("task_id"),
+                    item.get("user_id"),
+                )
+        return result
 
     def _download_and_upload_to_oss(self, video_url: str, filename: str, user_id: int, project_id: int | None, task_id: str) -> tuple[str | None, bool]:
         """下载视频并上传到OSS，返回(url, is_expired)"""

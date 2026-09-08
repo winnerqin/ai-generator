@@ -404,6 +404,7 @@ curl -H "X-API-Key: test-key-123" \
 OMNI_VIDEO_WORKER_ENABLED=true
 OMNI_VIDEO_WORKER_INTERVAL_SECONDS=60
 OMNI_VIDEO_WORKER_BATCH_LIMIT=200
+OMNI_VIDEO_OSS_BACKFILL_INTERVAL_SECONDS=300
 ```
 
 如果外部系统希望立即获得最新状态，可在查询接口中使用默认的 `sync=true` 或 `sync_running=true`。

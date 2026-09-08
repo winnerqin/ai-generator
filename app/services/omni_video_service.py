@@ -10,7 +10,7 @@ import uuid
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlparse, urlunparse
+from urllib.parse import parse_qs, quote, urlparse, urlunparse
 
 import requests
 
@@ -49,23 +49,53 @@ TERMINAL_STATUSES = SUCCESS_STATUSES | {"failed", "cancelled", "canceled", "expi
 
 # URL类型判断
 OSS_URL_PATTERNS = ["oss-cn", "aliyuncs.com"]
-TOS_URL_PATTERNS = ["tos-cn-beijing.volces.com", "tos-cn"]
+TOS_SIGNED_QUERY_KEYS = {
+    "x-tos-algorithm",
+    "x-tos-credential",
+    "x-tos-date",
+    "x-tos-expires",
+    "x-tos-signature",
+}
 
 
 def is_oss_url(url: str) -> bool:
     """判断是否是阿里云OSS永久URL"""
     if not url:
         return False
-    url_lower = url.lower()
-    return any(pattern in url_lower for pattern in OSS_URL_PATTERNS)
+    try:
+        hostname = (urlparse(url).hostname or "").lower().rstrip(".")
+    except (TypeError, ValueError):
+        return False
+    configured_hosts = {
+        (urlparse(value if "://" in value else f"https://{value}").hostname or "")
+        .lower()
+        .rstrip(".")
+        for value in (
+            config.OSS_ENDPOINT,
+            config.OSS_EXTERNAL_ENDPOINT,
+            config.OSS_ACCESS_ENDPOINT,
+        )
+        if value
+    }
+    return hostname in configured_hosts or any(pattern in hostname for pattern in OSS_URL_PATTERNS)
 
 
 def is_tos_temp_url(url: str) -> bool:
-    """判断是否是火山引擎TOS临时URL"""
+    """判断是否是任意地域的火山引擎 TOS 临时 URL。"""
     if not url:
         return False
-    url_lower = url.lower()
-    return any(pattern in url_lower for pattern in TOS_URL_PATTERNS)
+    try:
+        parsed = urlparse(url)
+    except (TypeError, ValueError):
+        return False
+
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    query_keys = {key.lower() for key in parse_qs(parsed.query, keep_blank_values=True)}
+    is_volcengine_tos_host = hostname.endswith(".volces.com") and (
+        hostname.startswith("tos-") or ".tos-" in hostname
+    )
+    is_signed_tos_url = len(query_keys & TOS_SIGNED_QUERY_KEYS) >= 2
+    return is_volcengine_tos_host or is_signed_tos_url
 
 
 def _normalize_reference_urls(reference_urls: list[str] | None) -> list[str]:
@@ -1024,6 +1054,12 @@ class OmniVideoService:
                 elif is_expired:
                     # 标记URL过期，不再重复尝试
                     database.update_video_asset_meta(existing["id"], {"url_expired": True})
+                    task["external_meta_json"] = {
+                        **(task.get("external_meta_json") or {}),
+                        "oss_backfill_status": "expired",
+                        "oss_backfill_checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    database.save_omni_video_task(task)
                     logger.info(
                         "[omni-video] Marked video URL as expired: task_id=%s", task["task_id"]
                     )
@@ -1085,6 +1121,12 @@ class OmniVideoService:
                 )
                 if existing_video:
                     database.update_video_asset_meta(existing_video["id"], {"url_expired": True})
+                    task["external_meta_json"] = {
+                        **(task.get("external_meta_json") or {}),
+                        "oss_backfill_status": "expired",
+                        "oss_backfill_checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    database.save_omni_video_task(task)
                     logger.info(
                         "[omni-video] Marked new video URL as expired: task_id=%s", task["task_id"]
                     )
@@ -1362,6 +1404,65 @@ class OmniVideoService:
                     item.get("user_id"),
                 )
         return {"scanned": len(items), "refreshed": refreshed, "failed": failed}
+
+    def backfill_successful_tos_tasks(self, limit: int = 200) -> dict[str, int]:
+        """Retry OSS persistence for successful tasks that still reference temporary TOS URLs."""
+        items = database.get_successful_omni_video_tasks_with_temp_urls(limit=limit)
+        result = {"scanned": len(items), "backfilled": 0, "expired": 0, "failed": 0}
+
+        if items and not oss_service.is_available():
+            logger.warning(
+                "[omni-video][oss-backfill][alert] OSS unavailable; pending_tasks=%s",
+                len(items),
+            )
+            result["failed"] = len(items)
+            return result
+
+        for item in items:
+            task_id = item.get("task_id")
+            try:
+                self._ensure_video_library_entry(item)
+                refreshed = database.get_omni_video_task(task_id, user_id=item.get("user_id"))
+                if refreshed and is_oss_url(refreshed.get("video_url") or ""):
+                    result["backfilled"] += 1
+                    continue
+
+                asset = database.get_video_by_task_id(
+                    item.get("user_id"), task_id, project_id=item.get("project_id")
+                )
+                if asset and (asset.get("meta") or {}).get("url_expired"):
+                    result["expired"] += 1
+                    logger.error(
+                        "[omni-video][oss-backfill][alert] source URL expired before OSS upload: "
+                        "task_id=%s user_id=%s",
+                        task_id,
+                        item.get("user_id"),
+                    )
+                else:
+                    result["failed"] += 1
+                    item["external_meta_json"] = {
+                        **(item.get("external_meta_json") or {}),
+                        "oss_backfill_status": "failed",
+                        "oss_backfill_checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    # Saving moves this task to the end of the oldest-first scan so one
+                    # transient failure cannot starve the rest of the backlog.
+                    database.save_omni_video_task(item)
+                    logger.error(
+                        "[omni-video][oss-backfill][alert] OSS backfill failed; temporary URL retained: "
+                        "task_id=%s user_id=%s url=%s",
+                        task_id,
+                        item.get("user_id"),
+                        item.get("video_url"),
+                    )
+            except Exception:
+                result["failed"] += 1
+                logger.exception(
+                    "[omni-video][oss-backfill][alert] unexpected failure: task_id=%s user_id=%s",
+                    task_id,
+                    item.get("user_id"),
+                )
+        return result
 
     def cancel_task(self, user_id: int, project_id: int | None, task_id: str) -> dict[str, Any]:
         existing = database.get_omni_video_task(task_id, user_id=user_id, project_id=project_id)

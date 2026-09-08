@@ -1608,6 +1608,35 @@ def get_omni_video_tasks_by_statuses(statuses, limit=200):
     return [_decode_omni_video_task(row) for row in rows]
 
 
+def get_successful_omni_video_tasks_with_temp_urls(limit=200):
+    """Return successful Seedance tasks whose result still looks like a signed TOS URL."""
+    conn = connect()
+    cursor = conn.cursor()
+    _ensure_omni_video_task_schema(cursor)
+    cursor.execute(
+        """
+        SELECT t.*, u.username
+        FROM omni_video_tasks t
+        LEFT JOIN users u ON u.id = t.user_id
+        WHERE LOWER(t.status) IN ('succeeded', 'success', 'completed', 'done', 'finished')
+          AND (t.source IS NULL OR t.source = '' OR t.source != 'wan_video')
+          AND t.video_url IS NOT NULL
+          AND COALESCE(t.external_meta_json, '') NOT LIKE '%"oss_backfill_status": "expired"%'
+          AND (
+              LOWER(t.video_url) LIKE '%.tos-%.volces.com/%'
+              OR LOWER(t.video_url) LIKE '%x-tos-signature=%'
+              OR LOWER(t.video_url) LIKE '%x-tos-expires=%'
+          )
+        ORDER BY t.updated_at ASC
+        LIMIT ?
+        """,
+        (int(limit or 200),),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_decode_omni_video_task(row) for row in rows]
+
+
 def get_unsettled_successful_wan_tasks(limit=200):
     """Return successful Wan tasks that have neither a debit nor cost settlement."""
     conn = connect()
@@ -1867,6 +1896,51 @@ def count_video_enhance_tasks(
     total = cursor.fetchone()[0]
     conn.close()
     return total
+
+
+def get_video_enhance_tasks_by_statuses(statuses, limit=200):
+    conn = connect()
+    cursor = conn.cursor()
+    _ensure_video_enhance_tasks_schema(cursor)
+    cleaned = [str(status).strip() for status in (statuses or []) if str(status).strip()]
+    if not cleaned:
+        conn.close()
+        return []
+    placeholders = ", ".join(["?"] * len(cleaned))
+    cursor.execute(
+        f"SELECT * FROM video_enhance_tasks WHERE status IN ({placeholders}) "
+        "ORDER BY created_at ASC LIMIT ?",
+        list(cleaned) + [int(limit or 200)],
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_decode_video_enhance_task(row) for row in rows]
+
+
+def get_successful_video_enhance_tasks_with_remote_urls(limit=200, excluded_hosts=None):
+    conn = connect()
+    cursor = conn.cursor()
+    _ensure_video_enhance_tasks_schema(cursor)
+    query = """
+        SELECT * FROM video_enhance_tasks
+        WHERE LOWER(status) IN ('succeeded', 'success', 'completed', 'done', 'finished')
+          AND video_url IS NOT NULL
+          AND (LOWER(video_url) LIKE 'http://%' OR LOWER(video_url) LIKE 'https://%')
+          AND LOWER(video_url) NOT LIKE '%oss-cn%'
+          AND LOWER(video_url) NOT LIKE '%aliyuncs.com%'
+    """
+    params = []
+    for host in (excluded_hosts or []):
+        cleaned = str(host or "").strip().lower()
+        if cleaned:
+            query += " AND LOWER(video_url) NOT LIKE ?"
+            params.append(f"%://{cleaned}/%")
+    query += " ORDER BY updated_at ASC LIMIT ?"
+    params.append(int(limit or 200))
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return [_decode_video_enhance_task(row) for row in rows]
 
 
 def delete_video_enhance_task(task_id, user_id=None, project_id=None):
