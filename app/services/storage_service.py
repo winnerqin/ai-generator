@@ -165,7 +165,10 @@ class AIVideoBackendStorageService:
         with path.open("rb") as stream:
             item = self._request(
                 "/file/v1/upload",
-                data={"projectId": str(self._project_id(project_id))},
+                data={
+                    "projectId": str(self._project_id(project_id)),
+                    "originalFileName": path.name,
+                },
                 files={"file": (path.name, stream, "application/octet-stream")},
                 timeout=(
                     int(config.AI_VIDEO_BACKEND_CONNECT_TIMEOUT_SECONDS),
@@ -206,7 +209,10 @@ class AIVideoBackendStorageService:
         safe_name = str(filename or "upload.bin").replace("\\", "/").rsplit("/", 1)[-1]
         item = self._request(
             "/file/v1/upload",
-            data={"projectId": str(self._project_id(project_id))},
+            data={
+                "projectId": str(self._project_id(project_id)),
+                "originalFileName": safe_name,
+            },
             files={"file": (safe_name, io.BytesIO(content), "application/octet-stream")},
             timeout=(
                 int(config.AI_VIDEO_BACKEND_CONNECT_TIMEOUT_SECONDS),

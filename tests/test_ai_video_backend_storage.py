@@ -54,7 +54,10 @@ def test_upload_file_uses_backend_multipart_and_returns_stable_url(monkeypatch, 
     assert "temporary" not in url
     assert post.call_args.args[0] == "https://backend.example/admin/file/v1/upload"
     assert post.call_args.kwargs["headers"] == {"appkey": "secret-app-key"}
-    assert post.call_args.kwargs["data"] == {"projectId": "7"}
+    assert post.call_args.kwargs["data"] == {
+        "projectId": "7",
+        "originalFileName": source.name,
+    }
     assert "file" in post.call_args.kwargs["files"]
 
 

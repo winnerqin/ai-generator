@@ -459,6 +459,7 @@ multipart 字段：
 | 字段 | 必填 | 类型 | 约束与含义 |
 |---|---|---|---|
 | `projectId` | 是 | integer/form field | 文件所属项目 ID |
+| `originalFileName` | 是 | string/form field | 原始文件名，不能为空；用于确定展示文件名、文件类型和扩展名 |
 | `file` | 是 | binary/file part | 原始文件，不能为空；文件名用于判断类型和扩展名 |
 
 请求大小上限为 500 MB。当前代码不主动校验 `projectId` 对应的项目是否存在。
@@ -469,6 +470,7 @@ multipart 字段：
 curl -X POST 'http://127.0.0.1:8080/admin/file/v1/upload' \
   -H 'appkey: <YOUR_APP_KEY>' \
   -F 'projectId=101' \
+  -F 'originalFileName=demo.mp4' \
   -F 'file=@/absolute/path/demo.mp4;type=video/mp4'
 ```
 
