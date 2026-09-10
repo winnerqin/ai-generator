@@ -516,7 +516,7 @@ def test_wan_consumption_record_displays_seconds_and_per_second_price(monkeypatc
     assert records[0]["display_tokens"] is None
 
 
-def test_wan_library_keeps_upstream_video_when_oss_backfill_fails(monkeypatch):
+def test_wan_library_does_not_save_upstream_video_when_storage_import_fails(monkeypatch):
     module = importlib.import_module("app.services.wan_video_service")
     monkeypatch.setattr(module.database, "is_video_task_deleted_from_library", lambda *a, **k: False)
     monkeypatch.setattr(module.database, "get_video_by_task_id", lambda *a, **k: None)
@@ -531,5 +531,4 @@ def test_wan_library_keeps_upstream_video_when_oss_backfill_fails(monkeypatch):
         "task_id": "wan-library", "video_url": "https://upstream/video.mp4",
         "model": "wan3.0-video", "resolution": "480P", "duration": 5,
     })
-    assert captured["url"] == "https://upstream/video.mp4"
-    assert captured["meta"]["library_group"] == "video"
+    assert captured == {}

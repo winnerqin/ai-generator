@@ -12,15 +12,39 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
-from flask import Blueprint, current_app, jsonify, render_template, request, send_file, session
+from flask import Blueprint, current_app, jsonify, redirect, render_template, request, send_file, session
 
 import database
 from app.config import config
 from app.decorators import handle_api_error, login_required
-from app.services import ArkAssetError, ark_asset_service, file_upload_service, oss_service
+from app.services import (
+    ArkAssetError,
+    InvalidStorageReferenceError,
+    StorageBackendError,
+    ark_asset_service,
+    file_upload_service,
+    oss_service,
+    storage_service,
+)
 
 content_bp = Blueprint("content", __name__)
 logger = logging.getLogger(__name__)
+
+
+@content_bp.route(
+    "/api/storage/files/<int:file_id>/<int:project_id>/<signature>/<path:filename>",
+    methods=["GET"],
+)
+def resolve_storage_file(file_id: int, project_id: int, signature: str, filename: str):
+    """Resolve a stable signed application URL to a fresh one-hour S3 preview URL."""
+    reference = f"/api/storage/files/{file_id}/{project_id}/{signature}/{filename}"
+    try:
+        return redirect(storage_service.resolve_access_url(reference), code=302)
+    except InvalidStorageReferenceError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except StorageBackendError as exc:
+        logger.warning("[storage] failed to resolve file id=%s: %s", file_id, exc)
+        return jsonify({"success": False, "error": "存储服务暂时不可用"}), 502
 
 
 def _ark_error_response(exc: ArkAssetError):
@@ -396,6 +420,7 @@ def _should_fallback_to_oss(exc: requests.RequestException) -> bool:
 
 
 def _request_asset_with_oss_fallback(asset: dict, download_url: str) -> requests.Response:
+    download_url = storage_service.resolve_download_url(download_url)
     try:
         response = requests.get(download_url, timeout=(10, 120))
         response.raise_for_status()
@@ -557,7 +582,7 @@ def virtual_assets():
         )
         if not success:
             raise ValueError(error or "文件上传失败")
-        source_url = str(uploaded_url or "")
+        source_url = storage_service.resolve_download_url(str(uploaded_url or ""))
         if not source_url.startswith(("http://", "https://")):
             raise ValueError("创建虚拟资产需要先配置可公网访问的 OSS")
 
@@ -673,17 +698,6 @@ def get_content_library():
     if pagination_requested and library_type == "image_material":
         oss_person_assets: list[dict] = []
         oss_scene_assets: list[dict] = []
-        if oss_service.is_available():
-            oss_person_assets = [
-                item
-                for item in oss_service.list_sample_images(user_id, project_id, "person")
-                if _matches_search(item, search)
-            ]
-            oss_scene_assets = [
-                item
-                for item in oss_service.list_sample_images(user_id, project_id, "scene")
-                if _matches_search(item, search)
-            ]
 
         person_total = database.count_person_assets(user_id, project_id, search=search)
         scene_total = database.count_scene_assets(user_id, project_id, search=search)
@@ -803,34 +817,6 @@ def get_content_library():
                 "page_size": page_size,
             }
         )
-
-    if oss_service.is_available():
-        if library_type in ("person", "all", "image_material"):
-            for item in oss_service.list_sample_images(user_id, project_id, "person"):
-                assets.append(
-                    {
-                        "id": item.get("key", "oss_person"),
-                        "url": item.get("url"),
-                        "filename": item.get("filename"),
-                        "type": "image" if library_type == "image_material" else "person",
-                        "source": "oss",
-                        "created_at": item.get("last_modified"),
-                        "meta": {"source_library": "person"},
-                    }
-                )
-        if library_type in ("scene", "all", "image_material"):
-            for item in oss_service.list_sample_images(user_id, project_id, "scene"):
-                assets.append(
-                    {
-                        "id": item.get("key", "oss_scene"),
-                        "url": item.get("url"),
-                        "filename": item.get("filename"),
-                        "type": "image" if library_type == "image_material" else "scene",
-                        "source": "oss",
-                        "created_at": item.get("last_modified"),
-                        "meta": {"source_library": "scene"},
-                    }
-                )
 
     if library_type in ("person", "all"):
         _append_assets(assets, database.get_person_assets(user_id, project_id), "db_person", "person")
@@ -1120,7 +1106,7 @@ def delete_library_asset():
             file_upload_service.delete_file(asset_id, is_oss=True)
 
         asset_url = str((asset or {}).get("url") or "").strip()
-        if asset_url.startswith(("http://", "https://")):
+        if storage_service.is_managed_url(asset_url) or asset_url.startswith(("http://", "https://")):
             file_upload_service.delete_file(asset_url, is_oss=True)
         else:
             local_path = _resolve_local_file_path(asset_url)
@@ -1352,7 +1338,6 @@ def get_output_file(user_id: int, project_id: int, filename: str):
     if not file_path.exists():
         return jsonify({"success": False, "error": "文件不存在"}), 404
     return send_file(file_path)
-
 
 @content_bp.route("/output/<int:user_id>/<filename>")
 @login_required

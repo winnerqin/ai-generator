@@ -3,20 +3,23 @@
 from __future__ import annotations
 
 import logging
-import os
-import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import requests
 
 import database
 from app.config import config
 from app.services.omni_video_service import is_oss_url
-from app.services.oss_service import oss_service
-from app.services.video_enhance_client import video_enhance_client, SUPPORTED_TOOL_VERSIONS, SUPPORTED_ENHANCE_RESOLUTIONS
+from app.services.storage_service import storage_service
+
+oss_service = storage_service
+from app.services.video_enhance_client import (
+    video_enhance_client,
+    SUPPORTED_TOOL_VERSIONS,
+    SUPPORTED_ENHANCE_RESOLUTIONS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +185,9 @@ class VideoEnhanceService:
 
         # 调用远端API
         if self.client.is_configured():
-            remote = self.client.create_task(source_video_url, tool_version, resolution)
+            remote = self.client.create_task(
+                storage_service.resolve_download_url(source_video_url), tool_version, resolution
+            )
         else:
             # 未配置API时使用本地模拟
             remote = {
@@ -436,16 +441,31 @@ class VideoEnhanceService:
 
         final_url = video_url
         url_expired = False
+        if not is_oss_url(video_url):
+            if not oss_service.is_available():
+                logger.error("[video-enhance][storage] backend unavailable: task_id=%s", task_id)
+                return
+            stored_url, is_expired = self._download_and_upload_to_oss(
+                video_url, output_filename, user_id, project_id, task_id
+            )
+            if not stored_url:
+                if is_expired:
+                    url_expired = True
+                return
+            final_url = stored_url
+            task["video_url"] = stored_url
+            database.save_video_enhance_task(task)
 
-        # 如果OSS可用，下载视频并上传到OSS
-        if oss_service.is_available():
-            oss_url, is_expired = self._download_and_upload_to_oss(video_url, output_filename, user_id, project_id, task_id)
-            if oss_url:
-                final_url = oss_url
-                task["video_url"] = oss_url
-                database.save_video_enhance_task(task)
-            elif is_expired:
-                url_expired = True
+        cover_url = str(task.get("cover_url") or "").strip()
+        if cover_url and not is_oss_url(cover_url):
+            stored_cover, _ = storage_service.import_from_url(
+                cover_url,
+                f"{Path(output_filename).stem}-cover.jpg",
+                user_id,
+                project_id,
+            )
+            task["cover_url"] = stored_cover
+            database.save_video_enhance_task(task)
 
         meta = {
             "library_group": "video",
@@ -468,7 +488,9 @@ class VideoEnhanceService:
             meta=meta,
             project_id=project_id,
         )
-        logger.info("[video-enhance] Video saved to library: filename=%s url=%s", output_filename, final_url)
+        logger.info(
+            "[video-enhance] Video saved to library: filename=%s url=%s", output_filename, final_url
+        )
 
     def refresh_pending_tasks(self, limit: int = 200) -> dict[str, int]:
         """Background polling for enhance tasks, including automatic OSS persistence on success."""
@@ -495,6 +517,8 @@ class VideoEnhanceService:
                 config.OSS_ENDPOINT,
                 config.OSS_EXTERNAL_ENDPOINT,
                 config.OSS_ACCESS_ENDPOINT,
+                config.AI_VIDEO_BACKEND_PUBLIC_BASE_URL,
+                config.PUBLIC_BASE_URL,
             )
             if value
         }
@@ -537,48 +561,12 @@ class VideoEnhanceService:
                 )
         return result
 
-    def _download_and_upload_to_oss(self, video_url: str, filename: str, user_id: int, project_id: int | None, task_id: str) -> tuple[str | None, bool]:
-        """下载视频并上传到OSS，返回(url, is_expired)"""
-        try:
-            logger.info("[video-enhance] Downloading video for OSS upload: task_id=%s url=%s", task_id, video_url)
-            response = requests.get(video_url, timeout=120, stream=True)
-            response.raise_for_status()
-
-            temp_dir = tempfile.gettempdir()
-            temp_file = os.path.join(temp_dir, filename)
-
-            with open(temp_file, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-
-            logger.info("[video-enhance] Video downloaded to temp: %s", temp_file)
-
-            oss_url = oss_service.upload_file(
-                temp_file,
-                user_id=user_id,
-                project_id=project_id,
-                file_type="video",
-            )
-
-            try:
-                os.unlink(temp_file)
-            except Exception:
-                pass
-
-            if oss_url:
-                logger.info("[video-enhance] Video uploaded to OSS: %s", oss_url)
-                return oss_url, False
-
-        except requests.HTTPError as e:
-            if e.response is not None and e.response.status_code == 403:
-                logger.warning("[video-enhance] Video URL expired (403): task_id=%s url=%s", task_id, video_url)
-                return None, True
-            logger.error("[video-enhance] Failed to download/upload video: %s", e)
-        except Exception as e:
-            logger.error("[video-enhance] Failed to download/upload video: %s", e)
-
-        return None, False
+    def _download_and_upload_to_oss(
+        self, video_url: str, filename: str, user_id: int, project_id: int | None, task_id: str
+    ) -> tuple[str | None, bool]:
+        """让 AI Video Backend 从上游 URL 直接导入 AWS S3。"""
+        logger.info("[video-enhance] Importing generated video: task_id=%s", task_id)
+        return storage_service.import_from_url(video_url, filename, user_id, project_id)
 
     def _decorate_task(self, task: dict[str, Any]) -> dict[str, Any]:
         """装饰任务信息，添加显示字段。"""
@@ -591,7 +579,9 @@ class VideoEnhanceService:
 
         # 添加下载文件名
         if decorated.get("video_url"):
-            decorated["download_filename"] = decorated.get("output_filename") or decorated.get("filename")
+            decorated["download_filename"] = decorated.get("output_filename") or decorated.get(
+                "filename"
+            )
 
         return decorated
 

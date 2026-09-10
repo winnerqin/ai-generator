@@ -15,6 +15,7 @@ from flask import Blueprint, jsonify, render_template, request, send_file, sessi
 
 from app.decorators import handle_api_error, login_required
 from app.services.video_enhance_service import video_enhance_service
+from app.services.storage_service import storage_service
 
 logger = logging.getLogger(__name__)
 video_enhance_bp = Blueprint("video_enhance", __name__)
@@ -79,7 +80,6 @@ def create_enhance_task():
         resolution,
         source_filename,
     )
-
     task = video_enhance_service.create_task(
         user_id=user_id,
         project_id=project_id,
@@ -214,7 +214,7 @@ def download_enhance_task(task_id: str):
     filename = task.get("download_filename") or task.get("output_filename") or f"{task_id}.mp4"
 
     try:
-        response = requests.get(video_url, timeout=120)
+        response = requests.get(storage_service.resolve_download_url(video_url), timeout=120)
         response.raise_for_status()
     except requests.RequestException as exc:
         logger.error("[video-enhance][download][error] task_id=%s video_url=%s error=%s", task_id, video_url, exc)
@@ -277,7 +277,7 @@ def batch_download_enhance_tasks():
         download_items.append((task_id, filename, video_url))
 
     def download_video(video_url):
-        response = requests.get(video_url, timeout=120)
+        response = requests.get(storage_service.resolve_download_url(video_url), timeout=120)
         response.raise_for_status()
         return response.content
 

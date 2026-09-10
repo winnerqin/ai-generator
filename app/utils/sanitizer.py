@@ -12,7 +12,7 @@ from typing import Any
 # 需要脱敏的字段名（不区分大小写）
 SENSITIVE_FIELDS = {
     'password', 'password_hash', 'pwd', 'passwd',
-    'api_key', 'apikey', 'api_token', 'token', 'access_token',
+    'api_key', 'apikey', 'appkey', 'api_token', 'token', 'access_token',
     'refresh_token', 'secret', 'secret_key', 'authorization',
     'credential', 'credentials', 'auth', 'private_key',
 }

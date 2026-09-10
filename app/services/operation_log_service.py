@@ -66,7 +66,7 @@ def _sanitize_sensitive_data(data: dict) -> dict:
     """脱敏敏感数据"""
     sensitive_keys = {
         'password', 'password_hash', 'pwd', 'passwd',
-        'api_key', 'apikey', 'api_token', 'token', 'access_token',
+        'api_key', 'apikey', 'appkey', 'api_token', 'token', 'access_token',
         'refresh_token', 'secret', 'secret_key', 'authorization',
         'credential', 'credentials', 'auth', 'private_key',
         'oss_access_key_id', 'oss_access_key_secret',

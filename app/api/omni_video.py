@@ -19,6 +19,7 @@ from app.config import config
 from app.decorators import handle_api_error, login_required
 from app.services.omni_video_service import get_models_for_role, omni_video_service
 from app.services.operation_log_service import log_balance_query
+from app.services.storage_service import storage_service
 from app.utils.jwt_auth import JWTAuth
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ def _endpoint_netloc(endpoint: str) -> str:
 
 def _omni_video_download_url(video_url: str) -> str:
     """Use the OSS origin for server-side downloads instead of the CDN."""
+    if storage_service.is_managed_url(video_url):
+        return storage_service.resolve_download_url(video_url)
     parsed = urlsplit(video_url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return video_url

@@ -58,6 +58,16 @@ class Config:
     OSS_ACCESS_KEY_ID: str = ""
     OSS_ACCESS_KEY_SECRET: str = ""
 
+    # ==================== AWS S3（经 AI Video Backend）====================
+    AI_VIDEO_BACKEND_BASE_URL: str = "http://127.0.0.1:8080/admin"
+    AI_VIDEO_BACKEND_APP_KEY: str = ""
+    AI_VIDEO_BACKEND_DEFAULT_PROJECT_ID: int = 0
+    AI_VIDEO_BACKEND_CONNECT_TIMEOUT_SECONDS: int = 10
+    AI_VIDEO_BACKEND_READ_TIMEOUT_SECONDS: int = 60
+    AI_VIDEO_BACKEND_UPLOAD_TIMEOUT_SECONDS: int = 600
+    AI_VIDEO_BACKEND_PUBLIC_BASE_URL: str = ""
+    AI_VIDEO_BACKEND_PROXY_SECRET: str = ""
+
     # ==================== OpenAI 配置 ====================
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
@@ -210,6 +220,32 @@ class Config:
         self.OSS_ACCESS_KEY_ID = os.environ.get("OSS_ACCESS_KEY_ID", self.OSS_ACCESS_KEY_ID)
         self.OSS_ACCESS_KEY_SECRET = os.environ.get(
             "OSS_ACCESS_KEY_SECRET", self.OSS_ACCESS_KEY_SECRET
+        )
+        self.AI_VIDEO_BACKEND_BASE_URL = os.environ.get(
+            "AI_VIDEO_BACKEND_BASE_URL", self.AI_VIDEO_BACKEND_BASE_URL
+        ).rstrip("/")
+        self.AI_VIDEO_BACKEND_APP_KEY = os.environ.get(
+            "AI_VIDEO_BACKEND_APP_KEY", self.AI_VIDEO_BACKEND_APP_KEY
+        )
+        self.AI_VIDEO_BACKEND_DEFAULT_PROJECT_ID = int(os.environ.get(
+            "AI_VIDEO_BACKEND_DEFAULT_PROJECT_ID", self.AI_VIDEO_BACKEND_DEFAULT_PROJECT_ID
+        ))
+        self.AI_VIDEO_BACKEND_CONNECT_TIMEOUT_SECONDS = int(os.environ.get(
+            "AI_VIDEO_BACKEND_CONNECT_TIMEOUT_SECONDS",
+            self.AI_VIDEO_BACKEND_CONNECT_TIMEOUT_SECONDS,
+        ))
+        self.AI_VIDEO_BACKEND_READ_TIMEOUT_SECONDS = int(os.environ.get(
+            "AI_VIDEO_BACKEND_READ_TIMEOUT_SECONDS", self.AI_VIDEO_BACKEND_READ_TIMEOUT_SECONDS
+        ))
+        self.AI_VIDEO_BACKEND_UPLOAD_TIMEOUT_SECONDS = int(os.environ.get(
+            "AI_VIDEO_BACKEND_UPLOAD_TIMEOUT_SECONDS",
+            self.AI_VIDEO_BACKEND_UPLOAD_TIMEOUT_SECONDS,
+        ))
+        self.AI_VIDEO_BACKEND_PUBLIC_BASE_URL = os.environ.get(
+            "AI_VIDEO_BACKEND_PUBLIC_BASE_URL", self.AI_VIDEO_BACKEND_PUBLIC_BASE_URL
+        )
+        self.AI_VIDEO_BACKEND_PROXY_SECRET = os.environ.get(
+            "AI_VIDEO_BACKEND_PROXY_SECRET", self.AI_VIDEO_BACKEND_PROXY_SECRET
         )
 
         # OpenAI 配置
@@ -400,6 +436,10 @@ class Config:
     def is_oss_enabled(self) -> bool:
         """检查是否启用 OSS"""
         return self.OSS_ENABLED and bool(self.OSS_ACCESS_KEY_ID and self.OSS_ACCESS_KEY_SECRET)
+
+    def is_ai_video_storage_enabled(self) -> bool:
+        """检查经 AI Video Backend 使用 AWS S3 的配置是否完整。"""
+        return bool(self.AI_VIDEO_BACKEND_BASE_URL and self.AI_VIDEO_BACKEND_APP_KEY)
 
     def is_openai_configured(self) -> bool:
         """检查是否配置了 OpenAI"""

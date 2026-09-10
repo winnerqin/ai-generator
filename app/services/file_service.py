@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from app.config import config
-from app.services.oss_service import oss_service
+from app.services.oss_service import oss_service as legacy_oss_service
+from app.services.storage_service import storage_service
+
+# Keep the old variable name inside this module for backwards-compatible tests.
+oss_service = storage_service
 
 
 class FileUploadService:
@@ -137,7 +141,10 @@ class FileUploadService:
                     f"涓嶆敮鎸佺殑闊抽鏍煎紡: {ext}锛屾敮鎸佺殑鏍煎紡: {', '.join(self.ALLOWED_AUDIO_EXTENSIONS)}",
                 )
             if file_size and file_size > self.MAX_AUDIO_SIZE:
-                return False, f"闊抽澶у皬瓒呰繃闄愬埗锛屾渶澶?{self.MAX_AUDIO_SIZE // 1024 // 1024}MB"
+                return (
+                    False,
+                    f"闊抽澶у皬瓒呰繃闄愬埗锛屾渶澶?{self.MAX_AUDIO_SIZE // 1024 // 1024}MB",
+                )
         elif file_type == "text":
             if ext not in self.ALLOWED_TEXT_EXTENSIONS:
                 return (
@@ -182,7 +189,7 @@ class FileUploadService:
             project_id: 项目ID
             subfolder: 子文件夹名称
             file_type: 文件类型
-            upload_to_oss: 是否上传到 OSS
+            upload_to_oss: 兼容参数；所有文件现在都必须上传到统一存储
 
         Returns:
             (是否成功, 本地路径/URL, 错误信息)
@@ -225,30 +232,31 @@ class FileUploadService:
         except Exception as e:
             return False, None, f"保存文件失败: {str(e)}"
 
-        # 如果启用 OSS，上传到 OSS
-        if upload_to_oss and oss_service.is_available():
-            oss_type = {
-                "image": "image",
-                "video": "video",
-                "audio": "document",
-                "text": "document",
-                "sample": "sample",
-            }.get(file_type, "image")
+        del upload_to_oss
+        storage_type = {
+            "image": "image",
+            "video": "video",
+            "audio": "document",
+            "text": "document",
+            "sample": "sample",
+        }.get(file_type, "image")
+        if subfolder in {"person", "scene"}:
+            storage_type = subfolder
 
-            # 确定 OSS 文件类型
-            if subfolder == "person":
-                oss_type = "person"
-            elif subfolder == "scene":
-                oss_type = "scene"
-
-            oss_url = oss_service.upload_file(
-                local_path, user_id=user_id, project_id=project_id, file_type=oss_type
-            )
-
-            if oss_url:
-                return True, oss_url, None
-
-        return True, local_path, None
+        stored_url = oss_service.upload_file(
+            local_path, user_id=user_id, project_id=project_id, file_type=storage_type
+        )
+        if not stored_url:
+            try:
+                os.remove(local_path)
+            except OSError:
+                pass
+            return False, None, "上传到 AWS S3 存储失败，请检查 AI Video Backend 配置和状态"
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+        return True, stored_url, None
 
     def save_generated_file(
         self,
@@ -274,24 +282,17 @@ class FileUploadService:
         if not os.path.exists(source_path):
             return False, None, f"源文件不存在: {source_path}"
 
-        # 上传到 OSS
-        if oss_service.is_available():
-            oss_url = oss_service.upload_file(
-                source_path, user_id=user_id, project_id=project_id, file_type=file_type
-            )
-
-            if oss_url:
-                # 如果不需要保留本地文件，删除本地文件
-                if not keep_local:
-                    try:
-                        os.remove(source_path)
-                    except Exception:
-                        pass
-
-                return True, oss_url, None
-
-        # OSS 不可用，返回本地路径
-        return True, source_path, None
+        stored_url = oss_service.upload_file(
+            source_path, user_id=user_id, project_id=project_id, file_type=file_type
+        )
+        if not stored_url:
+            return False, None, "上传到 AWS S3 存储失败，请检查 AI Video Backend 配置和状态"
+        if not keep_local:
+            try:
+                os.remove(source_path)
+            except OSError:
+                pass
+        return True, stored_url, None
 
     def delete_file(self, file_path: str, is_oss: bool = False) -> bool:
         """
@@ -304,21 +305,22 @@ class FileUploadService:
         Returns:
             是否删除成功
         """
+        if oss_service.is_managed_url(file_path):
+            return oss_service.delete_file(file_path)
         if is_oss:
-            # 从 OSS URL 提取对象键
-            # 需要检查所有可能的endpoint，因为URL可能使用任意一个
-            endpoints = [
-                config.OSS_EXTERNAL_ENDPOINT,
-                config.OSS_ACCESS_ENDPOINT,
-                config.OSS_ENDPOINT,
-            ]
-            # 过滤掉空值并去重
-            endpoints = list(set(e for e in endpoints if e))
-
+            endpoints = {
+                endpoint
+                for endpoint in (
+                    config.OSS_EXTERNAL_ENDPOINT,
+                    config.OSS_ACCESS_ENDPOINT,
+                    config.OSS_ENDPOINT,
+                )
+                if endpoint
+            }
             for endpoint in endpoints:
-                if endpoint and endpoint in file_path:
-                    object_key = file_path.split(endpoint + "/", 1)[1]
-                    return oss_service.delete_file(object_key)
+                if endpoint in file_path:
+                    object_key = file_path.split(endpoint + "/", 1)[-1]
+                    return legacy_oss_service.delete_file(object_key)
             return False
 
         # 删除本地文件

@@ -23,6 +23,7 @@ from app.services import (
     generate_legacy_request,
     oss_service,
     resume_legacy_generation_stream,
+    storage_service,
 )
 from app.services.generation_storage import save_generated_image
 from app.utils import ApiResponse
@@ -122,6 +123,11 @@ def _image2_reference_files() -> list[io.BytesIO]:
         content = file.read()
         if not content:
             continue
+        storage_service.upload_bytes(
+            content,
+            file.filename,
+            project_id=session.get("current_project_id"),
+        )
         reference_file = io.BytesIO(content)
         reference_file.name = file.filename
         references.append(reference_file)
@@ -138,6 +144,8 @@ def _image2_reference_files() -> list[io.BytesIO]:
 
 
 def _load_reference_url_bytes(image_url: str) -> bytes:
+    if storage_service.is_managed_url(image_url):
+        image_url = storage_service.resolve_download_url(image_url)
     if image_url.startswith("/output/"):
         parts = image_url.strip("/").split("/")
         if len(parts) == 3:
@@ -224,21 +232,6 @@ def get_sample_images():
     project_id = session.get("current_project_id")
     category = request.args.get("category")  # person, scene, all
     page, page_size, _ = _pagination_args()
-
-    # 尝试从 OSS 获取
-    if oss_service.is_available():
-        all_images = oss_service.list_sample_images(user_id, project_id, category)
-        images, total = _paginate_items(all_images, page, page_size)
-        return jsonify(
-            {
-                "success": True,
-                "images": images,
-                "data": {"images": images},
-                "page": page,
-                "page_size": page_size,
-                "total": total,
-            }
-        )
 
     # 从数据库获取 person 和 scene 资源
     images = []
@@ -348,7 +341,6 @@ def delete_sample_image():
         database.delete_scene_asset(image_id)
 
     return ApiResponse.success(None, "删除成功")
-
 
 @image_bp.route("/api/generate-task", methods=["POST"])
 @login_required

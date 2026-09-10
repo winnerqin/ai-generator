@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
-import tempfile
 import time
 import uuid
 from decimal import ROUND_HALF_UP, Decimal
@@ -12,7 +10,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse, urlunparse
 
-import requests
 
 import database
 from app.config import config
@@ -23,7 +20,9 @@ from app.services.operation_log_service import (
     log_task_operation,
     log_video_download,
 )
-from app.services.oss_service import oss_service
+from app.services.storage_service import storage_service
+
+oss_service = storage_service
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +58,11 @@ TOS_SIGNED_QUERY_KEYS = {
 
 
 def is_oss_url(url: str) -> bool:
-    """判断是否是阿里云OSS永久URL"""
+    """判断是否是当前托管存储地址或历史阿里云 OSS 地址。"""
     if not url:
         return False
+    if storage_service.is_managed_url(url):
+        return True
     try:
         hostname = (urlparse(url).hostname or "").lower().rstrip(".")
     except (TypeError, ValueError):
@@ -195,6 +196,9 @@ def _resolve_reference_url(
     if value.startswith("asset://"):
         return value
 
+    if storage_service.is_managed_url(value):
+        return _encode_public_url(storage_service.resolve_download_url(value))
+
     local_path: Path | None = None
     public_path: str | None = None
     parsed_url = urlparse(value) if value.startswith(("http://", "https://")) else None
@@ -314,7 +318,9 @@ def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
     if requested_account_id and asset_account_id and requested_account_id != asset_account_id:
         raise ValueError("任务账号与所选虚拟资产账号不一致")
     try:
-        ark_account_id = config.get_ark_account(asset_account_id or requested_account_id or None)["id"]
+        ark_account_id = config.get_ark_account(asset_account_id or requested_account_id or None)[
+            "id"
+        ]
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
     model = (data.get("model") or config.SEEDANCE_OMNI_MODEL or "").strip()
@@ -388,11 +394,7 @@ def build_omni_video_payload(data: dict[str, Any]) -> dict[str, Any]:
             {
                 "url": url,
                 "type": reference_types[url],
-                **(
-                    {"account_id": ark_account_id}
-                    if url.startswith("asset://")
-                    else {}
-                ),
+                **({"account_id": ark_account_id} if url.startswith("asset://") else {}),
             }
             for url in reference_urls
             if url in reference_types
@@ -759,7 +761,8 @@ def _decorate_task(task: dict[str, Any]) -> dict[str, Any]:
     elif task.get("task_id") and task.get("user_id"):
         amount_reader = (
             database.get_ledger_settled_amount_cent
-            if is_wan else database.get_ledger_debit_amount_cent
+            if is_wan
+            else database.get_ledger_debit_amount_cent
         )
         amount_cent = amount_reader(
             task.get("user_id"),
@@ -812,142 +815,23 @@ def _download_and_upload_to_oss(
     project_id: int | None,
     username: str | None = None,
 ) -> tuple[str | None, bool]:
-    """
-    从远程URL下载视频并上传到OSS，返回(OSS永久URL, 是否过期)。
-
-    如果OSS不可用或下载失败，返回(None, False)。
-    如果下载返回403（URL过期），返回(None, True)。
-    """
+    """让 AI Video Backend 从上游 URL 直接导入 AWS S3。"""
     start_time = time.time()
-
-    if not oss_service.is_available():
-        log_video_download(
-            user_id=user_id,
-            username=username,
-            project_id=project_id,
-            source_url=video_url,
-            success=False,
-            error="OSS不可用",
-            duration_ms=int((time.time() - start_time) * 1000),
-        )
-        return None, False
-
-    try:
-        logger.info("[omni-video] Downloading video for OSS upload: url=%s", video_url)
-        response = requests.get(video_url, timeout=120, stream=True)
-        response.raise_for_status()
-
-        file_suffix = os.path.splitext(filename)[1] or ".mp4"
-        # Use a unique temp file path to avoid concurrent tasks clobbering
-        # each other when they share the same filename.
-        fd, temp_file = tempfile.mkstemp(prefix="omni_video_", suffix=file_suffix)
-        os.close(fd)
-
-        file_size = 0
-        content_length = response.headers.get("Content-Length")
-        expected_size = int(content_length) if content_length and content_length.isdigit() else None
-        with open(temp_file, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    file_size += len(chunk)
-
-        if expected_size is not None and file_size != expected_size:
-            try:
-                os.unlink(temp_file)
-            except Exception:
-                pass
-            raise RuntimeError(
-                f"Downloaded video size mismatch: expected={expected_size}, actual={file_size}"
-            )
-        logger.info("[omni-video] Video downloaded to temp: %s, size=%d", temp_file, file_size)
-
-        oss_url = oss_service.upload_file(
-            temp_file,
-            user_id=user_id,
-            project_id=project_id,
-            file_type="video",
-            username=username,
-        )
-
-        # 清理临时文件
-        try:
-            os.unlink(temp_file)
-        except Exception:
-            pass
-
-        duration_ms = int((time.time() - start_time) * 1000)
-
-        if oss_url:
-            logger.info("[omni-video] Video uploaded to OSS: %s", oss_url)
-            log_video_download(
-                user_id=user_id,
-                username=username,
-                project_id=project_id,
-                source_url=video_url,
-                target_path=temp_file,
-                oss_url=oss_url,
-                file_size=file_size,
-                success=True,
-                duration_ms=duration_ms,
-            )
-            return oss_url, False
-
-        log_video_download(
-            user_id=user_id,
-            username=username,
-            project_id=project_id,
-            source_url=video_url,
-            target_path=temp_file,
-            file_size=file_size,
-            success=False,
-            error="OSS上传失败",
-            duration_ms=duration_ms,
-        )
-        return None, False
-
-    except requests.HTTPError as e:
-        duration_ms = int((time.time() - start_time) * 1000)
-        is_expired = e.response is not None and e.response.status_code == 403
-        if is_expired:
-            logger.warning("[omni-video] Video URL expired (403): %s", video_url)
-            log_video_download(
-                user_id=user_id,
-                username=username,
-                project_id=project_id,
-                source_url=video_url,
-                success=False,
-                is_expired=True,
-                duration_ms=duration_ms,
-                error="URL过期(403)",
-            )
-            return None, True
-        error_str = str(e)
-        logger.error("[omni-video] Failed to download/upload video: %s", e)
-        log_video_download(
-            user_id=user_id,
-            username=username,
-            project_id=project_id,
-            source_url=video_url,
-            success=False,
-            duration_ms=duration_ms,
-            error=error_str,
-        )
-        return None, False
-    except Exception as e:
-        duration_ms = int((time.time() - start_time) * 1000)
-        error_str = str(e)
-        logger.error("[omni-video] Failed to download/upload video: %s", e)
-        log_video_download(
-            user_id=user_id,
-            username=username,
-            project_id=project_id,
-            source_url=video_url,
-            success=False,
-            duration_ms=duration_ms,
-            error=error_str,
-        )
-        return None, False
+    stored_url, is_expired = storage_service.import_from_url(
+        video_url, filename, user_id, project_id, username=username
+    )
+    log_video_download(
+        user_id=user_id,
+        username=username,
+        project_id=project_id,
+        source_url=video_url,
+        oss_url=stored_url,
+        success=bool(stored_url),
+        is_expired=is_expired,
+        duration_ms=int((time.time() - start_time) * 1000),
+        error=None if stored_url else "AI Video Backend URL 导入失败",
+    )
+    return stored_url, is_expired
 
 
 class OmniVideoService:
@@ -991,8 +875,11 @@ class OmniVideoService:
             return self.client.is_configured()
 
     def _get_remote_task(
-        self, task_id: str, model: str | None = None, upstream_slot: int | None = None,
-        account_id: str | None = None
+        self,
+        task_id: str,
+        model: str | None = None,
+        upstream_slot: int | None = None,
+        account_id: str | None = None,
     ) -> dict[str, Any]:
         try:
             return self.client.get_task(
@@ -1024,7 +911,7 @@ class OmniVideoService:
             project_id=task.get("project_id"),
         )
         if existing:
-            # 已存在记录，检查是否需要更新URL（如果原URL是临时URL且OSS可用）
+            # 历史记录仍指向任意上游 HTTP 地址时，迁移到统一存储。
             existing_url = existing.get("url") or ""
             existing_meta = existing.get("meta") or {}
             # 如果已有OSS URL或原始URL不可用，无需更新
@@ -1033,8 +920,7 @@ class OmniVideoService:
             # 如果已标记URL过期，不再重复尝试
             if existing_meta.get("url_expired"):
                 return
-            # 如果原始URL仍是临时URL，尝试迁移到OSS
-            if is_tos_temp_url(existing_url):
+            if existing_url.startswith(("http://", "https://")):
                 filename = existing.get("filename") or _guess_video_filename(
                     task["task_id"], existing_url
                 )
@@ -1069,7 +955,48 @@ class OmniVideoService:
             task["task_id"], video_url
         )
 
-        # 先保存到视频库（使用原始URL），作为占位防止并发重复
+        # 上游生成地址不能作为永久资产保存；先让后端直接导入 S3。
+        if not is_oss_url(video_url):
+            if not video_url.startswith(("http://", "https://")) or not oss_service.is_available():
+                logger.error(
+                    "[omni-video][storage] generated video was not persisted: task_id=%s",
+                    task["task_id"],
+                )
+                return
+            stored_url, is_expired = _download_and_upload_to_oss(
+                video_url, filename, task["user_id"], task.get("project_id"), username=username
+            )
+            if not stored_url:
+                if is_expired:
+                    task["external_meta_json"] = {
+                        **(task.get("external_meta_json") or {}),
+                        "storage_import_status": "expired",
+                        "storage_import_checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    database.save_omni_video_task(task)
+                return
+            video_url = stored_url
+            task["video_url"] = stored_url
+            database.save_omni_video_task(task)
+
+        # 封面和尾帧同样属于生成结果，不能长期保留上游临时地址。
+        auxiliary_changed = False
+        stem = Path(filename).stem
+        for field, suffix in (("cover_url", "cover.jpg"), ("last_frame_url", "last-frame.jpg")):
+            auxiliary_url = str(task.get(field) or "").strip()
+            if not auxiliary_url or is_oss_url(auxiliary_url):
+                continue
+            stored_auxiliary, _ = storage_service.import_from_url(
+                auxiliary_url,
+                f"{stem}-{suffix}",
+                task["user_id"],
+                task.get("project_id"),
+            )
+            task[field] = stored_auxiliary
+            auxiliary_changed = True
+        if auxiliary_changed:
+            database.save_omni_video_task(task)
+
         database.save_video_asset(
             user_id=task["user_id"],
             project_id=task.get("project_id"),
@@ -1091,45 +1018,6 @@ class OmniVideoService:
                 "filename": task.get("filename"),
             },
         )
-
-        # 然后尝试下载并上传到OSS，获取永久URL
-        if oss_service.is_available() and is_tos_temp_url(video_url):
-            oss_url, is_expired = _download_and_upload_to_oss(
-                video_url,
-                filename,
-                task["user_id"],
-                task.get("project_id"),
-                username=username,
-            )
-            if oss_url:
-                # 更新视频库中的URL
-                database.update_video_asset_url_by_task_id(
-                    task["user_id"],
-                    task["task_id"],
-                    oss_url,
-                    project_id=task.get("project_id"),
-                )
-                # 更新任务记录中的video_url为OSS URL
-                task["video_url"] = oss_url
-                database.save_omni_video_task(task)
-            elif is_expired:
-                # 标记URL过期
-                existing_video = database.get_video_by_task_id(
-                    task["user_id"],
-                    task["task_id"],
-                    project_id=task.get("project_id"),
-                )
-                if existing_video:
-                    database.update_video_asset_meta(existing_video["id"], {"url_expired": True})
-                    task["external_meta_json"] = {
-                        **(task.get("external_meta_json") or {}),
-                        "oss_backfill_status": "expired",
-                        "oss_backfill_checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    }
-                    database.save_omni_video_task(task)
-                    logger.info(
-                        "[omni-video] Marked new video URL as expired: task_id=%s", task["task_id"]
-                    )
 
     def _persist_and_load(self, record: dict[str, Any]) -> dict[str, Any]:
         database.save_omni_video_task(record)
@@ -1205,9 +1093,13 @@ class OmniVideoService:
         account_id = payload.get("ark_account_id")
         is_configured = self._is_configured(model=model, account_id=account_id)
         route_key = self._build_upstream_route_key(user_id, project_id, data, payload)
-        upstream_slot = self.client.select_upstream_slot(
-            model=model, route_key=route_key, account_id=account_id
-        ) if is_configured else None
+        upstream_slot = (
+            self.client.select_upstream_slot(
+                model=model, route_key=route_key, account_id=account_id
+            )
+            if is_configured
+            else None
+        )
         if upstream_slot is not None:
             payload["_upstream_api_slot"] = upstream_slot
         api_endpoint = (
@@ -1334,8 +1226,11 @@ class OmniVideoService:
         if user_id is None:
             for item in items:
                 biz_type = "wan_video" if item.get("source") == "wan_video" else "omni_video"
-                reader = (database.get_ledger_settled_amount_cent if biz_type == "wan_video"
-                          else database.get_ledger_debit_amount_cent)
+                reader = (
+                    database.get_ledger_settled_amount_cent
+                    if biz_type == "wan_video"
+                    else database.get_ledger_debit_amount_cent
+                )
                 item["_ledger_amount_cent"] = reader(
                     item.get("user_id"), biz_type, item.get("task_id")
                 )

@@ -70,7 +70,7 @@ Copy-Item .env.example .env
 - `ARK_API_KEY_POOL`：全能视频国内版上游 Key 池，多个 Key 用英文逗号分隔；配置后创建任务会按稳定哈希分流到不同 Key
 - `ARK_INTL_API_KEY_POOL`：全能视频国际版上游 Key 池，多个 Key 用英文逗号分隔
 - `ARK_ACCOUNT_<账号>_INTL_API_KEY` / `ARK_ACCOUNT_<账号>_INTL_API_KEY_POOL`：账号对应的 Seedance 国际版生成 Key；使用该账号的虚拟资产时，创建、查询和取消任务都会固定使用该账号的 Key
-- `PUBLIC_BASE_URL`：对外可访问的服务基础地址，支付中心回调地址会基于它生成
+- `PUBLIC_BASE_URL`：对外可访问的服务基础地址，支付回调和存储代理地址会基于它生成
 - `PAYMENT_CENTER_ENABLED`：是否启用支付中心充值能力
 - `PAYMENT_CENTER_BASE_URL`、`PAYMENT_CENTER_CREATE_ORDER_PATH`：支付中心地址与创建订单路径
 - `PAYMENT_CENTER_MERCHANT_ID`、`PAYMENT_CENTER_APP_ID`、`PAYMENT_CENTER_SIGN_SECRET`：支付中心签名与商户配置
@@ -79,8 +79,11 @@ Copy-Item .env.example .env
 - `SEEDANCE_OMNI_MODEL_INTERNAL`：内部用户可用全能视频模型列表（逗号分隔，按顺序展示）
 - `SEEDANCE_OMNI_MODEL_EXTERNAL`：外部用户可用全能视频模型列表（逗号分隔，按顺序展示）
 - `SEEDANCE_OMNI_MODEL_ALIASES`：模型别名映射（逗号分隔，格式 `模型编码:显示别名`）
-- `OSS_ENABLED`：是否启用 OSS
-- `OSS_ENDPOINT`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET`
+- `AI_VIDEO_BACKEND_BASE_URL`、`AI_VIDEO_BACKEND_APP_KEY`：AWS S3 文件后端地址与调用凭证
+- `AI_VIDEO_BACKEND_DEFAULT_PROJECT_ID`：请求缺少本地项目上下文时使用的后端项目 ID
+- `AI_VIDEO_BACKEND_PUBLIC_BASE_URL`：存储代理的公网基础地址；为空时复用 `PUBLIC_BASE_URL`
+- `AI_VIDEO_BACKEND_PROXY_SECRET`：稳定文件代理地址的签名密钥（生产环境必须独立配置）
+- `OSS_*`：仅保留用于识别和迁移历史阿里云 OSS 地址，新内容不再写入 OSS
 
 在 `.env` 中设置 MySQL 8.0 连接信息：
 

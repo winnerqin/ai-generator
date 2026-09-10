@@ -16,6 +16,14 @@ def test_get_task_auto_saves_completed_video_to_library(monkeypatch):
     omni_module = importlib.import_module("app.services.omni_video_service")
     from app.services.omni_video_service import OmniVideoService
 
+    monkeypatch.setattr(omni_module.oss_service, "is_available", lambda: True)
+    monkeypatch.setattr(
+        omni_module.storage_service,
+        "import_from_url",
+        lambda url, filename, *args, **kwargs: (f"https://storage.example/{filename}", False),
+    )
+    monkeypatch.setattr(omni_module, "settle_omni_video_charge", lambda task: None)
+
     service = OmniVideoService()
     service.client = type(
         "StubClient",
@@ -96,7 +104,7 @@ def test_get_task_auto_saves_completed_video_to_library(monkeypatch):
     task = service.get_task(7, 3, "task-99")
     assert task["status"] == "succeeded"
     assert task["token_usage"] == 321
-    assert task["video_url"] == "https://example.com/output/demo.mp4"
+    assert task["video_url"] == "https://storage.example/task-99.mp4"
     assert saved_video["filename"] == "task-99.mp4"
     assert saved_video["meta"]["task_id"] == "task-99"
     assert saved_video["meta"]["token_usage"] == 321
@@ -107,6 +115,14 @@ def test_list_tasks_syncs_running_task_and_auto_saves_video(monkeypatch):
 
     omni_module = importlib.import_module("app.services.omni_video_service")
     from app.services.omni_video_service import OmniVideoService
+
+    monkeypatch.setattr(omni_module.oss_service, "is_available", lambda: True)
+    monkeypatch.setattr(
+        omni_module.storage_service,
+        "import_from_url",
+        lambda url, filename, *args, **kwargs: (f"https://storage.example/{filename}", False),
+    )
+    monkeypatch.setattr(omni_module, "settle_omni_video_charge", lambda task: None)
 
     service = OmniVideoService()
     service.client = type(
@@ -184,7 +200,7 @@ def test_list_tasks_syncs_running_task_and_auto_saves_video(monkeypatch):
     items, total = service.list_tasks(7, 3, page=1, page_size=20, sync_running=True)
     assert total == 1
     assert items[0]["status"] == "succeeded"
-    assert items[0]["video_url"] == "https://example.com/output/list-demo.mp4"
+    assert items[0]["video_url"] == "https://storage.example/task-list-1.mp4"
     assert saved_video["filename"] == "task-list-1.mp4"
     assert saved_video["meta"]["task_id"] == "task-list-1"
 
@@ -282,6 +298,14 @@ def test_get_task_extracts_video_url_from_content_blob(monkeypatch):
     omni_module = importlib.import_module("app.services.omni_video_service")
     from app.services.omni_video_service import OmniVideoService
 
+    monkeypatch.setattr(omni_module.oss_service, "is_available", lambda: True)
+    monkeypatch.setattr(
+        omni_module.storage_service,
+        "import_from_url",
+        lambda url, filename, *args, **kwargs: (f"https://storage.example/{filename}", False),
+    )
+    monkeypatch.setattr(omni_module, "settle_omni_video_charge", lambda task: None)
+
     service = OmniVideoService()
     service.client = type(
         "StubClient",
@@ -352,9 +376,9 @@ def test_get_task_extracts_video_url_from_content_blob(monkeypatch):
     )
 
     task = service.get_task(5, 2, "task-content-1")
-    assert task["video_url"] == "https://example.com/content-result.mp4"
+    assert task["video_url"] == "https://storage.example/task-content-1.mp4"
     assert task["token_usage"] == 152100
-    assert saved_video["url"] == "https://example.com/content-result.mp4"
+    assert saved_video["url"] == "https://storage.example/task-content-1.mp4"
     assert saved_video["filename"] == "task-content-1.mp4"
 
 

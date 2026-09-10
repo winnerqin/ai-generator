@@ -9,17 +9,24 @@ from typing import Any
 
 import database
 from app.config import config
-from app.services.omni_video_service import _download_and_upload_to_oss
-from app.services.oss_service import oss_service
+from app.services.omni_video_service import _download_and_upload_to_oss, is_oss_url
+from app.services.storage_service import storage_service
+
+oss_service = storage_service
 from app.services.wan_video_client import wan_video_client
 
 SOURCE = "wan_video"
 MODES = {"text_to_video", "image_to_video_first", "image_to_video_first_last", "reference_to_video"}
 MEDIA_ROLES = {"first_frame", "last_frame", "reference_image", "reference_video", "reference_audio"}
 STATUS_MAP = {
-    "PENDING": "queued", "QUEUED": "queued", "RUNNING": "running",
-    "SUCCEEDED": "succeeded", "SUCCESS": "succeeded",
-    "FAILED": "failed", "CANCELED": "cancelled", "CANCELLED": "cancelled",
+    "PENDING": "queued",
+    "QUEUED": "queued",
+    "RUNNING": "running",
+    "SUCCEEDED": "succeeded",
+    "SUCCESS": "succeeded",
+    "FAILED": "failed",
+    "CANCELED": "cancelled",
+    "CANCELLED": "cancelled",
 }
 TERMINAL = {"succeeded", "failed", "cancelled", "expired"}
 SUPPORTED_RESOLUTIONS = {"480p", "720p", "1080p"}
@@ -126,8 +133,10 @@ def build_wan_video_payload(data: dict[str, Any]) -> tuple[dict[str, Any], dict[
         raise ValueError("参考生视频至少需要一个参考素材。")
 
     role_to_type = {
-        "first_frame": "first_frame", "last_frame": "last_frame",
-        "reference_image": "reference_image", "reference_video": "reference_video",
+        "first_frame": "first_frame",
+        "last_frame": "last_frame",
+        "reference_image": "reference_image",
+        "reference_video": "reference_video",
         "reference_audio": "reference_audio",
     }
     parameters: dict[str, Any] = {}
@@ -139,44 +148,66 @@ def build_wan_video_payload(data: dict[str, Any]) -> tuple[dict[str, Any], dict[
         upstream_input["media"] = [
             {"type": role_to_type[item["role"]], "url": item["url"]} for item in normalized
         ]
-    upstream_model = config.WAN_VIDEO_UPSTREAM_MODEL if _region_for_model(model) == "intl" else model
+    upstream_model = (
+        config.WAN_VIDEO_UPSTREAM_MODEL if _region_for_model(model) == "intl" else model
+    )
     upstream = {"model": upstream_model, "input": upstream_input, "parameters": parameters}
     parameters["resolution"] = resolution
     parameters["duration"] = duration
-    canonical = {**data, "mode": mode, "model": model, "prompt": prompt,
-                 "media": normalized, "resolution": resolution, "duration": duration}
+    canonical = {
+        **data,
+        "mode": mode,
+        "model": model,
+        "prompt": prompt,
+        "media": normalized,
+        "resolution": resolution,
+        "duration": duration,
+    }
     return upstream, canonical
 
 
 class WanVideoService:
     @staticmethod
     def _multiplier(user: dict[str, Any]) -> Decimal:
-        return Decimal(str(database.get_role_pricing_multiplier(
-            user.get("role_code") or database.ROLE_EXTERNAL_USER
-        ) or 1))
+        return Decimal(
+            str(
+                database.get_role_pricing_multiplier(
+                    user.get("role_code") or database.ROLE_EXTERNAL_USER
+                )
+                or 1
+            )
+        )
 
-    def _ensure_balance(self, user_id: int, duration: Any, resolution: Any,
-                        model: Any = None) -> None:
+    def _ensure_balance(
+        self, user_id: int, duration: Any, resolution: Any, model: Any = None
+    ) -> None:
         user = database.get_user_by_id(user_id) or {}
         if user.get("role_code") != database.ROLE_EXTERNAL_USER:
             return
         unit_price = _price_cent_per_second(resolution, model)
         requested_seconds = _duration(duration)
-        seconds = (int(config.WAN_VIDEO_SMART_DURATION_MAX_SECONDS or 30)
-                   if requested_seconds == -1 else requested_seconds)
+        seconds = (
+            int(config.WAN_VIDEO_SMART_DURATION_MAX_SECONDS or 30)
+            if requested_seconds == -1
+            else requested_seconds
+        )
         if seconds <= 0:
             raise ValueError("Wan 3.0 智能时长余额预检上限必须大于 0 秒。")
-        fee = int((Decimal(unit_price * seconds) * self._multiplier(user)).quantize(
-            Decimal("1"), rounding=ROUND_HALF_UP
-        ))
+        fee = int(
+            (Decimal(unit_price * seconds) * self._multiplier(user)).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
         if int(user.get("balance_cent") or 0) < fee:
             raise ValueError("账号余额不足，请联系管理员充值。")
 
     def _settle(self, task: dict[str, Any]) -> str:
         if task.get("status") != "succeeded" or not task.get("user_id"):
             return "skipped"
-        if any(database.has_ledger_entry(task["user_id"], entry_type, SOURCE, task["task_id"])
-               for entry_type in ("debit", "cost")):
+        if any(
+            database.has_ledger_entry(task["user_id"], entry_type, SOURCE, task["task_id"])
+            for entry_type in ("debit", "cost")
+        ):
             return "settled"
         user = database.get_user_by_id(task["user_id"]) or {}
         try:
@@ -188,21 +219,33 @@ class WanVideoService:
             return "pending"
         is_external = user.get("role_code") == database.ROLE_EXTERNAL_USER
         multiplier = self._multiplier(user) if is_external else Decimal("1")
-        fee = int((Decimal(unit_price * seconds) * multiplier).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-        database.create_account_ledger_entry(
-            user_id=task["user_id"], entry_type="debit" if is_external else "cost",
-            amount_cent=fee,
-            biz_type=SOURCE, biz_id=task["task_id"], model_code=task.get("model"),
-            tokens_raw=seconds, tokens_billed=seconds,
-            unit_price_cent_per_ktoken=int((unit_price * Decimal("1000")).quantize(
+        fee = int(
+            (Decimal(unit_price * seconds) * multiplier).quantize(
                 Decimal("1"), rounding=ROUND_HALF_UP
-            )), multiplier=float(multiplier),
-            snapshot_json={"billing_unit": "video_second", "billable_seconds": seconds,
-                           "resolution": str(task.get("resolution") or "720P").upper(),
-                           "region": _region_for_model(task.get("model")),
-                           "price_cent_per_second": str(unit_price),
-                           "pricing_multiplier": float(multiplier),
-                           "deducted_from_balance": is_external},
+            )
+        )
+        database.create_account_ledger_entry(
+            user_id=task["user_id"],
+            entry_type="debit" if is_external else "cost",
+            amount_cent=fee,
+            biz_type=SOURCE,
+            biz_id=task["task_id"],
+            model_code=task.get("model"),
+            tokens_raw=seconds,
+            tokens_billed=seconds,
+            unit_price_cent_per_ktoken=int(
+                (unit_price * Decimal("1000")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            ),
+            multiplier=float(multiplier),
+            snapshot_json={
+                "billing_unit": "video_second",
+                "billable_seconds": seconds,
+                "resolution": str(task.get("resolution") or "720P").upper(),
+                "region": _region_for_model(task.get("model")),
+                "price_cent_per_second": str(unit_price),
+                "pricing_multiplier": float(multiplier),
+                "deducted_from_balance": is_external,
+            },
         )
         return "settled"
 
@@ -222,37 +265,68 @@ class WanVideoService:
         if not filename.lower().endswith(".mp4"):
             filename += ".mp4"
         video_url = task["video_url"]
-        asset_id = database.save_video_asset(
-            user_id=task["user_id"], project_id=task.get("project_id"),
-            filename=filename, url=video_url,
-            meta={"library_group": "video", "task_id": task["task_id"],
-                  "source": SOURCE, "model": task.get("model"), "mode": task.get("mode"),
-                  "prompt": task.get("prompt"), "resolution": task.get("resolution"),
-                  "duration": task.get("duration")},
-        )
-        if oss_service.is_available():
+        if not is_oss_url(video_url):
+            if not oss_service.is_available():
+                logger.error(
+                    "[wan-video][storage] backend unavailable: task_id=%s", task["task_id"]
+                )
+                return
             try:
-                oss_url, _ = _download_and_upload_to_oss(
+                stored_url, _ = _download_and_upload_to_oss(
                     video_url, filename, task["user_id"], task.get("project_id")
                 )
-                if oss_url:
-                    task["video_url"] = oss_url
-                    database.save_omni_video_task(task)
-                    database.update_video_asset_url(asset_id, oss_url)
-            except Exception as exc:
-                logger.warning(
-                    "[wan-video][library] OSS backfill failed; upstream URL retained: "
-                    "task_id=%s error=%s", task.get("task_id"), exc,
+            except Exception:
+                logger.exception(
+                    "[wan-video][storage] URL import failed: task_id=%s", task["task_id"]
                 )
+                return
+            if not stored_url:
+                logger.error("[wan-video][storage] URL import failed: task_id=%s", task["task_id"])
+                return
+            video_url = stored_url
+            task["video_url"] = stored_url
+            database.save_omni_video_task(task)
 
-    def create_task(self, data: dict[str, Any], *, user_id: int, project_id: int | None) -> dict[str, Any]:
+        database.save_video_asset(
+            user_id=task["user_id"],
+            project_id=task.get("project_id"),
+            filename=filename,
+            url=video_url,
+            meta={
+                "library_group": "video",
+                "task_id": task["task_id"],
+                "source": SOURCE,
+                "model": task.get("model"),
+                "mode": task.get("mode"),
+                "prompt": task.get("prompt"),
+                "resolution": task.get("resolution"),
+                "duration": task.get("duration"),
+            },
+        )
+
+    def create_task(
+        self, data: dict[str, Any], *, user_id: int, project_id: int | None
+    ) -> dict[str, Any]:
+        data = dict(data)
+        data["media"] = [
+            (
+                {
+                    **item,
+                    "url": storage_service.resolve_download_url(str(item.get("url") or "")),
+                }
+                if isinstance(item, dict) and storage_service.is_managed_url(item.get("url") or "")
+                else item
+            )
+            for item in (data.get("media") or [])
+        ]
         requested_model = str(data.get("model") or _default_model()).strip()
         region = _region_for_model(requested_model)
         if not wan_video_client.is_configured(region):
             raise ValueError("Wan 3.0 服务尚未配置。")
         upstream, canonical = build_wan_video_payload(data)
-        self._ensure_balance(user_id, canonical.get("duration"), canonical.get("resolution"),
-                             canonical.get("model"))
+        self._ensure_balance(
+            user_id, canonical.get("duration"), canonical.get("resolution"), canonical.get("model")
+        )
         route_key = str(data.get("client_request_id") or uuid.uuid4().hex)
         response, slot = wan_video_client.create_task(upstream, route_key=route_key, region=region)
         output = response.get("output") or {}
@@ -260,17 +334,31 @@ class WanVideoService:
         if not task_id:
             raise ValueError("Wan 上游未返回 task_id。")
         task = {
-            "user_id": user_id, "project_id": project_id, "task_id": task_id,
-            "status": "queued", "source": SOURCE, "mode": canonical["mode"],
-            "model": canonical["model"], "prompt": canonical["prompt"],
-            "input_payload_json": canonical, "raw_response_json": response,
+            "user_id": user_id,
+            "project_id": project_id,
+            "task_id": task_id,
+            "status": "queued",
+            "source": SOURCE,
+            "mode": canonical["mode"],
+            "model": canonical["model"],
+            "prompt": canonical["prompt"],
+            "input_payload_json": canonical,
+            "raw_response_json": response,
             "reference_urls_json": [item["url"] for item in canonical["media"]],
-            "first_frame_url": next((i["url"] for i in canonical["media"] if i["role"] == "first_frame"), None),
-            "last_frame_url": next((i["url"] for i in canonical["media"] if i["role"] == "last_frame"), None),
-            "duration": canonical.get("duration"), "resolution": canonical.get("resolution"),
-            "aspect_ratio": canonical.get("ratio"), "seed": canonical.get("seed"),
-            "filename": canonical.get("filename"), "client_request_id": data.get("client_request_id"),
-            "batch_id": data.get("batch_id"), "callback_url": data.get("callback_url"),
+            "first_frame_url": next(
+                (i["url"] for i in canonical["media"] if i["role"] == "first_frame"), None
+            ),
+            "last_frame_url": next(
+                (i["url"] for i in canonical["media"] if i["role"] == "last_frame"), None
+            ),
+            "duration": canonical.get("duration"),
+            "resolution": canonical.get("resolution"),
+            "aspect_ratio": canonical.get("ratio"),
+            "seed": canonical.get("seed"),
+            "filename": canonical.get("filename"),
+            "client_request_id": data.get("client_request_id"),
+            "batch_id": data.get("batch_id"),
+            "callback_url": data.get("callback_url"),
             "external_meta_json": {"upstream_slot": slot, "upstream_region": region},
         }
         database.save_omni_video_task(task)
@@ -278,17 +366,28 @@ class WanVideoService:
 
     def refresh_task(self, task: dict[str, Any]) -> dict[str, Any]:
         slot = int((task.get("external_meta_json") or {}).get("upstream_slot") or 0)
-        region = str((task.get("external_meta_json") or {}).get("upstream_region") or
-                     _region_for_model(task.get("model")))
+        region = str(
+            (task.get("external_meta_json") or {}).get("upstream_region")
+            or _region_for_model(task.get("model"))
+        )
         response = wan_video_client.get_task(task["task_id"], slot=slot, region=region)
         output = response.get("output") or {}
-        status = STATUS_MAP.get(str(output.get("task_status") or response.get("status") or "").upper(), "running")
+        status = STATUS_MAP.get(
+            str(output.get("task_status") or response.get("status") or "").upper(), "running"
+        )
         results = output.get("results") or []
         first_result = results[0] if results and isinstance(results[0], dict) else {}
-        video_url = output.get("video_url") or first_result.get("url") or first_result.get("video_url")
-        updated = {**task, "status": status, "raw_response_json": response,
-                   "result_json": output, "video_url": video_url or task.get("video_url"),
-                   "fail_reason": output.get("message") or response.get("message")}
+        video_url = (
+            output.get("video_url") or first_result.get("url") or first_result.get("video_url")
+        )
+        updated = {
+            **task,
+            "status": status,
+            "raw_response_json": response,
+            "result_json": output,
+            "video_url": video_url or task.get("video_url"),
+            "fail_reason": output.get("message") or response.get("message"),
+        }
         usage = response.get("usage") or output.get("usage") or {}
         updated["usage_json"] = usage
         actual_seconds = _billable_seconds(updated) if status == "succeeded" else None
@@ -312,8 +411,7 @@ class WanVideoService:
         tasks = database.get_omni_video_tasks_by_statuses(["queued", "running"], limit=limit)
         tasks = [task for task in tasks if task.get("source") == SOURCE]
         unsettled = database.get_unsettled_successful_wan_tasks(limit=limit)
-        result = {"checked": len(tasks) + len(unsettled), "updated": 0,
-                  "settled": 0, "failed": 0}
+        result = {"checked": len(tasks) + len(unsettled), "updated": 0, "settled": 0, "failed": 0}
         for task in tasks:
             try:
                 self.refresh_task(task)
@@ -325,8 +423,9 @@ class WanVideoService:
                 if self._settle(task) == "settled":
                     result["settled"] += 1
             except Exception:
-                logger.exception("Wan historical cost settlement failed: task_id=%s",
-                                 task.get("task_id"))
+                logger.exception(
+                    "Wan historical cost settlement failed: task_id=%s", task.get("task_id")
+                )
                 result["failed"] += 1
         return result
 
@@ -334,8 +433,10 @@ class WanVideoService:
         if task.get("status") in TERMINAL:
             return task
         slot = int((task.get("external_meta_json") or {}).get("upstream_slot") or 0)
-        region = str((task.get("external_meta_json") or {}).get("upstream_region") or
-                     _region_for_model(task.get("model")))
+        region = str(
+            (task.get("external_meta_json") or {}).get("upstream_region")
+            or _region_for_model(task.get("model"))
+        )
         response = wan_video_client.cancel_task(task["task_id"], slot=slot, region=region)
         updated = {**task, "status": "cancelled", "raw_response_json": response}
         database.save_omni_video_task(updated)

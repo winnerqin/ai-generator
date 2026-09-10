@@ -9,7 +9,9 @@ from typing import Any, Optional
 from werkzeug.utils import secure_filename
 
 import database
-from app.services.oss_service import oss_service
+from app.services.storage_service import StorageBackendError, storage_service
+
+oss_service = storage_service
 
 
 def get_scoped_folder(root_folder: str, user_id: int, project_id: Optional[int]) -> str:
@@ -62,23 +64,26 @@ def save_uploaded_reference_images(
 ) -> list[str]:
     image_urls: list[str] = []
     upload_folder = get_user_upload_folder(user_id, project_id)
-    upload_to_oss = os.environ.get("OSS_ENABLED", "false").lower() == "true"
-
     for file in uploaded_files:
         if not file or not file.filename:
             continue
         filename = secure_filename(file.filename)
         file_path = os.path.join(upload_folder, filename)
         file.save(file_path)
-        if upload_to_oss and oss_service.is_available():
-            uploaded_url = oss_service.upload_file(
-                file_path=file_path,
-                user_id=user_id,
-                project_id=project_id,
-                file_type="image",
-            )
-            if uploaded_url:
-                image_urls.append(uploaded_url)
+        uploaded_url = oss_service.upload_file(
+            file_path=file_path, user_id=user_id, project_id=project_id, file_type="image"
+        )
+        if not uploaded_url:
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+            raise StorageBackendError(f"参考图片上传到 AWS S3 失败: {filename}")
+        image_urls.append(uploaded_url)
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
     return image_urls
 
 
@@ -121,16 +126,19 @@ def save_generated_image(
     with open(output_path, "wb") as file:
         file.write(content)
 
-    final_url = build_output_url(user_id, project_id, filename)
-    if oss_service.is_available():
-        uploaded_url = oss_service.upload_file(
-            file_path=output_path,
-            user_id=user_id,
-            project_id=project_id,
-            file_type="image",
-        )
-        if uploaded_url:
-            final_url = uploaded_url
+    final_url = oss_service.upload_file(
+        file_path=output_path, user_id=user_id, project_id=project_id, file_type="image"
+    )
+    if not final_url:
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+        raise StorageBackendError(f"生成图片上传到 AWS S3 失败: {filename}")
+    try:
+        os.remove(output_path)
+    except OSError:
+        pass
 
     sample_images = [{"url": url, "filename": os.path.basename(url)} for url in image_urls]
     record_id = database.save_generation_record(
