@@ -56,7 +56,11 @@ class AIVideoBackendStorageService:
 
     @staticmethod
     def _project_id(project_id: Optional[int]) -> int:
-        value = project_id or config.AI_VIDEO_BACKEND_DEFAULT_PROJECT_ID
+        value = (
+            config.AI_VIDEO_BACKEND_PROJECT_ID
+            or project_id
+            or config.AI_VIDEO_BACKEND_DEFAULT_PROJECT_ID
+        )
         if not value:
             raise StorageBackendError("当前内容没有项目ID，且未配置默认存储项目")
         return int(value)
@@ -253,7 +257,7 @@ class AIVideoBackendStorageService:
             return self.build_access_url(item), False
         except StorageBackendError as exc:
             message = str(exc).lower()
-            expired = "403" in message or "过期" in message or "expired" in message
+            expired = "过期" in message or "expired" in message
             logger.error("[storage] URL upload failed: %s", exc)
             return None, expired
 

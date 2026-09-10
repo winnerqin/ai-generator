@@ -61,6 +61,7 @@ class Config:
     # ==================== AWS S3（经 AI Video Backend）====================
     AI_VIDEO_BACKEND_BASE_URL: str = "http://127.0.0.1:8080/admin"
     AI_VIDEO_BACKEND_APP_KEY: str = ""
+    AI_VIDEO_BACKEND_PROJECT_ID: int = 0
     AI_VIDEO_BACKEND_DEFAULT_PROJECT_ID: int = 0
     AI_VIDEO_BACKEND_CONNECT_TIMEOUT_SECONDS: int = 10
     AI_VIDEO_BACKEND_READ_TIMEOUT_SECONDS: int = 60
@@ -227,6 +228,9 @@ class Config:
         self.AI_VIDEO_BACKEND_APP_KEY = os.environ.get(
             "AI_VIDEO_BACKEND_APP_KEY", self.AI_VIDEO_BACKEND_APP_KEY
         )
+        self.AI_VIDEO_BACKEND_PROJECT_ID = int(os.environ.get(
+            "AI_VIDEO_BACKEND_PROJECT_ID", self.AI_VIDEO_BACKEND_PROJECT_ID
+        ))
         self.AI_VIDEO_BACKEND_DEFAULT_PROJECT_ID = int(os.environ.get(
             "AI_VIDEO_BACKEND_DEFAULT_PROJECT_ID", self.AI_VIDEO_BACKEND_DEFAULT_PROJECT_ID
         ))

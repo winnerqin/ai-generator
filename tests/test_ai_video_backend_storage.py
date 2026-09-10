@@ -18,6 +18,7 @@ storage_module = importlib.import_module("app.services.storage_service")
 def storage_config(monkeypatch):
     monkeypatch.setattr(config, "AI_VIDEO_BACKEND_BASE_URL", "https://backend.example/admin")
     monkeypatch.setattr(config, "AI_VIDEO_BACKEND_APP_KEY", "secret-app-key")
+    monkeypatch.setattr(config, "AI_VIDEO_BACKEND_PROJECT_ID", 0)
     monkeypatch.setattr(config, "AI_VIDEO_BACKEND_DEFAULT_PROJECT_ID", 0)
     monkeypatch.setattr(config, "AI_VIDEO_BACKEND_PUBLIC_BASE_URL", "https://app.example")
     monkeypatch.setattr(config, "AI_VIDEO_BACKEND_PROXY_SECRET", "proxy-secret")
@@ -83,6 +84,47 @@ def test_generated_url_is_imported_by_backend_without_local_download(monkeypatch
         "fileUrl": "https://upstream.example/result.mp4",
         "originalFileName": "result.mp4",
     }
+
+
+def test_configured_backend_project_overrides_local_project(monkeypatch, storage_config):
+    monkeypatch.setattr(config, "AI_VIDEO_BACKEND_PROJECT_ID", 4)
+    post = Mock(
+        return_value=_response(
+            {
+                "id": 90,
+                "projectId": 4,
+                "originalFileName": "result.mp4",
+                "previewUrl": "https://s3.example/temporary",
+            }
+        )
+    )
+    monkeypatch.setattr(storage_module.requests, "post", post)
+
+    url, expired = AIVideoBackendStorageService().import_from_url(
+        "https://upstream.example/result.mp4", "result.mp4", 3, 1
+    )
+
+    assert expired is False
+    assert "/api/storage/files/90/4/" in url
+    assert post.call_args.kwargs["json"]["projectId"] == 4
+
+
+def test_project_permission_403_is_not_reported_as_expired(monkeypatch, storage_config):
+    response = Mock(status_code=403)
+    response.json.return_value = {
+        "success": False,
+        "code": "403",
+        "message": "无项目访问权限",
+        "data": None,
+    }
+    monkeypatch.setattr(storage_module.requests, "post", Mock(return_value=response))
+
+    url, expired = AIVideoBackendStorageService().import_from_url(
+        "https://upstream.example/result.mp4", "result.mp4", 3, 1
+    )
+
+    assert url is None
+    assert expired is False
 
 
 def test_proxy_refreshes_expired_preview_url_with_file_page(monkeypatch, storage_config):

@@ -80,6 +80,7 @@ Copy-Item .env.example .env
 - `SEEDANCE_OMNI_MODEL_EXTERNAL`：外部用户可用全能视频模型列表（逗号分隔，按顺序展示）
 - `SEEDANCE_OMNI_MODEL_ALIASES`：模型别名映射（逗号分隔，格式 `模型编码:显示别名`）
 - `AI_VIDEO_BACKEND_BASE_URL`、`AI_VIDEO_BACKEND_APP_KEY`：AWS S3 文件后端地址与调用凭证
+- `AI_VIDEO_BACKEND_PROJECT_ID`：统一的 Backend 存储项目 ID；配置后不再传递本地项目 ID
 - `AI_VIDEO_BACKEND_DEFAULT_PROJECT_ID`：请求缺少本地项目上下文时使用的后端项目 ID
 - `AI_VIDEO_BACKEND_PUBLIC_BASE_URL`：存储代理的公网基础地址；为空时复用 `PUBLIC_BASE_URL`
 - `AI_VIDEO_BACKEND_PROXY_SECRET`：稳定文件代理地址的签名密钥（生产环境必须独立配置）
